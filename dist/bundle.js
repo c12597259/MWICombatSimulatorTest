@@ -1528,6 +1528,137 @@ class Trigger {
 
 /***/ }),
 
+/***/ "./src/teamPresetStore.js":
+/*!********************************!*\
+  !*** ./src/teamPresetStore.js ***!
+  \********************************/
+/***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
+
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   TEAM_PRESET_STORAGE_KEY: () => (/* binding */ TEAM_PRESET_STORAGE_KEY),
+/* harmony export */   createEmptyTeamPresetStore: () => (/* binding */ createEmptyTeamPresetStore),
+/* harmony export */   createTeamPresetId: () => (/* binding */ createTeamPresetId),
+/* harmony export */   createTeamPresetTargetKey: () => (/* binding */ createTeamPresetTargetKey),
+/* harmony export */   getDefaultTeamPreset: () => (/* binding */ getDefaultTeamPreset),
+/* harmony export */   getTeamPresetsForTarget: () => (/* binding */ getTeamPresetsForTarget),
+/* harmony export */   loadTeamPresetStore: () => (/* binding */ loadTeamPresetStore),
+/* harmony export */   saveTeamPresetStore: () => (/* binding */ saveTeamPresetStore)
+/* harmony export */ });
+const TEAM_PRESET_STORAGE_KEY = "mwiCombatSimulatorTeamPresets_v1";
+
+const TEAM_PRESET_STORE_VERSION = 1;
+
+function createEmptyTeamPresetStore() {
+    return {
+        version: TEAM_PRESET_STORE_VERSION,
+        autoLoad: false,
+        defaults: {},
+        presets: [],
+    };
+}
+
+function isPlainObject(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizePreset(preset) {
+    if (!isPlainObject(preset) || typeof preset.id !== "string" || typeof preset.name !== "string") {
+        return null;
+    }
+
+    if (typeof preset.targetKey !== "string" || !isPlainObject(preset.target)) {
+        return null;
+    }
+
+    if (!isPlainObject(preset.playerDataMap) || !isPlainObject(preset.playerNames)) {
+        return null;
+    }
+
+    const selectedPlayers = Array.isArray(preset.selectedPlayers)
+        ? preset.selectedPlayers
+            .map((playerNumber) => String(playerNumber))
+            .filter((playerNumber) => ["1", "2", "3", "4", "5"].includes(playerNumber))
+        : [];
+
+    if (selectedPlayers.length === 0) {
+        return null;
+    }
+
+    return {
+        ...preset,
+        name: preset.name.trim(),
+        selectedPlayers: [...new Set(selectedPlayers)],
+    };
+}
+
+function normalizeStore(value) {
+    const emptyStore = createEmptyTeamPresetStore();
+    if (!isPlainObject(value) || value.version !== TEAM_PRESET_STORE_VERSION) {
+        return emptyStore;
+    }
+
+    const presets = Array.isArray(value.presets)
+        ? value.presets.map(normalizePreset).filter(Boolean)
+        : [];
+    const validIds = new Set(presets.map((preset) => preset.id));
+    const defaults = {};
+
+    if (isPlainObject(value.defaults)) {
+        for (const [targetKey, presetId] of Object.entries(value.defaults)) {
+            if (typeof presetId === "string" && validIds.has(presetId)) {
+                defaults[targetKey] = presetId;
+            }
+        }
+    }
+
+    return {
+        version: TEAM_PRESET_STORE_VERSION,
+        autoLoad: value.autoLoad === true,
+        defaults,
+        presets,
+    };
+}
+
+function loadTeamPresetStore(storage = window.localStorage) {
+    try {
+        const rawValue = storage.getItem(TEAM_PRESET_STORAGE_KEY);
+        return rawValue ? normalizeStore(JSON.parse(rawValue)) : createEmptyTeamPresetStore();
+    } catch (error) {
+        console.warn("Unable to load team presets; using an empty store.", error);
+        return createEmptyTeamPresetStore();
+    }
+}
+
+function saveTeamPresetStore(store, storage = window.localStorage) {
+    storage.setItem(TEAM_PRESET_STORAGE_KEY, JSON.stringify(normalizeStore(store)));
+}
+
+function createTeamPresetTargetKey(target) {
+    return `${target.kind}:${target.hrid}:T${target.difficultyTier}`;
+}
+
+function getTeamPresetsForTarget(store, targetKey) {
+    return store.presets
+        .filter((preset) => preset.targetKey === targetKey)
+        .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function getDefaultTeamPreset(store, targetKey) {
+    const defaultId = store.defaults[targetKey];
+    return store.presets.find((preset) => preset.id === defaultId && preset.targetKey === targetKey) ?? null;
+}
+
+function createTeamPresetId() {
+    if (globalThis.crypto?.randomUUID) {
+        return globalThis.crypto.randomUUID();
+    }
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+
+/***/ }),
+
 /***/ "./patchNote.json":
 /*!************************!*\
   !*** ./patchNote.json ***!
@@ -1841,7 +1972,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _combatsimulator_data_openableLootDropMap_json__WEBPACK_IMPORTED_MODULE_16__ = __webpack_require__(/*! ./combatsimulator/data/openableLootDropMap.json */ "./src/combatsimulator/data/openableLootDropMap.json");
 /* harmony import */ var _combatsimulator_data_achievementTierDetailMap_json__WEBPACK_IMPORTED_MODULE_17__ = __webpack_require__(/*! ./combatsimulator/data/achievementTierDetailMap.json */ "./src/combatsimulator/data/achievementTierDetailMap.json");
 /* harmony import */ var _combatsimulator_data_achievementDetailMap_json__WEBPACK_IMPORTED_MODULE_18__ = __webpack_require__(/*! ./combatsimulator/data/achievementDetailMap.json */ "./src/combatsimulator/data/achievementDetailMap.json");
-/* harmony import */ var _patchNote_json__WEBPACK_IMPORTED_MODULE_19__ = __webpack_require__(/*! ../patchNote.json */ "./patchNote.json");
+/* harmony import */ var _teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__ = __webpack_require__(/*! ./teamPresetStore.js */ "./src/teamPresetStore.js");
+/* harmony import */ var _patchNote_json__WEBPACK_IMPORTED_MODULE_20__ = __webpack_require__(/*! ../patchNote.json */ "./patchNote.json");
+
 
 
 
@@ -1887,6 +2020,7 @@ let modalTriggers = [];
 let currentSimResults = {};
 
 let currentPlayerTabId = '1';
+let lastAutoLoadedTeamPresetTargetKey = null;
 let playerDataMap = {
     "1": "{\"player\":{\"attackLevel\":1,\"magicLevel\":1,\"meleeLevel\":1,\"rangedLevel\":1,\"defenseLevel\":1,\"staminaLevel\":1,\"intelligenceLevel\":1,\"equipment\":[]},\"food\":{\"/action_types/combat\":[{\"itemHrid\":\"\"},{\"itemHrid\":\"\"},{\"itemHrid\":\"\"}]},\"drinks\":{\"/action_types/combat\":[{\"itemHrid\":\"\"},{\"itemHrid\":\"\"},{\"itemHrid\":\"\"}]},\"abilities\":[{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"}],\"triggerMap\":{},\"zone\":\"/actions/combat/fly\",\"simulationTime\":\"100\",\"houseRooms\":{\"/house_rooms/dairy_barn\":0,\"/house_rooms/garden\":0,\"/house_rooms/log_shed\":0,\"/house_rooms/forge\":0,\"/house_rooms/workshop\":0,\"/house_rooms/sewing_parlor\":0,\"/house_rooms/kitchen\":0,\"/house_rooms/brewery\":0,\"/house_rooms/laboratory\":0,\"/house_rooms/dining_room\":0,\"/house_rooms/library\":0,\"/house_rooms/dojo\":0,\"/house_rooms/gym\":0,\"/house_rooms/armory\":0,\"/house_rooms/archery_range\":0,\"/house_rooms/mystical_study\":0,\"/house_rooms/observatory\":0},\"achievements\":{}}",
     "2": "{\"player\":{\"attackLevel\":1,\"magicLevel\":1,\"meleeLevel\":1,\"rangedLevel\":1,\"defenseLevel\":1,\"staminaLevel\":1,\"intelligenceLevel\":1,\"equipment\":[]},\"food\":{\"/action_types/combat\":[{\"itemHrid\":\"\"},{\"itemHrid\":\"\"},{\"itemHrid\":\"\"}]},\"drinks\":{\"/action_types/combat\":[{\"itemHrid\":\"\"},{\"itemHrid\":\"\"},{\"itemHrid\":\"\"}]},\"abilities\":[{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"}],\"triggerMap\":{},\"zone\":\"/actions/combat/fly\",\"simulationTime\":\"100\",\"houseRooms\":{\"/house_rooms/dairy_barn\":0,\"/house_rooms/garden\":0,\"/house_rooms/log_shed\":0,\"/house_rooms/forge\":0,\"/house_rooms/workshop\":0,\"/house_rooms/sewing_parlor\":0,\"/house_rooms/kitchen\":0,\"/house_rooms/brewery\":0,\"/house_rooms/laboratory\":0,\"/house_rooms/dining_room\":0,\"/house_rooms/library\":0,\"/house_rooms/dojo\":0,\"/house_rooms/gym\":0,\"/house_rooms/armory\":0,\"/house_rooms/archery_range\":0,\"/house_rooms/mystical_study\":0,\"/house_rooms/observatory\":0},\"achievements\":{}}",
@@ -6064,6 +6198,9 @@ function doSoloImport() {
 }
 
 function savePreviousPlayer(playerId) {
+    // Keep the serialized slot in sync even when a control has not emitted its
+    // change event yet (for example, when Save is clicked while an input is focused).
+    updateState();
     let zoneSelect = document.getElementById("selectZone");
     let simulationTimeInput = document.getElementById("inputSimulationTime");
     let equipmentArray = [];
@@ -6254,6 +6391,485 @@ function updateNextPlayer(currentPlayerNumber) {
     }
     refreshAchievementStatics();
 }
+
+// #region Team Presets
+
+function interpolateTeamPresetFallback(fallback, values = {}) {
+    return Object.entries(values).reduce(
+        (result, [key, value]) => result.replaceAll(`{{${key}}}`, String(value)),
+        fallback,
+    );
+}
+
+function getTeamPresetText(key, fallback, values = {}) {
+    try {
+        if (typeof i18next !== "undefined" && i18next.isInitialized) {
+            const translationKey = `common:teamPresets.${key}`;
+            const translated = i18next.t(translationKey, values);
+            if (translated && translated !== translationKey) {
+                return translated;
+            }
+        }
+    } catch (error) {
+        console.warn("Unable to translate team preset text.", error);
+    }
+    return interpolateTeamPresetFallback(fallback, values);
+}
+
+function setTeamPresetStatus(message = "", style = "muted") {
+    const status = document.getElementById("teamPresetStatus");
+    status.textContent = message;
+    status.classList.remove("text-muted", "text-success", "text-danger");
+    status.classList.add(`text-${style}`);
+}
+
+function getCurrentTeamPresetTarget() {
+    const unsupportedToggleIds = [
+        "simAllZoneToggle",
+        "simAllSoloToggle",
+        "simLabyrinthToggle",
+        "simAllLabyrinthsToggle",
+    ];
+    if (unsupportedToggleIds.some((id) => document.getElementById(id)?.checked)) {
+        return null;
+    }
+
+    const isDungeon = document.getElementById("simDungeonToggle")?.checked === true;
+    const select = document.getElementById(isDungeon ? "selectDungeon" : "selectZone");
+    const difficultyTier = Number(document.getElementById("selectDifficulty")?.value ?? 0);
+    if (!select?.value) {
+        return null;
+    }
+
+    return {
+        kind: isDungeon ? "dungeon" : "zone",
+        hrid: select.value,
+        difficultyTier,
+    };
+}
+
+function getTeamPresetTargetLabel(target) {
+    const selectId = target.kind === "dungeon" ? "selectDungeon" : "selectZone";
+    const targetSelect = document.getElementById(selectId);
+    const targetName = targetSelect?.selectedOptions?.[0]?.textContent?.trim() || target.hrid;
+    const kindName = target.kind === "dungeon"
+        ? getTeamPresetText("dungeon", "Dungeon")
+        : getTeamPresetText("zone", "Zone");
+    return `${kindName}: ${targetName} · T${target.difficultyTier}`;
+}
+
+function updateTeamPresetPlayerLabels() {
+    for (let playerNumber = 1; playerNumber <= 5; playerNumber++) {
+        const tab = document.getElementById(`player${playerNumber}-tab`);
+        const playerName = tab?.textContent?.trim() || `Player ${playerNumber}`;
+        document.querySelectorAll(`label[for="player${playerNumber}"]`).forEach((label) => {
+            label.textContent = playerName;
+        });
+    }
+}
+
+function updateTeamPresetActionButtons() {
+    const target = getCurrentTeamPresetTarget();
+    const presetId = document.getElementById("selectTeamPreset").value;
+    const hasPreset = Boolean(target && presetId);
+
+    document.getElementById("selectTeamPreset").disabled = !target;
+    document.getElementById("inputTeamPresetName").disabled = !target;
+    document.getElementById("buttonSaveTeamPreset").disabled = !target;
+    document.getElementById("buttonLoadTeamPreset").disabled = !hasPreset;
+    document.getElementById("buttonDefaultTeamPreset").disabled = !hasPreset;
+    document.getElementById("buttonDeleteTeamPreset").disabled = !hasPreset;
+}
+
+function refreshTeamPresetControls({ allowAutoLoad = false, preferredPresetId = null } = {}) {
+    const target = getCurrentTeamPresetTarget();
+    const presetSelect = document.getElementById("selectTeamPreset");
+    const presetNameInput = document.getElementById("inputTeamPresetName");
+    const targetLabel = document.getElementById("teamPresetTargetLabel");
+    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.loadTeamPresetStore)();
+    document.getElementById("autoLoadTeamPreset").checked = store.autoLoad;
+
+    presetSelect.replaceChildren();
+    if (!target) {
+        if (allowAutoLoad) {
+            lastAutoLoadedTeamPresetTargetKey = null;
+        }
+        const unsupportedOption = new Option(
+            getTeamPresetText("unsupported", "Presets currently support one zone or dungeon at a time."),
+            "",
+        );
+        presetSelect.add(unsupportedOption);
+        targetLabel.textContent = getTeamPresetText(
+            "unsupported",
+            "Presets currently support one zone or dungeon at a time.",
+        );
+        presetNameInput.value = "";
+        updateTeamPresetActionButtons();
+        return;
+    }
+
+    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.createTeamPresetTargetKey)(target);
+    const targetChanged = lastAutoLoadedTeamPresetTargetKey !== targetKey;
+    if (allowAutoLoad) {
+        lastAutoLoadedTeamPresetTargetKey = targetKey;
+    }
+    const presets = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.getTeamPresetsForTarget)(store, targetKey);
+    const defaultPreset = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.getDefaultTeamPreset)(store, targetKey);
+    const previousSelection = preferredPresetId ?? presetSelect.dataset.selectedPresetId ?? "";
+
+    presetSelect.add(new Option(getTeamPresetText("newPreset", "+ New preset..."), ""));
+    for (const preset of presets) {
+        const isDefault = preset.id === defaultPreset?.id;
+        const defaultBadge = getTeamPresetText("defaultBadge", "default");
+        const optionLabel = isDefault ? `${preset.name} ★ (${defaultBadge})` : preset.name;
+        presetSelect.add(new Option(optionLabel, preset.id));
+    }
+
+    const selectionExists = presets.some((preset) => preset.id === previousSelection);
+    presetSelect.value = selectionExists ? previousSelection : (defaultPreset?.id ?? "");
+    presetSelect.dataset.selectedPresetId = presetSelect.value;
+    const selectedPreset = presets.find((preset) => preset.id === presetSelect.value);
+    presetNameInput.value = selectedPreset?.name ?? "";
+    targetLabel.textContent = getTeamPresetText(
+        "currentTarget",
+        "Current: {{target}}",
+        { target: getTeamPresetTargetLabel(target) },
+    );
+    updateTeamPresetActionButtons();
+
+    if (
+        allowAutoLoad &&
+        store.autoLoad &&
+        defaultPreset &&
+        targetChanged
+    ) {
+        loadTeamPreset(defaultPreset.id);
+    }
+}
+
+function saveCurrentTeamPreset() {
+    const target = getCurrentTeamPresetTarget();
+    if (!target) {
+        setTeamPresetStatus(
+            getTeamPresetText("unsupported", "Presets currently support one zone or dungeon at a time."),
+            "danger",
+        );
+        return;
+    }
+
+    const name = document.getElementById("inputTeamPresetName").value.trim();
+    if (!name) {
+        setTeamPresetStatus(getTeamPresetText("enterName", "Enter a preset name."), "danger");
+        return;
+    }
+
+    const selectedPlayerNumbers = [...document.querySelectorAll(".player-checkbox:checked")]
+        .map((checkbox) => checkbox.id.replace("player", ""));
+    if (selectedPlayerNumbers.length === 0) {
+        setTeamPresetStatus(
+            getTeamPresetText("selectPlayers", "Select at least one player before saving."),
+            "danger",
+        );
+        return;
+    }
+
+    savePreviousPlayer(currentPlayerTabId);
+    const selectedPlayerData = {};
+    const selectedPlayerNames = {};
+    try {
+        for (const playerNumber of selectedPlayerNumbers) {
+            JSON.parse(playerDataMap[playerNumber]);
+            selectedPlayerData[playerNumber] = playerDataMap[playerNumber];
+            selectedPlayerNames[playerNumber] = document.getElementById(`player${playerNumber}-tab`)?.textContent?.trim()
+                || `Player ${playerNumber}`;
+        }
+    } catch (error) {
+        console.error("Invalid player data while saving a team preset.", error);
+        setTeamPresetStatus(
+            getTeamPresetText("invalidData", "One of the selected player loadouts is invalid."),
+            "danger",
+        );
+        return;
+    }
+
+    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.loadTeamPresetStore)();
+    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.createTeamPresetTargetKey)(target);
+    const selectedPresetId = document.getElementById("selectTeamPreset").value;
+    const existingPreset = store.presets.find((preset) => preset.id === selectedPresetId);
+    const duplicatePreset = store.presets.find((preset) =>
+        preset.targetKey === targetKey &&
+        preset.id !== selectedPresetId &&
+        preset.name.toLocaleLowerCase() === name.toLocaleLowerCase()
+    );
+    if (duplicatePreset) {
+        setTeamPresetStatus(
+            getTeamPresetText("duplicateName", "A preset with that name already exists for this target."),
+            "danger",
+        );
+        return;
+    }
+
+    const now = new Date().toISOString();
+    const presetId = existingPreset?.id ?? (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.createTeamPresetId)();
+    const preset = {
+        id: presetId,
+        name,
+        targetKey,
+        target,
+        selectedPlayers: selectedPlayerNumbers,
+        playerDataMap: selectedPlayerData,
+        playerNames: selectedPlayerNames,
+        createdAt: existingPreset?.createdAt ?? now,
+        updatedAt: now,
+    };
+
+    if (existingPreset) {
+        store.presets[store.presets.findIndex((candidate) => candidate.id === existingPreset.id)] = preset;
+    } else {
+        store.presets.push(preset);
+    }
+    if (!store.defaults[targetKey]) {
+        store.defaults[targetKey] = presetId;
+    }
+
+    try {
+        (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.saveTeamPresetStore)(store);
+    } catch (error) {
+        console.error("Unable to save team preset.", error);
+        setTeamPresetStatus(
+            getTeamPresetText("storageError", "The preset could not be saved in this browser."),
+            "danger",
+        );
+        return;
+    }
+
+    lastAutoLoadedTeamPresetTargetKey = targetKey;
+    refreshTeamPresetControls({ preferredPresetId: presetId });
+    setTeamPresetStatus(
+        getTeamPresetText("saved", "Saved preset: {{name}}", { name }),
+        "success",
+    );
+}
+
+function loadTeamPreset(presetId) {
+    const target = getCurrentTeamPresetTarget();
+    if (!target) {
+        return;
+    }
+
+    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.createTeamPresetTargetKey)(target);
+    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.loadTeamPresetStore)();
+    const preset = store.presets.find((candidate) =>
+        candidate.id === presetId && candidate.targetKey === targetKey
+    );
+    if (!preset) {
+        refreshTeamPresetControls();
+        return;
+    }
+
+    const validatedPlayerData = {};
+    try {
+        for (const playerNumber of preset.selectedPlayers) {
+            const playerImportData = preset.playerDataMap[playerNumber];
+            JSON.parse(playerImportData);
+            validatedPlayerData[playerNumber] = playerImportData;
+        }
+    } catch (error) {
+        console.error("Invalid player data while loading a team preset.", error);
+        setTeamPresetStatus(
+            getTeamPresetText("invalidData", "One of the selected player loadouts is invalid."),
+            "danger",
+        );
+        return;
+    }
+
+    savePreviousPlayer(currentPlayerTabId);
+    for (const playerNumber of preset.selectedPlayers) {
+        playerDataMap[playerNumber] = validatedPlayerData[playerNumber];
+
+        const tab = document.getElementById(`player${playerNumber}-tab`);
+        if (tab) {
+            tab.textContent = preset.playerNames[playerNumber] || `Player ${playerNumber}`;
+        }
+    }
+
+    document.querySelectorAll(".player-checkbox").forEach((checkbox) => {
+        checkbox.checked = preset.selectedPlayers.includes(checkbox.id.replace("player", ""));
+    });
+    updateTeamPresetPlayerLabels();
+
+    const playerToShow = preset.selectedPlayers.includes(currentPlayerTabId)
+        ? currentPlayerTabId
+        : preset.selectedPlayers[0];
+    if (playerToShow === currentPlayerTabId) {
+        updateNextPlayer(currentPlayerTabId);
+        updateState();
+        updateUI();
+    } else {
+        const tabElement = document.getElementById(`player${playerToShow}-tab`);
+        if (tabElement && typeof bootstrap !== "undefined" && bootstrap.Tab) {
+            bootstrap.Tab.getOrCreateInstance(tabElement).show();
+        } else {
+            currentPlayerTabId = playerToShow;
+            updateNextPlayer(currentPlayerTabId);
+            updateState();
+            updateUI();
+        }
+    }
+
+    lastAutoLoadedTeamPresetTargetKey = targetKey;
+    refreshTeamPresetControls({ preferredPresetId: preset.id });
+    setTeamPresetStatus(
+        getTeamPresetText("loaded", "Loaded preset: {{name}}", { name: preset.name }),
+        "success",
+    );
+}
+
+function setDefaultTeamPreset() {
+    const target = getCurrentTeamPresetTarget();
+    const presetId = document.getElementById("selectTeamPreset").value;
+    if (!target || !presetId) {
+        return;
+    }
+
+    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.createTeamPresetTargetKey)(target);
+    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.loadTeamPresetStore)();
+    const preset = store.presets.find((candidate) =>
+        candidate.id === presetId && candidate.targetKey === targetKey
+    );
+    if (!preset) {
+        return;
+    }
+
+    store.defaults[targetKey] = preset.id;
+    try {
+        (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.saveTeamPresetStore)(store);
+    } catch (error) {
+        console.error("Unable to set the default team preset.", error);
+        setTeamPresetStatus(
+            getTeamPresetText("storageError", "The preset could not be saved in this browser."),
+            "danger",
+        );
+        return;
+    }
+
+    refreshTeamPresetControls({ preferredPresetId: preset.id });
+    setTeamPresetStatus(
+        getTeamPresetText("defaultSet", "Default preset: {{name}}", { name: preset.name }),
+        "success",
+    );
+}
+
+function deleteTeamPreset() {
+    const target = getCurrentTeamPresetTarget();
+    const presetId = document.getElementById("selectTeamPreset").value;
+    if (!target || !presetId) {
+        return;
+    }
+
+    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.createTeamPresetTargetKey)(target);
+    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.loadTeamPresetStore)();
+    const preset = store.presets.find((candidate) =>
+        candidate.id === presetId && candidate.targetKey === targetKey
+    );
+    if (!preset) {
+        return;
+    }
+
+    const confirmationMessage = getTeamPresetText(
+        "deleteConfirm",
+        "Delete preset '{{name}}'?",
+        { name: preset.name },
+    );
+    if (!confirm(confirmationMessage)) {
+        return;
+    }
+
+    store.presets = store.presets.filter((candidate) => candidate.id !== preset.id);
+    if (store.defaults[targetKey] === preset.id) {
+        delete store.defaults[targetKey];
+    }
+    try {
+        (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.saveTeamPresetStore)(store);
+    } catch (error) {
+        console.error("Unable to delete team preset.", error);
+        setTeamPresetStatus(
+            getTeamPresetText("storageError", "The preset could not be saved in this browser."),
+            "danger",
+        );
+        return;
+    }
+
+    refreshTeamPresetControls();
+    setTeamPresetStatus(
+        getTeamPresetText("deleted", "Deleted preset: {{name}}", { name: preset.name }),
+        "success",
+    );
+}
+
+function initTeamPresets() {
+    const targetControlIds = [
+        "selectZone",
+        "selectDungeon",
+        "selectDifficulty",
+        "simAllZoneToggle",
+        "simAllSoloToggle",
+        "simDungeonToggle",
+        "simLabyrinthToggle",
+        "simAllLabyrinthsToggle",
+    ];
+    targetControlIds.forEach((id) => {
+        document.getElementById(id)?.addEventListener("change", () => {
+            setTeamPresetStatus();
+            refreshTeamPresetControls({ allowAutoLoad: true });
+        });
+    });
+
+    document.getElementById("selectTeamPreset").addEventListener("change", (event) => {
+        event.target.dataset.selectedPresetId = event.target.value;
+        const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.loadTeamPresetStore)();
+        const selectedPreset = store.presets.find((preset) => preset.id === event.target.value);
+        document.getElementById("inputTeamPresetName").value = selectedPreset?.name ?? "";
+        updateTeamPresetActionButtons();
+        setTeamPresetStatus();
+    });
+    document.getElementById("buttonLoadTeamPreset").addEventListener("click", () => {
+        loadTeamPreset(document.getElementById("selectTeamPreset").value);
+    });
+    document.getElementById("buttonSaveTeamPreset").addEventListener("click", saveCurrentTeamPreset);
+    document.getElementById("buttonDefaultTeamPreset").addEventListener("click", setDefaultTeamPreset);
+    document.getElementById("buttonDeleteTeamPreset").addEventListener("click", deleteTeamPreset);
+    document.getElementById("autoLoadTeamPreset").addEventListener("change", (event) => {
+        const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.loadTeamPresetStore)();
+        store.autoLoad = event.target.checked;
+        try {
+            (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.saveTeamPresetStore)(store);
+        } catch (error) {
+            console.error("Unable to update team preset auto-load.", error);
+            event.target.checked = !event.target.checked;
+            setTeamPresetStatus(
+                getTeamPresetText("storageError", "The preset could not be saved in this browser."),
+                "danger",
+            );
+            return;
+        }
+
+        if (event.target.checked) {
+            lastAutoLoadedTeamPresetTargetKey = null;
+            refreshTeamPresetControls({ allowAutoLoad: true });
+        }
+    });
+    document.getElementById("buttonSimulationSetup").addEventListener("click", () => {
+        refreshTeamPresetControls();
+    });
+
+    if (typeof i18next !== "undefined" && typeof i18next.on === "function") {
+        i18next.on("languageChanged", () => refreshTeamPresetControls());
+    }
+    refreshTeamPresetControls({ allowAutoLoad: true });
+}
+
+// #endregion
 
 function showErrorModal(error) {
     let zoneSelect = document.getElementById("selectZone");
@@ -6472,14 +7088,14 @@ function updateTable(tableId, item, price) {
 
 function initPatchNotes() {
     const patchNotesRows = document.getElementById("patchNotes");
-    for (const pn in _patchNote_json__WEBPACK_IMPORTED_MODULE_19__) {
+    for (const pn in _patchNote_json__WEBPACK_IMPORTED_MODULE_20__) {
         const patchNoteContainer = document.createElement("div");
         patchNotesRows.setAttribute('class', 'col-12 mb-4');
 
         const patchNoteElement = document.createElement("h6");
         patchNoteElement.innerHTML = pn;
         const patchNoteList = document.createElement("ul");
-        for (const note of _patchNote_json__WEBPACK_IMPORTED_MODULE_19__[pn]) {
+        for (const note of _patchNote_json__WEBPACK_IMPORTED_MODULE_20__[pn]) {
             const noteElement = document.createElement("li");
             noteElement.innerHTML = note;
             patchNoteList.appendChild(noteElement);
@@ -6670,6 +7286,7 @@ initSimulationControls();
 initEquipmentSetsModal();
 initErrorHandling();
 initImportExportModal();
+document.addEventListener("DOMContentLoaded", initTeamPresets);
 initDamageDoneTaken();
 initPatchNotes();
 initExtraBuffSection();

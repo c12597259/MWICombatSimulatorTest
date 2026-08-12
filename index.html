@@ -1414,6 +1414,32 @@
                                 </div>
                             </div>
                         </div>
+                        <div class="outlined-box mt-2 mb-2" id="teamPresetPanel">
+                            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                                <h6 class="mb-0" data-i18n="common:teamPresets.title">Team Presets</h6>
+                                <small class="text-muted" id="teamPresetTargetLabel"></small>
+                            </div>
+                            <div class="input-group mb-2">
+                                <select id="selectTeamPreset" class="form-select" aria-label="Team preset"></select>
+                                <button type="button" class="btn btn-primary" id="buttonLoadTeamPreset" data-i18n="common:controls.load">Load</button>
+                            </div>
+                            <div class="input-group mb-2">
+                                <input type="text" id="inputTeamPresetName" class="form-control" maxlength="60"
+                                    placeholder="Preset name" data-i18n-placeholder="common:teamPresets.namePlaceholder" />
+                                <button type="button" class="btn btn-primary" id="buttonSaveTeamPreset" data-i18n="common:teamPresets.saveCurrent">Save Current</button>
+                            </div>
+                            <div class="d-flex flex-wrap gap-2 mb-2">
+                                <button type="button" class="btn btn-outline-primary btn-sm" id="buttonDefaultTeamPreset" data-i18n="common:teamPresets.setDefault">Set Default</button>
+                                <button type="button" class="btn btn-outline-danger btn-sm" id="buttonDeleteTeamPreset" data-i18n="common:controls.delete">Delete</button>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="autoLoadTeamPreset">
+                                <label class="form-check-label" for="autoLoadTeamPreset" data-i18n="common:teamPresets.autoLoad">
+                                    Automatically load the default preset when the target changes
+                                </label>
+                            </div>
+                            <div class="form-text" id="teamPresetStatus" aria-live="polite"></div>
+                        </div>
                         <div class="row mb-1">
                             <label for="selectLabyrinth" class="col-md-3 col-form-label" data-i18n="labyrinthPanel.combatRoom">Labyrinth</label>
                             <div class="col-md">
