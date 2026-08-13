@@ -72,6 +72,21 @@
     "dropTotal": "掉落物合计",
     "expectedDropsTotal": "期望掉落物合计",
     "noRNGDrops": "非随机掉落物",
+    "fragmentTimeCost": {
+        "title": "钥匙碎片时间成本",
+        "fragment": "碎片",
+        "combatOnly": "纯战斗（分钟/片）",
+        "withCrafting": "计入耗材制作（分钟/片）",
+        "craftSummary": "每模拟小时所需耗材制作时间",
+        "minutes": "分钟",
+        "modeExact": "精确",
+        "modePersonalized": "个人资料",
+        "modeEstimated": "默认估算",
+        "noteExact": "本次没有使用消耗品，因此两个耗时相同。",
+        "notePersonalized": "已使用该角色导入的完整生活生产资料计算。",
+        "noteEstimated": "尚未导入完整生产资料：生活技能按配方最低等级、工具和生活茶按无、房屋使用当前角色数据，并采用与 ICKeyTool 兼容的默认增益。",
+        "noteEstimatedMissing": "部分材料没有可计算的生产来源，因此计入制作的结果可能偏低。"
+    },
     "simulationResults": {
         "title": "模拟结果",
         "killPerHour": "每小时击杀数",

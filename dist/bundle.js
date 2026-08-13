@@ -1528,6 +1528,416 @@ class Trigger {
 
 /***/ }),
 
+/***/ "./src/fragmentTimeCost.js":
+/*!*********************************!*\
+  !*** ./src/fragmentTimeCost.js ***!
+  \*********************************/
+/***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
+
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   DEFAULT_FRAGMENT_PRODUCTION_BUFFS: () => (/* binding */ DEFAULT_FRAGMENT_PRODUCTION_BUFFS),
+/* harmony export */   KEY_FRAGMENT_HRIDS: () => (/* binding */ KEY_FRAGMENT_HRIDS),
+/* harmony export */   calculateFragmentTimeCosts: () => (/* binding */ calculateFragmentTimeCosts)
+/* harmony export */ });
+const KEY_FRAGMENT_HRIDS = Object.freeze([
+    "/items/blue_key_fragment",
+    "/items/green_key_fragment",
+    "/items/purple_key_fragment",
+    "/items/white_key_fragment",
+    "/items/orange_key_fragment",
+    "/items/brown_key_fragment",
+    "/items/stone_key_fragment",
+    "/items/dark_key_fragment",
+    "/items/burning_key_fragment",
+]);
+
+const DEFAULT_FRAGMENT_PRODUCTION_BUFFS = Object.freeze({
+    itemEfficiencyPercent: 11.2,
+    gatheringQuantityPercent: 29.5,
+    productionEfficiencyPercent: 19.7,
+});
+
+const HOUSE_ROOM_BY_ACTION_TYPE = Object.freeze({
+    "/action_types/brewing": "/house_rooms/brewery",
+    "/action_types/cheesesmithing": "/house_rooms/forge",
+    "/action_types/cooking": "/house_rooms/kitchen",
+    "/action_types/crafting": "/house_rooms/workshop",
+    "/action_types/foraging": "/house_rooms/garden",
+    "/action_types/milking": "/house_rooms/dairy_barn",
+    "/action_types/tailoring": "/house_rooms/sewing_parlor",
+    "/action_types/woodcutting": "/house_rooms/log_shed",
+    "/action_types/alchemy": "/house_rooms/laboratory",
+});
+
+const TOOL_SPEED_STAT_BY_ACTION_TYPE = Object.freeze({
+    "/action_types/brewing": "brewingSpeed",
+    "/action_types/cheesesmithing": "cheesesmithingSpeed",
+    "/action_types/cooking": "cookingSpeed",
+    "/action_types/crafting": "craftingSpeed",
+    "/action_types/foraging": "foragingSpeed",
+    "/action_types/milking": "milkingSpeed",
+    "/action_types/tailoring": "tailoringSpeed",
+    "/action_types/woodcutting": "woodcuttingSpeed",
+    "/action_types/alchemy": "alchemySpeed",
+});
+
+const ENHANCEMENT_BONUS_PERCENT = Object.freeze([
+    0, 2, 4.2, 6.6, 9.2, 12, 15, 18.2, 21.6, 25.2, 29,
+    33, 37.2, 41.6, 46.2, 51, 56, 61.2, 66.6, 72.2, 78,
+]);
+
+function toFiniteNumber(value, fallback = 0) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+}
+
+function readLevelMap(value, keyName) {
+    const result = {};
+    if (Array.isArray(value)) {
+        for (const entry of value) {
+            if (entry?.[keyName]) {
+                result[entry[keyName]] = toFiniteNumber(entry.level);
+            }
+        }
+        return result;
+    }
+    if (!value || typeof value !== "object") {
+        return result;
+    }
+    for (const [key, entry] of Object.entries(value)) {
+        result[key] = toFiniteNumber(entry?.level ?? entry);
+    }
+    return result;
+}
+
+function normalizeProductionProfile(profile = {}, fallbackHouseRooms = {}) {
+    const skillSource = profile.skillLevels
+        ?? profile.skills
+        ?? profile.characterSkills
+        ?? profile.characterSkillMap;
+    const houseSource = profile.houseRooms ?? profile.characterHouseRoomMap;
+    const itemSource = profile.items
+        ?? profile.tools
+        ?? profile.characterItems;
+    const drinkSource = profile.actionTypeDrinkSlots ?? profile.actionTypeDrinkSlotsMap;
+    const explicitBuffs = profile.buffs ?? {};
+    const hasNamedBuffData = [
+        "itemEfficiencyPercent",
+        "gatheringQuantityPercent",
+        "productionEfficiencyPercent",
+    ].every((key) => explicitBuffs[key] !== undefined);
+    const hasLegacyBuffData = [
+        profile.itemEffiBuff,
+        profile.GatheringQuantityBuff,
+        profile.ProductionEfficiencyBuff,
+    ].every((value) => value !== undefined);
+
+    return {
+        complete: profile.complete === true,
+        skillLevels: readLevelMap(skillSource, "skillHrid"),
+        houseRooms: {
+            ...readLevelMap(fallbackHouseRooms, "houseRoomHrid"),
+            ...readLevelMap(houseSource, "houseRoomHrid"),
+        },
+        items: Array.isArray(itemSource) ? itemSource : [],
+        actionTypeDrinkSlots: drinkSource && typeof drinkSource === "object" ? drinkSource : {},
+        buffs: {
+            itemEfficiencyPercent: toFiniteNumber(
+                explicitBuffs.itemEfficiencyPercent ?? profile.itemEffiBuff,
+                DEFAULT_FRAGMENT_PRODUCTION_BUFFS.itemEfficiencyPercent,
+            ),
+            gatheringQuantityPercent: toFiniteNumber(
+                explicitBuffs.gatheringQuantityPercent ?? profile.GatheringQuantityBuff,
+                DEFAULT_FRAGMENT_PRODUCTION_BUFFS.gatheringQuantityPercent,
+            ),
+            productionEfficiencyPercent: toFiniteNumber(
+                explicitBuffs.productionEfficiencyPercent ?? profile.ProductionEfficiencyBuff,
+                DEFAULT_FRAGMENT_PRODUCTION_BUFFS.productionEfficiencyPercent,
+            ),
+        },
+        hasSkillData: skillSource !== undefined,
+        hasItemData: itemSource !== undefined,
+        hasDrinkData: drinkSource !== undefined,
+        hasBuffData: hasNamedBuffData || hasLegacyBuffData,
+    };
+}
+
+function buildItemSourceIndex(actionDetailMap) {
+    const index = new Map();
+    const addSource = (itemHrid, source) => {
+        if (!itemHrid) {
+            return;
+        }
+        const sources = index.get(itemHrid) ?? [];
+        sources.push(source);
+        index.set(itemHrid, sources);
+    };
+
+    for (const action of Object.values(actionDetailMap ?? {})) {
+        if (!action || action.type === "/action_types/combat" || !action.baseTimeCost) {
+            continue;
+        }
+        for (const output of action.outputItems ?? []) {
+            addSource(output.itemHrid, {
+                action,
+                kind: "production",
+                expectedYield: toFiniteNumber(output.count),
+            });
+        }
+        for (const drop of action.dropTable ?? []) {
+            addSource(drop.itemHrid, {
+                action,
+                kind: "gathering",
+                expectedYield: toFiniteNumber(drop.dropRate, 1)
+                    * (toFiniteNumber(drop.minCount) + toFiniteNumber(drop.maxCount)) / 2,
+            });
+        }
+    }
+    return index;
+}
+
+function expectedActionNameForItem(itemName = "") {
+    return itemName
+        .replace("Milk", "Cow")
+        .replace("Log", "Tree")
+        .replace("Cowing", "Milking")
+        .replace("Rainbow Cow", "Unicow")
+        .replace("Collector's Boots", "Collectors Boots")
+        .replace("Knight's Aegis", "Knights Aegis");
+}
+
+function selectItemSource(itemHrid, sourceIndex, itemDetailMap) {
+    const sources = sourceIndex.get(itemHrid) ?? [];
+    if (sources.length <= 1) {
+        return sources[0] ?? null;
+    }
+
+    const expectedName = expectedActionNameForItem(itemDetailMap?.[itemHrid]?.name);
+    return sources.find((source) => source.action.name === expectedName)
+        ?? sources.find((source) => source.kind === "production")
+        ?? [...sources].sort((left, right) =>
+            toFiniteNumber(left.action.sortIndex) - toFiniteNumber(right.action.sortIndex)
+        )[0];
+}
+
+function getTeaBuffs(actionType, profile, itemDetailMap) {
+    const result = {
+        efficiencyPercent: 0,
+        quantityPercent: 0,
+        lessResourcePercent: 0,
+    };
+    const drinks = profile.actionTypeDrinkSlots[actionType] ?? [];
+    for (const drink of drinks) {
+        if (!drink?.itemHrid) {
+            continue;
+        }
+        for (const buff of itemDetailMap?.[drink.itemHrid]?.consumableDetail?.buffs ?? []) {
+            if (buff.typeHrid === "/buff_types/artisan") {
+                result.lessResourcePercent += toFiniteNumber(buff.flatBoost) * 100;
+            } else if (buff.typeHrid === "/buff_types/action_level") {
+                result.efficiencyPercent -= toFiniteNumber(buff.flatBoost);
+            } else if (["/buff_types/gathering", "/buff_types/gourmet"].includes(buff.typeHrid)) {
+                result.quantityPercent += toFiniteNumber(buff.flatBoost) * 100;
+            } else if (buff.typeHrid === "/buff_types/efficiency") {
+                result.efficiencyPercent += toFiniteNumber(buff.flatBoost) * 100;
+            } else if (buff.typeHrid === `/buff_types/${actionType.replace("/action_types/", "")}_level`) {
+                result.efficiencyPercent += toFiniteNumber(buff.flatBoost);
+            }
+        }
+    }
+    return result;
+}
+
+function getToolSpeedPercent(actionType, profile, itemDetailMap) {
+    const statName = TOOL_SPEED_STAT_BY_ACTION_TYPE[actionType];
+    if (!statName) {
+        return 0;
+    }
+
+    let totalFraction = 0;
+    for (const item of profile.items) {
+        if (!String(item?.itemLocationHrid ?? "").includes("_tool")) {
+            continue;
+        }
+        const baseFraction = toFiniteNumber(
+            itemDetailMap?.[item.itemHrid]?.equipmentDetail?.noncombatStats?.[statName],
+        );
+        const enhancementLevel = Math.max(0, Math.min(
+            ENHANCEMENT_BONUS_PERCENT.length - 1,
+            Math.floor(toFiniteNumber(item.enhancementLevel)),
+        ));
+        const enhancementMultiplier = 1 + ENHANCEMENT_BONUS_PERCENT[enhancementLevel] / 100;
+        totalFraction += baseFraction * enhancementMultiplier;
+    }
+    return totalFraction * 100;
+}
+
+function calculateConsumableCraftMinutesPerHour({
+    consumablesUsed,
+    simulatedHours,
+    profile,
+    actionDetailMap,
+    itemDetailMap,
+}) {
+    const issues = new Set();
+    const sourceIndex = buildItemSourceIndex(actionDetailMap);
+    const unitCostMemo = new Map();
+
+    if (!profile.hasSkillData) issues.add("defaultSkills");
+    if (!profile.hasItemData) issues.add("defaultTools");
+    if (!profile.hasDrinkData) issues.add("defaultDrinks");
+    if (!profile.hasBuffData) issues.add("defaultBuffs");
+
+    const getUnitMinutes = (itemHrid, includeActionDrinks = true, stack = new Set()) => {
+        const memoKey = `${itemHrid}:${includeActionDrinks}`;
+        if (unitCostMemo.has(memoKey)) {
+            return unitCostMemo.get(memoKey);
+        }
+        if (stack.has(itemHrid)) {
+            issues.add(`cycle:${itemHrid}`);
+            return 0;
+        }
+
+        const source = selectItemSource(itemHrid, sourceIndex, itemDetailMap);
+        if (!source || source.expectedYield <= 0) {
+            issues.add(`missingAction:${itemHrid}`);
+            return 0;
+        }
+
+        const action = source.action;
+        const requiredSkill = action.levelRequirement?.skillHrid;
+        const requiredLevel = toFiniteNumber(action.levelRequirement?.level, 1);
+        const currentLevel = profile.skillLevels[requiredSkill];
+        if (currentLevel === undefined) {
+            issues.add(`missingSkill:${requiredSkill}`);
+        }
+        const levelEfficiencyPercent = Math.max(0, toFiniteNumber(currentLevel, requiredLevel) - requiredLevel);
+        const houseRoomHrid = HOUSE_ROOM_BY_ACTION_TYPE[action.type];
+        const houseEfficiencyPercent = toFiniteNumber(profile.houseRooms[houseRoomHrid]) * 1.5;
+        const teaBuffs = getTeaBuffs(action.type, profile, itemDetailMap);
+        const toolSpeedPercent = getToolSpeedPercent(action.type, profile, itemDetailMap);
+        const efficiencyPercent = levelEfficiencyPercent
+            + houseEfficiencyPercent
+            + teaBuffs.efficiencyPercent
+            + profile.buffs.itemEfficiencyPercent
+            + profile.buffs.productionEfficiencyPercent;
+        const actionsPerHour = 3600
+            / (toFiniteNumber(action.baseTimeCost) / 1e9)
+            * (1 + toolSpeedPercent / 100)
+            * (1 + efficiencyPercent / 100);
+        const quantityPercent = teaBuffs.quantityPercent
+            + (source.kind === "gathering" ? profile.buffs.gatheringQuantityPercent : 0);
+        const yieldPerAction = source.expectedYield * (1 + quantityPercent / 100);
+        if (actionsPerHour <= 0 || yieldPerAction <= 0) {
+            issues.add(`invalidRate:${itemHrid}`);
+            return 0;
+        }
+
+        const actionsNeeded = 1 / yieldPerAction;
+        const activeHours = actionsNeeded / actionsPerHour;
+        let minutes = activeHours * 60;
+        const nextStack = new Set(stack);
+        nextStack.add(itemHrid);
+
+        const resourceMultiplier = Math.max(0, 1 - teaBuffs.lessResourcePercent / 100);
+        for (const input of action.inputItems ?? []) {
+            const inputQuantity = actionsNeeded * toFiniteNumber(input.count) * resourceMultiplier;
+            minutes += getUnitMinutes(input.itemHrid, includeActionDrinks, nextStack) * inputQuantity;
+        }
+
+        if (includeActionDrinks) {
+            for (const drink of profile.actionTypeDrinkSlots[action.type] ?? []) {
+                if (!drink?.itemHrid || drink.itemHrid === itemHrid) {
+                    continue;
+                }
+                const drinkQuantity = 12 * activeHours;
+                minutes += getUnitMinutes(drink.itemHrid, false, nextStack) * drinkQuantity;
+            }
+        }
+
+        unitCostMemo.set(memoKey, minutes);
+        return minutes;
+    };
+
+    let totalMinutesPerHour = 0;
+    const breakdown = [];
+    for (const [itemHrid, totalAmount] of Object.entries(consumablesUsed ?? {})) {
+        const amountPerHour = toFiniteNumber(totalAmount) / simulatedHours;
+        if (amountPerHour <= 0) {
+            continue;
+        }
+        const minutes = getUnitMinutes(itemHrid) * amountPerHour;
+        totalMinutesPerHour += minutes;
+        breakdown.push({ itemHrid, amountPerHour, minutes });
+    }
+
+    return {
+        totalMinutesPerHour,
+        breakdown,
+        issues: [...issues],
+    };
+}
+
+function calculateFragmentTimeCosts({
+    expectedDropMap,
+    simulatedHours,
+    consumablesUsed = {},
+    productionProfile = {},
+    fallbackHouseRooms = {},
+    actionDetailMap = {},
+    itemDetailMap = {},
+}) {
+    const hours = toFiniteNumber(simulatedHours);
+    if (hours <= 0) {
+        return {
+            fragments: [],
+            craftMinutesPerSimHour: 0,
+            breakdown: [],
+            mode: "exact",
+            issues: ["invalidSimulationTime"],
+        };
+    }
+
+    const normalizedProfile = normalizeProductionProfile(productionProfile, fallbackHouseRooms);
+    const hasConsumables = Object.values(consumablesUsed ?? {}).some((amount) => toFiniteNumber(amount) > 0);
+    const craftResult = hasConsumables
+        ? calculateConsumableCraftMinutesPerHour({
+            consumablesUsed,
+            simulatedHours: hours,
+            profile: normalizedProfile,
+            actionDetailMap,
+            itemDetailMap,
+        })
+        : { totalMinutesPerHour: 0, breakdown: [], issues: [] };
+
+    const getDropAmount = (itemHrid) => expectedDropMap instanceof Map
+        ? toFiniteNumber(expectedDropMap.get(itemHrid))
+        : toFiniteNumber(expectedDropMap?.[itemHrid]);
+    const fragments = KEY_FRAGMENT_HRIDS
+        .map((itemHrid) => ({ itemHrid, expectedAmount: getDropAmount(itemHrid) }))
+        .filter((fragment) => fragment.expectedAmount > 0)
+        .map((fragment) => ({
+            ...fragment,
+            combatMinutesPerFragment: hours * 60 / fragment.expectedAmount,
+            totalMinutesPerFragment: hours
+                * (60 + craftResult.totalMinutesPerHour)
+                / fragment.expectedAmount,
+        }));
+
+    const profileIsComplete = normalizedProfile.complete && craftResult.issues.length === 0;
+    return {
+        fragments,
+        craftMinutesPerSimHour: craftResult.totalMinutesPerHour,
+        breakdown: craftResult.breakdown,
+        mode: !hasConsumables ? "exact" : (profileIsComplete ? "personalized" : "estimated"),
+        issues: craftResult.issues,
+    };
+}
+
+
+/***/ }),
+
 /***/ "./src/teamPresetStore.js":
 /*!********************************!*\
   !*** ./src/teamPresetStore.js ***!
@@ -1972,8 +2382,10 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _combatsimulator_data_openableLootDropMap_json__WEBPACK_IMPORTED_MODULE_16__ = __webpack_require__(/*! ./combatsimulator/data/openableLootDropMap.json */ "./src/combatsimulator/data/openableLootDropMap.json");
 /* harmony import */ var _combatsimulator_data_achievementTierDetailMap_json__WEBPACK_IMPORTED_MODULE_17__ = __webpack_require__(/*! ./combatsimulator/data/achievementTierDetailMap.json */ "./src/combatsimulator/data/achievementTierDetailMap.json");
 /* harmony import */ var _combatsimulator_data_achievementDetailMap_json__WEBPACK_IMPORTED_MODULE_18__ = __webpack_require__(/*! ./combatsimulator/data/achievementDetailMap.json */ "./src/combatsimulator/data/achievementDetailMap.json");
-/* harmony import */ var _teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__ = __webpack_require__(/*! ./teamPresetStore.js */ "./src/teamPresetStore.js");
-/* harmony import */ var _patchNote_json__WEBPACK_IMPORTED_MODULE_20__ = __webpack_require__(/*! ../patchNote.json */ "./patchNote.json");
+/* harmony import */ var _fragmentTimeCost_js__WEBPACK_IMPORTED_MODULE_19__ = __webpack_require__(/*! ./fragmentTimeCost.js */ "./src/fragmentTimeCost.js");
+/* harmony import */ var _teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__ = __webpack_require__(/*! ./teamPresetStore.js */ "./src/teamPresetStore.js");
+/* harmony import */ var _patchNote_json__WEBPACK_IMPORTED_MODULE_21__ = __webpack_require__(/*! ../patchNote.json */ "./patchNote.json");
+
 
 
 
@@ -3899,6 +4311,130 @@ function getDropProfit(simResult, playerToDisplay) {
     simResult["profit"] = (expectedRevenue - expenses).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function getPlayerFragmentProductionData(playerToDisplay) {
+    const playerNumber = playerToDisplay.replace("player", "");
+    try {
+        const importData = JSON.parse(playerDataMap[playerNumber]);
+        const productionProfile = importData.productionProfile ?? {};
+        return {
+            profile: {
+                ...productionProfile,
+                complete: productionProfile.complete === true,
+                characterSkills: productionProfile.characterSkills ?? importData.characterSkills,
+                characterSkillMap: productionProfile.characterSkillMap ?? importData.characterSkillMap,
+                characterItems: productionProfile.characterItems ?? importData.characterItems,
+                actionTypeDrinkSlotsMap: productionProfile.actionTypeDrinkSlotsMap
+                    ?? importData.actionTypeDrinkSlotsMap,
+                characterHouseRoomMap: productionProfile.characterHouseRoomMap
+                    ?? importData.characterHouseRoomMap,
+                buffs: productionProfile.buffs ?? importData.productionBuffs,
+            },
+            houseRooms: importData.houseRooms ?? {},
+        };
+    } catch (error) {
+        console.warn("Unable to read production data for fragment time cost.", error);
+        return { profile: {}, houseRooms: {} };
+    }
+}
+
+function setFragmentTimeCostTranslation(element, key, fallback) {
+    const translationKey = `common:fragmentTimeCost.${key}`;
+    element.setAttribute("data-i18n", translationKey);
+    try {
+        const translated = i18next.t(translationKey);
+        element.textContent = translated === translationKey ? fallback : translated;
+    } catch {
+        element.textContent = fallback;
+    }
+}
+
+function formatFragmentTimeCost(value) {
+    return value.toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    });
+}
+
+function showFragmentTimeCosts(simResult, playerToDisplay, expectedDropMap, simulatedHours) {
+    const section = document.getElementById("fragmentTimeCostSection");
+    const resultDiv = document.getElementById("simulationResultFragmentTimeCost");
+    const modeBadge = document.getElementById("fragmentTimeCostMode");
+    const note = document.getElementById("fragmentTimeCostNote");
+    const craftMinutes = document.getElementById("fragmentTimeCostCraftMinutes");
+    const productionData = getPlayerFragmentProductionData(playerToDisplay);
+    const result = (0,_fragmentTimeCost_js__WEBPACK_IMPORTED_MODULE_19__.calculateFragmentTimeCosts)({
+        expectedDropMap,
+        simulatedHours,
+        consumablesUsed: simResult.consumablesUsed?.[playerToDisplay] ?? {},
+        productionProfile: productionData.profile,
+        fallbackHouseRooms: productionData.houseRooms,
+        actionDetailMap: _combatsimulator_data_actionDetailMap_json__WEBPACK_IMPORTED_MODULE_12__,
+        itemDetailMap: _combatsimulator_data_itemDetailMap_json__WEBPACK_IMPORTED_MODULE_3__,
+    });
+
+    if (result.fragments.length === 0) {
+        section.classList.add("d-none");
+        resultDiv.replaceChildren();
+        note.replaceChildren();
+        return;
+    }
+
+    const modeConfig = {
+        exact: { key: "modeExact", fallback: "exact", className: "bg-success" },
+        personalized: { key: "modePersonalized", fallback: "personal profile", className: "bg-success" },
+        estimated: { key: "modeEstimated", fallback: "default estimate", className: "bg-warning text-dark" },
+    }[result.mode];
+    modeBadge.className = `badge ${modeConfig.className}`;
+    setFragmentTimeCostTranslation(modeBadge, modeConfig.key, modeConfig.fallback);
+
+    const rows = result.fragments.map((fragment) => {
+        const wrapper = createElement("div", "py-1 border-bottom");
+        const fragmentName = createElement(
+            "div",
+            "small",
+            _combatsimulator_data_itemDetailMap_json__WEBPACK_IMPORTED_MODULE_3__[fragment.itemHrid]?.name ?? fragment.itemHrid,
+        );
+        fragmentName.setAttribute("data-i18n", `itemNames.${fragment.itemHrid}`);
+        const values = createRow(
+            ["col-6 text-end", "col-6 text-end"],
+            [
+                formatFragmentTimeCost(fragment.combatMinutesPerFragment),
+                formatFragmentTimeCost(fragment.totalMinutesPerFragment),
+            ],
+        );
+        wrapper.append(fragmentName, values);
+        return wrapper;
+    });
+    resultDiv.replaceChildren(...rows);
+    craftMinutes.textContent = formatFragmentTimeCost(result.craftMinutesPerSimHour);
+
+    const noteDefinitions = result.mode === "exact"
+        ? [["noteExact", "No consumables were used, so both values are identical."]]
+        : result.mode === "personalized"
+            ? [["notePersonalized", "Calculated with the complete production profile imported for this character."]]
+            : [[
+                "noteEstimated",
+                "A complete production profile has not been imported, so default production assumptions are in use.",
+            ]];
+    if (result.issues.some((issue) => issue.startsWith("missingAction:"))) {
+        noteDefinitions.push([
+            "noteEstimatedMissing",
+            "Some materials have no calculable production source, so the value including crafting may be underestimated.",
+        ]);
+    }
+    const noteChildren = [];
+    noteDefinitions.forEach(([key, fallback], index) => {
+        if (index > 0) {
+            noteChildren.push(document.createElement("br"));
+        }
+        const span = document.createElement("span");
+        setFragmentTimeCostTranslation(span, key, fallback);
+        noteChildren.push(span);
+    });
+    note.replaceChildren(...noteChildren);
+    section.classList.remove("d-none");
+}
+
 function updateAllSimsModal(data) {
     const tableBody = document.getElementById('allZonesData').getElementsByTagName('tbody')[0];
     tableBody.innerHTML = '';
@@ -4142,6 +4678,7 @@ function showKills(simResult, playerToDisplay) {
 
     resultDiv.replaceChildren(...newChildren);
     dropsResultDiv.replaceChildren(...newDropChildren);
+    showFragmentTimeCosts(simResult, playerToDisplay, expectedDropMap, hoursSimulated);
 }
 
 function showDeaths(simResult, playerToDisplay) {
@@ -6178,11 +6715,21 @@ function savePreviousPlayer(playerId) {
     let importMetadata = {};
     try {
         const previousImportData = JSON.parse(playerDataMap[playerId]);
-        if (typeof previousImportData.characterName === "string" && previousImportData.characterName.trim()) {
-            importMetadata.characterName = previousImportData.characterName.trim();
-        }
-        if (typeof previousImportData.loadoutName === "string" && previousImportData.loadoutName.trim()) {
-            importMetadata.loadoutName = previousImportData.loadoutName.trim();
+        const simulatorStateKeys = new Set([
+            "player",
+            "food",
+            "drinks",
+            "abilities",
+            "triggerMap",
+            "zone",
+            "simulationTime",
+            "houseRooms",
+            "achievements",
+        ]);
+        for (const [key, value] of Object.entries(previousImportData)) {
+            if (!simulatorStateKeys.has(key)) {
+                importMetadata[key] = value;
+            }
         }
     } catch (error) {
         console.warn("Unable to preserve player import metadata.", error);
@@ -6438,7 +6985,7 @@ function refreshTeamPresetControls({ allowAutoLoad = false, preferredPresetId = 
     const presetSelect = document.getElementById("selectTeamPreset");
     const presetNameInput = document.getElementById("inputTeamPresetName");
     const targetLabel = document.getElementById("teamPresetTargetLabel");
-    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.loadTeamPresetStore)();
+    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.loadTeamPresetStore)();
     document.getElementById("autoLoadTeamPreset").checked = store.autoLoad;
 
     presetSelect.replaceChildren();
@@ -6460,13 +7007,13 @@ function refreshTeamPresetControls({ allowAutoLoad = false, preferredPresetId = 
         return;
     }
 
-    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.createTeamPresetTargetKey)(target);
+    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.createTeamPresetTargetKey)(target);
     const targetChanged = lastAutoLoadedTeamPresetTargetKey !== targetKey;
     if (allowAutoLoad) {
         lastAutoLoadedTeamPresetTargetKey = targetKey;
     }
-    const presets = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.getTeamPresetsForTarget)(store, targetKey);
-    const defaultPreset = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.getDefaultTeamPreset)(store, targetKey);
+    const presets = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.getTeamPresetsForTarget)(store, targetKey);
+    const defaultPreset = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.getDefaultTeamPreset)(store, targetKey);
     const previousSelection = preferredPresetId ?? presetSelect.dataset.selectedPresetId ?? "";
 
     presetSelect.add(new Option(getTeamPresetText("newPreset", "+ New preset..."), ""));
@@ -6534,8 +7081,8 @@ function captureCurrentTeamPreset(selectedPlayerNumbers) {
 }
 
 function persistTeamPreset(target, name, snapshot, existingPresetId = "") {
-    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.loadTeamPresetStore)();
-    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.createTeamPresetTargetKey)(target);
+    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.loadTeamPresetStore)();
+    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.createTeamPresetTargetKey)(target);
     const existingPreset = store.presets.find((preset) =>
         preset.id === existingPresetId && preset.targetKey === targetKey
     );
@@ -6549,7 +7096,7 @@ function persistTeamPreset(target, name, snapshot, existingPresetId = "") {
     }
 
     const now = new Date().toISOString();
-    const presetId = existingPreset?.id ?? (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.createTeamPresetId)();
+    const presetId = existingPreset?.id ?? (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.createTeamPresetId)();
     const preset = {
         id: presetId,
         name,
@@ -6572,7 +7119,7 @@ function persistTeamPreset(target, name, snapshot, existingPresetId = "") {
     }
 
     try {
-        (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.saveTeamPresetStore)(store);
+        (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.saveTeamPresetStore)(store);
     } catch (error) {
         console.error("Unable to save team preset.", error);
         return { status: "error", error };
@@ -6684,8 +7231,8 @@ function loadTeamPreset(presetId) {
         return;
     }
 
-    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.createTeamPresetTargetKey)(target);
-    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.loadTeamPresetStore)();
+    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.createTeamPresetTargetKey)(target);
+    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.loadTeamPresetStore)();
     const preset = store.presets.find((candidate) =>
         candidate.id === presetId && candidate.targetKey === targetKey
     );
@@ -6759,8 +7306,8 @@ function setDefaultTeamPreset() {
         return;
     }
 
-    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.createTeamPresetTargetKey)(target);
-    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.loadTeamPresetStore)();
+    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.createTeamPresetTargetKey)(target);
+    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.loadTeamPresetStore)();
     const preset = store.presets.find((candidate) =>
         candidate.id === presetId && candidate.targetKey === targetKey
     );
@@ -6770,7 +7317,7 @@ function setDefaultTeamPreset() {
 
     store.defaults[targetKey] = preset.id;
     try {
-        (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.saveTeamPresetStore)(store);
+        (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.saveTeamPresetStore)(store);
     } catch (error) {
         console.error("Unable to set the default team preset.", error);
         setTeamPresetStatus(
@@ -6794,8 +7341,8 @@ function deleteTeamPreset() {
         return;
     }
 
-    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.createTeamPresetTargetKey)(target);
-    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.loadTeamPresetStore)();
+    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.createTeamPresetTargetKey)(target);
+    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.loadTeamPresetStore)();
     const preset = store.presets.find((candidate) =>
         candidate.id === presetId && candidate.targetKey === targetKey
     );
@@ -6817,7 +7364,7 @@ function deleteTeamPreset() {
         delete store.defaults[targetKey];
     }
     try {
-        (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.saveTeamPresetStore)(store);
+        (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.saveTeamPresetStore)(store);
     } catch (error) {
         console.error("Unable to delete team preset.", error);
         setTeamPresetStatus(
@@ -6888,7 +7435,7 @@ function initTeamPresets() {
 
     document.getElementById("selectTeamPreset").addEventListener("change", (event) => {
         event.target.dataset.selectedPresetId = event.target.value;
-        const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.loadTeamPresetStore)();
+        const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.loadTeamPresetStore)();
         const selectedPreset = store.presets.find((preset) => preset.id === event.target.value);
         document.getElementById("inputTeamPresetName").value = selectedPreset?.name ?? "";
         updateTeamPresetActionButtons();
@@ -6901,10 +7448,10 @@ function initTeamPresets() {
     document.getElementById("buttonDefaultTeamPreset").addEventListener("click", setDefaultTeamPreset);
     document.getElementById("buttonDeleteTeamPreset").addEventListener("click", deleteTeamPreset);
     document.getElementById("autoLoadTeamPreset").addEventListener("change", (event) => {
-        const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.loadTeamPresetStore)();
+        const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.loadTeamPresetStore)();
         store.autoLoad = event.target.checked;
         try {
-            (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_19__.saveTeamPresetStore)(store);
+            (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.saveTeamPresetStore)(store);
         } catch (error) {
             console.error("Unable to update team preset auto-load.", error);
             event.target.checked = !event.target.checked;
@@ -7141,14 +7688,14 @@ function updateTable(tableId, item, price) {
 
 function initPatchNotes() {
     const patchNotesRows = document.getElementById("patchNotes");
-    for (const pn in _patchNote_json__WEBPACK_IMPORTED_MODULE_20__) {
+    for (const pn in _patchNote_json__WEBPACK_IMPORTED_MODULE_21__) {
         const patchNoteContainer = document.createElement("div");
         patchNotesRows.setAttribute('class', 'col-12 mb-4');
 
         const patchNoteElement = document.createElement("h6");
         patchNoteElement.innerHTML = pn;
         const patchNoteList = document.createElement("ul");
-        for (const note of _patchNote_json__WEBPACK_IMPORTED_MODULE_20__[pn]) {
+        for (const note of _patchNote_json__WEBPACK_IMPORTED_MODULE_21__[pn]) {
             const noteElement = document.createElement("li");
             noteElement.innerHTML = note;
             patchNoteList.appendChild(noteElement);

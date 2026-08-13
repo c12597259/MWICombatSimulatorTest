@@ -4,7 +4,7 @@
     "description": "",
     "main": "index.js",
     "scripts": {
-        "test": "echo \"Error: no test specified\" && exit 1",
+        "test": "node --test tests/fragmentTimeCost.test.mjs",
         "build": "webpack",
         "watch": "webpack --watch",
         "start": "webpack serve --mode development --open"

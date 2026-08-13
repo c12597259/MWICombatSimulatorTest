@@ -1107,6 +1107,24 @@
                             <b data-i18n="common:expectedDropsTotal">Expected Drops (Total)</b>
                         </div>
                         <div class="row" id="simulationResultDrops"></div>
+                        <div class="pt-3 d-none" id="fragmentTimeCostSection">
+                            <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
+                                <b data-i18n="common:fragmentTimeCost.title">Key Fragment Time Cost</b>
+                                <span class="badge" id="fragmentTimeCostMode"></span>
+                            </div>
+                            <div class="small text-muted" data-i18n="common:fragmentTimeCost.fragment">Fragment</div>
+                            <div class="row small text-muted">
+                                <div class="col-6 text-end" data-i18n="common:fragmentTimeCost.combatOnly">Combat only (min/fragment)</div>
+                                <div class="col-6 text-end" data-i18n="common:fragmentTimeCost.withCrafting">With crafting (min/fragment)</div>
+                            </div>
+                            <div id="simulationResultFragmentTimeCost"></div>
+                            <div class="form-text">
+                                <span data-i18n="common:fragmentTimeCost.craftSummary">Consumable crafting per simulated hour</span>:
+                                <span id="fragmentTimeCostCraftMinutes"></span>
+                                <span data-i18n="common:fragmentTimeCost.minutes">min</span>
+                            </div>
+                            <div class="form-text" id="fragmentTimeCostNote"></div>
+                        </div>
                     </div>
                     <!-- #endregion -->
                 </div>

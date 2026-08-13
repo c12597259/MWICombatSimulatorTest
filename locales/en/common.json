@@ -72,6 +72,21 @@
     "dropTotal": "Drops (Total)",
     "expectedDropsTotal": "Expected Drops (Total)",
     "noRNGDrops": "No RNG Drops",
+    "fragmentTimeCost": {
+        "title": "Key Fragment Time Cost",
+        "fragment": "Fragment",
+        "combatOnly": "Combat only (min/fragment)",
+        "withCrafting": "With crafting (min/fragment)",
+        "craftSummary": "Consumable crafting per simulated hour",
+        "minutes": "min",
+        "modeExact": "exact",
+        "modePersonalized": "personal profile",
+        "modeEstimated": "default estimate",
+        "noteExact": "No consumables were used, so both values are identical.",
+        "notePersonalized": "Calculated with the complete production profile imported for this character.",
+        "noteEstimated": "A complete production profile has not been imported. Life skills use recipe minimums, tools and production drinks use none, current house levels are used, and ICKeyTool-compatible default buffs are applied.",
+        "noteEstimatedMissing": "Some materials have no calculable production source, so the value including crafting may be underestimated."
+    },
     "simulationResults": {
         "title": "Simulation Results",
         "killPerHour": "Kills Per Hour",

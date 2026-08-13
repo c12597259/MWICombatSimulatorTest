@@ -17,6 +17,7 @@ import combatStyleDetailMap from "./combatsimulator/data/combatStyleDetailMap.js
 import openableLootDropMap from "./combatsimulator/data/openableLootDropMap.json";
 import achievementTierMap from "./combatsimulator/data/achievementTierDetailMap.json"
 import achievementDetailMap from "./combatsimulator/data/achievementDetailMap.json"
+import { calculateFragmentTimeCosts } from "./fragmentTimeCost.js";
 import {
     createTeamPresetId,
     createTeamPresetTargetKey,
@@ -1930,6 +1931,130 @@ function getDropProfit(simResult, playerToDisplay) {
     simResult["profit"] = (expectedRevenue - expenses).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function getPlayerFragmentProductionData(playerToDisplay) {
+    const playerNumber = playerToDisplay.replace("player", "");
+    try {
+        const importData = JSON.parse(playerDataMap[playerNumber]);
+        const productionProfile = importData.productionProfile ?? {};
+        return {
+            profile: {
+                ...productionProfile,
+                complete: productionProfile.complete === true,
+                characterSkills: productionProfile.characterSkills ?? importData.characterSkills,
+                characterSkillMap: productionProfile.characterSkillMap ?? importData.characterSkillMap,
+                characterItems: productionProfile.characterItems ?? importData.characterItems,
+                actionTypeDrinkSlotsMap: productionProfile.actionTypeDrinkSlotsMap
+                    ?? importData.actionTypeDrinkSlotsMap,
+                characterHouseRoomMap: productionProfile.characterHouseRoomMap
+                    ?? importData.characterHouseRoomMap,
+                buffs: productionProfile.buffs ?? importData.productionBuffs,
+            },
+            houseRooms: importData.houseRooms ?? {},
+        };
+    } catch (error) {
+        console.warn("Unable to read production data for fragment time cost.", error);
+        return { profile: {}, houseRooms: {} };
+    }
+}
+
+function setFragmentTimeCostTranslation(element, key, fallback) {
+    const translationKey = `common:fragmentTimeCost.${key}`;
+    element.setAttribute("data-i18n", translationKey);
+    try {
+        const translated = i18next.t(translationKey);
+        element.textContent = translated === translationKey ? fallback : translated;
+    } catch {
+        element.textContent = fallback;
+    }
+}
+
+function formatFragmentTimeCost(value) {
+    return value.toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    });
+}
+
+function showFragmentTimeCosts(simResult, playerToDisplay, expectedDropMap, simulatedHours) {
+    const section = document.getElementById("fragmentTimeCostSection");
+    const resultDiv = document.getElementById("simulationResultFragmentTimeCost");
+    const modeBadge = document.getElementById("fragmentTimeCostMode");
+    const note = document.getElementById("fragmentTimeCostNote");
+    const craftMinutes = document.getElementById("fragmentTimeCostCraftMinutes");
+    const productionData = getPlayerFragmentProductionData(playerToDisplay);
+    const result = calculateFragmentTimeCosts({
+        expectedDropMap,
+        simulatedHours,
+        consumablesUsed: simResult.consumablesUsed?.[playerToDisplay] ?? {},
+        productionProfile: productionData.profile,
+        fallbackHouseRooms: productionData.houseRooms,
+        actionDetailMap,
+        itemDetailMap,
+    });
+
+    if (result.fragments.length === 0) {
+        section.classList.add("d-none");
+        resultDiv.replaceChildren();
+        note.replaceChildren();
+        return;
+    }
+
+    const modeConfig = {
+        exact: { key: "modeExact", fallback: "exact", className: "bg-success" },
+        personalized: { key: "modePersonalized", fallback: "personal profile", className: "bg-success" },
+        estimated: { key: "modeEstimated", fallback: "default estimate", className: "bg-warning text-dark" },
+    }[result.mode];
+    modeBadge.className = `badge ${modeConfig.className}`;
+    setFragmentTimeCostTranslation(modeBadge, modeConfig.key, modeConfig.fallback);
+
+    const rows = result.fragments.map((fragment) => {
+        const wrapper = createElement("div", "py-1 border-bottom");
+        const fragmentName = createElement(
+            "div",
+            "small",
+            itemDetailMap[fragment.itemHrid]?.name ?? fragment.itemHrid,
+        );
+        fragmentName.setAttribute("data-i18n", `itemNames.${fragment.itemHrid}`);
+        const values = createRow(
+            ["col-6 text-end", "col-6 text-end"],
+            [
+                formatFragmentTimeCost(fragment.combatMinutesPerFragment),
+                formatFragmentTimeCost(fragment.totalMinutesPerFragment),
+            ],
+        );
+        wrapper.append(fragmentName, values);
+        return wrapper;
+    });
+    resultDiv.replaceChildren(...rows);
+    craftMinutes.textContent = formatFragmentTimeCost(result.craftMinutesPerSimHour);
+
+    const noteDefinitions = result.mode === "exact"
+        ? [["noteExact", "No consumables were used, so both values are identical."]]
+        : result.mode === "personalized"
+            ? [["notePersonalized", "Calculated with the complete production profile imported for this character."]]
+            : [[
+                "noteEstimated",
+                "A complete production profile has not been imported, so default production assumptions are in use.",
+            ]];
+    if (result.issues.some((issue) => issue.startsWith("missingAction:"))) {
+        noteDefinitions.push([
+            "noteEstimatedMissing",
+            "Some materials have no calculable production source, so the value including crafting may be underestimated.",
+        ]);
+    }
+    const noteChildren = [];
+    noteDefinitions.forEach(([key, fallback], index) => {
+        if (index > 0) {
+            noteChildren.push(document.createElement("br"));
+        }
+        const span = document.createElement("span");
+        setFragmentTimeCostTranslation(span, key, fallback);
+        noteChildren.push(span);
+    });
+    note.replaceChildren(...noteChildren);
+    section.classList.remove("d-none");
+}
+
 function updateAllSimsModal(data) {
     const tableBody = document.getElementById('allZonesData').getElementsByTagName('tbody')[0];
     tableBody.innerHTML = '';
@@ -2173,6 +2298,7 @@ function showKills(simResult, playerToDisplay) {
 
     resultDiv.replaceChildren(...newChildren);
     dropsResultDiv.replaceChildren(...newDropChildren);
+    showFragmentTimeCosts(simResult, playerToDisplay, expectedDropMap, hoursSimulated);
 }
 
 function showDeaths(simResult, playerToDisplay) {
@@ -4209,11 +4335,21 @@ function savePreviousPlayer(playerId) {
     let importMetadata = {};
     try {
         const previousImportData = JSON.parse(playerDataMap[playerId]);
-        if (typeof previousImportData.characterName === "string" && previousImportData.characterName.trim()) {
-            importMetadata.characterName = previousImportData.characterName.trim();
-        }
-        if (typeof previousImportData.loadoutName === "string" && previousImportData.loadoutName.trim()) {
-            importMetadata.loadoutName = previousImportData.loadoutName.trim();
+        const simulatorStateKeys = new Set([
+            "player",
+            "food",
+            "drinks",
+            "abilities",
+            "triggerMap",
+            "zone",
+            "simulationTime",
+            "houseRooms",
+            "achievements",
+        ]);
+        for (const [key, value] of Object.entries(previousImportData)) {
+            if (!simulatorStateKeys.has(key)) {
+                importMetadata[key] = value;
+            }
         }
     } catch (error) {
         console.warn("Unable to preserve player import metadata.", error);
