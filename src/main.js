@@ -52,6 +52,7 @@ let currentSimResults = {};
 
 let currentPlayerTabId = '1';
 let lastAutoLoadedTeamPresetTargetKey = null;
+const pendingImporterLoadoutNames = new Map();
 let playerDataMap = {
     "1": "{\"player\":{\"attackLevel\":1,\"magicLevel\":1,\"meleeLevel\":1,\"rangedLevel\":1,\"defenseLevel\":1,\"staminaLevel\":1,\"intelligenceLevel\":1,\"equipment\":[]},\"food\":{\"/action_types/combat\":[{\"itemHrid\":\"\"},{\"itemHrid\":\"\"},{\"itemHrid\":\"\"}]},\"drinks\":{\"/action_types/combat\":[{\"itemHrid\":\"\"},{\"itemHrid\":\"\"},{\"itemHrid\":\"\"}]},\"abilities\":[{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"}],\"triggerMap\":{},\"zone\":\"/actions/combat/fly\",\"simulationTime\":\"100\",\"houseRooms\":{\"/house_rooms/dairy_barn\":0,\"/house_rooms/garden\":0,\"/house_rooms/log_shed\":0,\"/house_rooms/forge\":0,\"/house_rooms/workshop\":0,\"/house_rooms/sewing_parlor\":0,\"/house_rooms/kitchen\":0,\"/house_rooms/brewery\":0,\"/house_rooms/laboratory\":0,\"/house_rooms/dining_room\":0,\"/house_rooms/library\":0,\"/house_rooms/dojo\":0,\"/house_rooms/gym\":0,\"/house_rooms/armory\":0,\"/house_rooms/archery_range\":0,\"/house_rooms/mystical_study\":0,\"/house_rooms/observatory\":0},\"achievements\":{}}",
     "2": "{\"player\":{\"attackLevel\":1,\"magicLevel\":1,\"meleeLevel\":1,\"rangedLevel\":1,\"defenseLevel\":1,\"staminaLevel\":1,\"intelligenceLevel\":1,\"equipment\":[]},\"food\":{\"/action_types/combat\":[{\"itemHrid\":\"\"},{\"itemHrid\":\"\"},{\"itemHrid\":\"\"}]},\"drinks\":{\"/action_types/combat\":[{\"itemHrid\":\"\"},{\"itemHrid\":\"\"},{\"itemHrid\":\"\"}]},\"abilities\":[{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"}],\"triggerMap\":{},\"zone\":\"/actions/combat/fly\",\"simulationTime\":\"100\",\"houseRooms\":{\"/house_rooms/dairy_barn\":0,\"/house_rooms/garden\":0,\"/house_rooms/log_shed\":0,\"/house_rooms/forge\":0,\"/house_rooms/workshop\":0,\"/house_rooms/sewing_parlor\":0,\"/house_rooms/kitchen\":0,\"/house_rooms/brewery\":0,\"/house_rooms/laboratory\":0,\"/house_rooms/dining_room\":0,\"/house_rooms/library\":0,\"/house_rooms/dojo\":0,\"/house_rooms/gym\":0,\"/house_rooms/armory\":0,\"/house_rooms/archery_range\":0,\"/house_rooms/mystical_study\":0,\"/house_rooms/observatory\":0},\"achievements\":{}}",
@@ -60,10 +61,8 @@ let playerDataMap = {
     "5": "{\"player\":{\"attackLevel\":1,\"magicLevel\":1,\"meleeLevel\":1,\"rangedLevel\":1,\"defenseLevel\":1,\"staminaLevel\":1,\"intelligenceLevel\":1,\"equipment\":[]},\"food\":{\"/action_types/combat\":[{\"itemHrid\":\"\"},{\"itemHrid\":\"\"},{\"itemHrid\":\"\"}]},\"drinks\":{\"/action_types/combat\":[{\"itemHrid\":\"\"},{\"itemHrid\":\"\"},{\"itemHrid\":\"\"}]},\"abilities\":[{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"}],\"triggerMap\":{},\"zone\":\"/actions/combat/fly\",\"simulationTime\":\"100\",\"houseRooms\":{\"/house_rooms/dairy_barn\":0,\"/house_rooms/garden\":0,\"/house_rooms/log_shed\":0,\"/house_rooms/forge\":0,\"/house_rooms/workshop\":0,\"/house_rooms/sewing_parlor\":0,\"/house_rooms/kitchen\":0,\"/house_rooms/brewery\":0,\"/house_rooms/laboratory\":0,\"/house_rooms/dining_room\":0,\"/house_rooms/library\":0,\"/house_rooms/dojo\":0,\"/house_rooms/gym\":0,\"/house_rooms/armory\":0,\"/house_rooms/archery_range\":0,\"/house_rooms/mystical_study\":0,\"/house_rooms/observatory\":0},\"achievements\":{}}"
 };
 window.revenue = 0;
-window.noRngRevenue = 0;
 window.expenses = 0;
 window.profit = 0;
-window.noRngProfit = 0;
 
 // #region Worker
 
@@ -1349,8 +1348,6 @@ function showSimulationResult(simResult) {
     expensesModalTable.innerHTML = '<th data-i18n=\"marketplacePanel.item\">Item</th><th data-i18n=\"marketplacePanel.price\">Price</th><th data-i18n=\"common:amount\">Amount</th><th data-i18n=\"common:total\">Total</th>';
     let revenueModalTable = document.querySelector("#revenueTable > tbody");
     revenueModalTable.innerHTML = '<th data-i18n=\"marketplacePanel.item\">Item</th><th data-i18n=\"marketplacePanel.price\">Price</th><th data-i18n=\"common:amount\">Amount</th><th data-i18n=\"common:total\">Total</th>';
-    let noRngRevenueModalTable = document.querySelector("#noRngRevenueTable > tbody");
-    noRngRevenueModalTable.innerHTML = '<th data-i18n=\"marketplacePanel.item\">Item</th><th data-i18n=\"marketplacePanel.price\">Price</th><th data-i18n=\"common:amount\">Amount</th><th data-i18n=\"common:total\">Total</th>';
     let playerToDisplay = "player1";
     if (selectedPlayers.includes(parseInt(currentPlayerTabId))) {
         playerToDisplay = "player" + currentPlayerTabId;
@@ -1373,9 +1370,6 @@ function showSimulationResult(simResult) {
     window.profit = window.revenue - window.expenses;
     document.getElementById('profitSpan').innerText = window.profit.toLocaleString();
     document.getElementById('profitPreview').innerText = window.profit.toLocaleString();
-    window.noRngProfit = window.noRngRevenue - window.expenses;
-    document.getElementById('noRngProfitSpan').innerText = window.noRngProfit.toLocaleString();
-    document.getElementById('noRngProfitPreview').innerText = window.noRngProfit.toLocaleString();
     
     // 显示战斗图表
     if (document.getElementById('hpMpVisualizationToggle').checked) {
@@ -1792,8 +1786,8 @@ function manipulateSimResultsDataForDisplay(simResults) {
                 experiencePerHour[skill] = experiencePerHourValue;
             });
             getDropProfit(simResult, playerToDisplay);
-            let noRngRevenue = simResult["noRngRevenue"];
-            let noRngProfit = simResult["noRngProfit"];
+            let revenue = simResult["revenue"];
+            let profit = simResult["profit"];
             let expenses = simResult["expenses"];
 
             let displaySimRow = {
@@ -1802,9 +1796,9 @@ function manipulateSimResultsDataForDisplay(simResults) {
                 "Intelligence": experiencePerHour["Intelligence"], "Attack": experiencePerHour["Attack"],
                 "Magic": experiencePerHour["Magic"], "Ranged": experiencePerHour["Ranged"],
                 "Melee": experiencePerHour["Melee"], "Defense": experiencePerHour["Defense"],
-                "noRngRevenue": noRngRevenue,
+                "revenue": revenue,
                 "expenses": expenses,
-                "noRngProfit": noRngProfit
+                "profit": profit
             };
             displaySimResults.push(displaySimRow);
         }
@@ -1812,15 +1806,7 @@ function manipulateSimResultsDataForDisplay(simResults) {
     return displaySimResults;
 }
 
-function fidDropAmount(dropAmount) {
-  if (Number.isInteger(dropAmount)) return dropAmount;
-
-  const intPart   = Math.floor(dropAmount);
-  const fracPart  = dropAmount - intPart;
-  return Math.random() < fracPart ? intPart + 1 : intPart;
-}
-
-function calcDropMaps(simResult, playerToDisplay) {
+function calcExpectedDropMap(simResult, playerToDisplay) {
     let dropRateMultiplier = simResult.dropRateMultiplier[playerToDisplay];
     let rareFindMultiplier = simResult.rareFindMultiplier[playerToDisplay];
     let combatDropQuantity = simResult.combatDropQuantity[playerToDisplay];
@@ -1831,90 +1817,52 @@ function calcDropMaps(simResult, playerToDisplay) {
         .filter(enemy => enemy !== "player1" && enemy !== "player2" && enemy !== "player3" && enemy !== "player4" && enemy !== "player5")
         .sort();
 
-    const totalDropMap = new Map();
-    const noRngTotalDropMap = new Map();
+    const expectedDropMap = new Map();
     for (const monster of monsters) {
-        const dropMap = new Map();
-        const rareDropMap = new Map();
-        if (combatMonsterDetailMap[monster].dropTable) {
-            for (const drop of combatMonsterDetailMap[monster].dropTable) {
-                if (drop.minDifficultyTier > simResult.difficultyTier) {
-                    continue;
-                }
+        const monsterDetail = combatMonsterDetailMap[monster];
+        if (!monsterDetail) {
+            continue;
+        }
 
-                let multiplier = 1.0 + 0.1 * simResult.difficultyTier;
-                let dropRate = Math.min(1.0, multiplier * (drop.dropRate + (drop.dropRatePerDifficultyTier ?? 0) * simResult.difficultyTier));
-                if (dropRate <= 0) continue;
+        const quantityMultiplier = (1 + debuffOnLevelGap) * (1 + combatDropQuantity);
+        const addExpectedDrop = (drop, dropRate) => {
+            if (drop.minDifficultyTier > simResult.difficultyTier || dropRate <= 0) {
+                return;
+            }
+            const averageCount = (drop.maxCount + drop.minCount) / 2;
+            const expectedAmount = simResult.deaths[monster]
+                * dropRate
+                * averageCount
+                * quantityMultiplier
+                / numberOfPlayers;
+            expectedDropMap.set(
+                drop.itemHrid,
+                (expectedDropMap.get(drop.itemHrid) ?? 0) + expectedAmount,
+            );
+        };
 
-                dropMap.set(drop.itemHrid, { "dropRate": Math.min(1.0, dropRate * dropRateMultiplier), "number": 0, "dropMin": drop.minCount, "dropMax": drop.maxCount, "noRngDropAmount": 0 });
-            }
-            if (combatMonsterDetailMap[monster].rareDropTable)
-                for (const drop of combatMonsterDetailMap[monster].rareDropTable) {
-                    if (drop.minDifficultyTier > simResult.difficultyTier) {
-                        continue;
-                    }
-                    rareDropMap.set(drop.itemHrid, { "dropRate": drop.dropRate * rareFindMultiplier, "number": 0, "dropMin": drop.minCount, "dropMax": drop.maxCount, "noRngDropAmount": 0 });
-                }
-
-            for (let dropObject of dropMap.values()) {
-                dropObject.noRngDropAmount += simResult.deaths[monster] * dropObject.dropRate * ((dropObject.dropMax + dropObject.dropMin) / 2) * (1 + debuffOnLevelGap) * (1 + combatDropQuantity) / numberOfPlayers;
-
-            }
-            for (let dropObject of rareDropMap.values()) {
-                dropObject.noRngDropAmount += simResult.deaths[monster] * dropObject.dropRate * ((dropObject.dropMax + dropObject.dropMin) / 2) * (1 + debuffOnLevelGap) * (1 + combatDropQuantity) / numberOfPlayers;
-            }
-
-            for (let i = 0; i < simResult.deaths[monster]; i++) {
-                for (let dropObject of dropMap.values()) {
-                    let chance = Math.random();
-                    if (chance <= dropObject.dropRate / numberOfPlayers) {
-                        let amount = Math.floor(Math.random() * (dropObject.dropMax - dropObject.dropMin + 1) + dropObject.dropMin) * (1 + debuffOnLevelGap) * (1 + combatDropQuantity);
-                        dropObject.number = dropObject.number + fidDropAmount(amount);
-                    }
-                }
-                for (let dropObject of rareDropMap.values()) {
-                    let chance = Math.random();
-                    if (chance <= dropObject.dropRate / numberOfPlayers) {
-                        let amount = Math.floor(Math.random() * (dropObject.dropMax - dropObject.dropMin + 1) + dropObject.dropMin) * (1 + debuffOnLevelGap) * (1 + combatDropQuantity);
-                        dropObject.number = dropObject.number + fidDropAmount(amount);
-                    }
-                }
-            }
-            for (let [name, dropObject] of dropMap.entries()) {
-                if (totalDropMap.has(name)) {
-                    totalDropMap.set(name, totalDropMap.get(name) + dropObject.number);
-                } else {
-                    totalDropMap.set(name, dropObject.number);
-                }
-                if (noRngTotalDropMap.has(name)) {
-                    noRngTotalDropMap.set(name, noRngTotalDropMap.get(name) + dropObject.noRngDropAmount);
-                } else {
-                    noRngTotalDropMap.set(name, dropObject.noRngDropAmount);
-                }
-            }
-            for (let [name, dropObject] of rareDropMap.entries()) {
-                if (totalDropMap.has(name)) {
-                    totalDropMap.set(name, totalDropMap.get(name) + dropObject.number);
-                } else {
-                    totalDropMap.set(name, dropObject.number);
-                }
-                if (noRngTotalDropMap.has(name)) {
-                    noRngTotalDropMap.set(name, noRngTotalDropMap.get(name) + dropObject.noRngDropAmount);
-                } else {
-                    noRngTotalDropMap.set(name, dropObject.noRngDropAmount);
-                }
-            }
+        for (const drop of monsterDetail.dropTable ?? []) {
+            const difficultyMultiplier = 1.0 + 0.1 * simResult.difficultyTier;
+            const tierAdjustedDropRate = Math.min(
+                1.0,
+                difficultyMultiplier
+                    * (drop.dropRate + (drop.dropRatePerDifficultyTier ?? 0) * simResult.difficultyTier),
+            );
+            addExpectedDrop(drop, Math.min(1.0, tierAdjustedDropRate * dropRateMultiplier));
+        }
+        for (const drop of monsterDetail.rareDropTable ?? []) {
+            addExpectedDrop(drop, drop.dropRate * rareFindMultiplier);
         }
     }
 
-    return { totalDropMap, noRngTotalDropMap };
+    return expectedDropMap;
 }
 
 function getDropProfit(simResult, playerToDisplay) {
-    let { totalDropMap, noRngTotalDropMap } = calcDropMaps(simResult, playerToDisplay);
+    const expectedDropMap = calcExpectedDropMap(simResult, playerToDisplay);
 
-    let noRngTotal = 0;
-    for (let [name, dropAmount] of noRngTotalDropMap.entries()) {
+    let expectedRevenue = 0;
+    for (let [name, dropAmount] of expectedDropMap.entries()) {
         let price = -1;
         let revenueSetting = document.getElementById('selectPrices_drops').value;
         if (window.prices) {
@@ -1938,7 +1886,7 @@ function getDropProfit(simResult, playerToDisplay) {
                 }
             }
         }
-        noRngTotal += price * dropAmount;
+        expectedRevenue += price * dropAmount;
     }
 
     let consumablesUsed = simResult.consumablesUsed?.[playerToDisplay];
@@ -1977,9 +1925,9 @@ function getDropProfit(simResult, playerToDisplay) {
         expenses += price * amount;
     }
 
-    simResult["noRngRevenue"] = (noRngTotal).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    simResult["revenue"] = expectedRevenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     simResult["expenses"] = (expenses).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    simResult["noRngProfit"] = (noRngTotal - expenses).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    simResult["profit"] = (expectedRevenue - expenses).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function updateAllSimsModal(data) {
@@ -2085,10 +2033,8 @@ document.getElementById('buttonExportResults').addEventListener('click', functio
 function showKills(simResult, playerToDisplay) {
     let resultDiv = document.getElementById("simulationResultKills");
     let dropsResultDiv = document.getElementById("simulationResultDrops");
-    let noRngDropsResultDiv = document.getElementById("noRngDrops");
     let newChildren = [];
     let newDropChildren = [];
-    let newNoRngDropChildren = [];
 
     let hoursSimulated = simResult.simulatedTime / ONE_HOUR;
     if (simResult.isDungeon && simResult.lastDungeonFinishTime > 0) {
@@ -2170,11 +2116,13 @@ function showKills(simResult, playerToDisplay) {
             newChildren.push(monsterRow);
         });
 
-    let { totalDropMap, noRngTotalDropMap } = !simResult.isDungeon ? calcDropMaps(simResult, playerToDisplay) : {totalDropMap:new Map(), noRngTotalDropMap:new Map()};
+    const expectedDropMap = !simResult.isDungeon
+        ? calcExpectedDropMap(simResult, playerToDisplay)
+        : new Map();
 
     let revenueModalTable = document.querySelector("#revenueTable > tbody");
     let total = 0;
-    for (let [name, dropAmount] of totalDropMap.entries()) {
+    for (let [name, dropAmount] of expectedDropMap.entries()) {
         let dropRow = createRow(
             ["col-md-6", "col-md-6 text-end"],
             [name, dropAmount.toLocaleString()]
@@ -2220,63 +2168,11 @@ function showKills(simResult, playerToDisplay) {
 
 
 
-    let noRngRevenueModalTable = document.querySelector("#noRngRevenueTable > tbody");
-    let noRngTotal = 0;
-    for (let [name, dropAmount] of noRngTotalDropMap.entries()) {
-        let noRngDropRow = createRow(
-            ["col-md-6", "col-md-6 text-end"],
-            [name, dropAmount.toLocaleString()]
-        );
-        noRngDropRow.firstElementChild.setAttribute("data-i18n", "itemNames." + name);
-        newNoRngDropChildren.push(noRngDropRow);
-
-        let tableRow = '<tr class="' + name.replace(/\s+/g, '') + '"><td data-i18n="itemNames.';
-        tableRow += name;
-        tableRow += '"></td><td contenteditable="true">';
-        let price = -1;
-        let revenueSetting = document.getElementById('selectPrices_drops').value;
-        if (window.prices) {
-            let item = window.prices[name];
-            if (item) {
-                if (revenueSetting == 'bid') {
-                    if (item['bid'] !== -1) {
-                        price = item['bid'];
-                    } else if (item['ask'] !== -1) {
-                        price = item['ask'];
-                    }
-                } else if (revenueSetting == 'ask') {
-                    if (item['ask'] !== -1) {
-                        price = item['ask'];
-                    } else if (item['bid'] !== -1) {
-                        price = item['bid'];
-                    }
-                }
-                if (price == -1) {
-                    price = item['vendor'];
-                }
-            }
-        }
-        tableRow += price;
-        tableRow += '</td><td>';
-        tableRow += dropAmount;
-        tableRow += '</td><td>';
-        tableRow += price * dropAmount;
-        tableRow += '</td></tr>';
-        noRngRevenueModalTable.innerHTML += tableRow;
-        noRngTotal += price * dropAmount;
-    }
-
     document.getElementById('revenueSpan').innerText = total.toLocaleString();
     window.revenue = total;
-    document.getElementById('noRngRevenueSpan').innerText = noRngTotal.toLocaleString();
-    window.noRngRevenue = noRngTotal;
-
-    let resultAccordion = document.getElementById("noRngDropsAccordion");
-    showElement(resultAccordion);
 
     resultDiv.replaceChildren(...newChildren);
     dropsResultDiv.replaceChildren(...newDropChildren);
-    noRngDropsResultDiv.replaceChildren(...newNoRngDropChildren);
 }
 
 function showDeaths(simResult, playerToDisplay) {
@@ -2954,6 +2850,7 @@ function initSimulationControls() {
             alert("You need to select at least one player to sim.");
             return;
         }
+        autoSaveCurrentTeamPreset(selectedPlayers);
         // buttonStartSimulation.disabled = true;
         buttonStopSimulation.style.display = 'block';
         startSimulation(selectedPlayers);
@@ -4054,13 +3951,48 @@ function doSoloExport() {
     }
 }
 
+function getPlayerTabName(playerId) {
+    const playerName = document.getElementById(`player${playerId}-tab`)?.textContent?.trim() ?? "";
+    return /^Player\s*\d+$/i.test(playerName) ? "" : playerName;
+}
+
+function normalizePlayerImportData(playerId, value) {
+    const importData = JSON.parse(value);
+    const pendingLoadout = pendingImporterLoadoutNames.get(String(playerId));
+    pendingImporterLoadoutNames.delete(String(playerId));
+
+    if (
+        !importData.loadoutName &&
+        pendingLoadout &&
+        Date.now() - pendingLoadout.capturedAt < 10000
+    ) {
+        importData.loadoutName = pendingLoadout.name;
+    }
+
+    if (!importData.characterName) {
+        const playerName = getPlayerTabName(playerId);
+        if (playerName) {
+            importData.characterName = playerName;
+        }
+    }
+
+    if (typeof importData.characterName === "string" && importData.characterName.trim()) {
+        const playerTab = document.getElementById(`player${playerId}-tab`);
+        if (playerTab) {
+            playerTab.textContent = importData.characterName.trim();
+        }
+    }
+
+    return JSON.stringify(importData);
+}
+
 function setPlayerData(playerId, inputElementId) {
     const inputElement = document.getElementById(inputElementId);
     const value = inputElement ? inputElement.value.trim() : "";
 
     // Only set the value in the map if it's not null, undefined, or empty
     if (value) {
-        playerDataMap[playerId] = value;
+        playerDataMap[playerId] = normalizePlayerImportData(playerId, value);
         return true;
     }
     return false;
@@ -4077,12 +4009,18 @@ function doGroupImport() {
         }
     } else {
         playerDataMap = JSON.parse(value);
+        for (let i of ['1', '2', '3', '4', '5']) {
+            if (typeof playerDataMap[i] === "string") {
+                playerDataMap[i] = normalizePlayerImportData(i, playerDataMap[i]);
+            }
+        }
         needUpdateCurrentTab = true;
     }
 
     if (needUpdateCurrentTab) {
         updateNextPlayer(currentPlayerTabId);
     }
+    updateTeamPresetPlayerLabels();
 }
 
 function doSoloImport() {
@@ -4268,7 +4206,21 @@ function savePreviousPlayer(playerId) {
     for (let i = 0; i < food?.length; i++) {
         foodArray.push({ "itemHrid": food[i] });
     }
+    let importMetadata = {};
+    try {
+        const previousImportData = JSON.parse(playerDataMap[playerId]);
+        if (typeof previousImportData.characterName === "string" && previousImportData.characterName.trim()) {
+            importMetadata.characterName = previousImportData.characterName.trim();
+        }
+        if (typeof previousImportData.loadoutName === "string" && previousImportData.loadoutName.trim()) {
+            importMetadata.loadoutName = previousImportData.loadoutName.trim();
+        }
+    } catch (error) {
+        console.warn("Unable to preserve player import metadata.", error);
+    }
+
     let state = {
+        ...importMetadata,
         player: playerArray,
         food: { "/action_types/combat": foodArray },
         drinks: { "/action_types/combat": drinksArray },
@@ -4578,66 +4530,53 @@ function refreshTeamPresetControls({ allowAutoLoad = false, preferredPresetId = 
     }
 }
 
-function saveCurrentTeamPreset() {
-    const target = getCurrentTeamPresetTarget();
-    if (!target) {
-        setTeamPresetStatus(
-            getTeamPresetText("unsupported", "Presets currently support one zone or dungeon at a time."),
-            "danger",
-        );
-        return;
-    }
+function normalizeTeamPresetNamePart(value) {
+    return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+}
 
-    const name = document.getElementById("inputTeamPresetName").value.trim();
-    if (!name) {
-        setTeamPresetStatus(getTeamPresetText("enterName", "Enter a preset name."), "danger");
-        return;
-    }
-
-    const selectedPlayerNumbers = [...document.querySelectorAll(".player-checkbox:checked")]
-        .map((checkbox) => checkbox.id.replace("player", ""));
-    if (selectedPlayerNumbers.length === 0) {
-        setTeamPresetStatus(
-            getTeamPresetText("selectPlayers", "Select at least one player before saving."),
-            "danger",
-        );
-        return;
-    }
-
-    savePreviousPlayer(currentPlayerTabId);
+function captureCurrentTeamPreset(selectedPlayerNumbers) {
     const selectedPlayerData = {};
     const selectedPlayerNames = {};
-    try {
-        for (const playerNumber of selectedPlayerNumbers) {
-            JSON.parse(playerDataMap[playerNumber]);
-            selectedPlayerData[playerNumber] = playerDataMap[playerNumber];
-            selectedPlayerNames[playerNumber] = document.getElementById(`player${playerNumber}-tab`)?.textContent?.trim()
-                || `Player ${playerNumber}`;
-        }
-    } catch (error) {
-        console.error("Invalid player data while saving a team preset.", error);
-        setTeamPresetStatus(
-            getTeamPresetText("invalidData", "One of the selected player loadouts is invalid."),
-            "danger",
+    const generatedNameParts = [];
+
+    for (const playerNumber of selectedPlayerNumbers.map(String)) {
+        const serializedPlayerData = playerDataMap[playerNumber];
+        const playerImportData = JSON.parse(serializedPlayerData);
+        const tabName = normalizeTeamPresetNamePart(
+            document.getElementById(`player${playerNumber}-tab`)?.textContent,
         );
-        return;
+        const characterName = normalizeTeamPresetNamePart(playerImportData.characterName)
+            || tabName
+            || `Player ${playerNumber}`;
+        const loadoutName = normalizeTeamPresetNamePart(playerImportData.loadoutName)
+            || getTeamPresetText("manualLoadout", "Manual loadout");
+
+        selectedPlayerData[playerNumber] = serializedPlayerData;
+        selectedPlayerNames[playerNumber] = characterName;
+        generatedNameParts.push(`${characterName}-${loadoutName}`);
     }
 
+    return {
+        selectedPlayers: selectedPlayerNumbers.map(String),
+        playerDataMap: selectedPlayerData,
+        playerNames: selectedPlayerNames,
+        generatedName: generatedNameParts.join(" "),
+    };
+}
+
+function persistTeamPreset(target, name, snapshot, existingPresetId = "") {
     const store = loadTeamPresetStore();
     const targetKey = createTeamPresetTargetKey(target);
-    const selectedPresetId = document.getElementById("selectTeamPreset").value;
-    const existingPreset = store.presets.find((preset) => preset.id === selectedPresetId);
+    const existingPreset = store.presets.find((preset) =>
+        preset.id === existingPresetId && preset.targetKey === targetKey
+    );
     const duplicatePreset = store.presets.find((preset) =>
         preset.targetKey === targetKey &&
-        preset.id !== selectedPresetId &&
+        preset.id !== existingPreset?.id &&
         preset.name.toLocaleLowerCase() === name.toLocaleLowerCase()
     );
     if (duplicatePreset) {
-        setTeamPresetStatus(
-            getTeamPresetText("duplicateName", "A preset with that name already exists for this target."),
-            "danger",
-        );
-        return;
+        return { status: "duplicate", preset: duplicatePreset };
     }
 
     const now = new Date().toISOString();
@@ -4647,9 +4586,9 @@ function saveCurrentTeamPreset() {
         name,
         targetKey,
         target,
-        selectedPlayers: selectedPlayerNumbers,
-        playerDataMap: selectedPlayerData,
-        playerNames: selectedPlayerNames,
+        selectedPlayers: snapshot.selectedPlayers,
+        playerDataMap: snapshot.playerDataMap,
+        playerNames: snapshot.playerNames,
         createdAt: existingPreset?.createdAt ?? now,
         updatedAt: now,
     };
@@ -4667,6 +4606,56 @@ function saveCurrentTeamPreset() {
         saveTeamPresetStore(store);
     } catch (error) {
         console.error("Unable to save team preset.", error);
+        return { status: "error", error };
+    }
+
+    return { status: "saved", preset };
+}
+
+function saveCurrentTeamPreset() {
+    const target = getCurrentTeamPresetTarget();
+    if (!target) {
+        setTeamPresetStatus(
+            getTeamPresetText("unsupported", "Presets currently support one zone or dungeon at a time."),
+            "danger",
+        );
+        return;
+    }
+
+    const selectedPlayerNumbers = [...document.querySelectorAll(".player-checkbox:checked")]
+        .map((checkbox) => checkbox.id.replace("player", ""));
+    if (selectedPlayerNumbers.length === 0) {
+        setTeamPresetStatus(
+            getTeamPresetText("selectPlayers", "Select at least one player before saving."),
+            "danger",
+        );
+        return;
+    }
+
+    savePreviousPlayer(currentPlayerTabId);
+    let snapshot;
+    try {
+        snapshot = captureCurrentTeamPreset(selectedPlayerNumbers);
+    } catch (error) {
+        console.error("Invalid player data while saving a team preset.", error);
+        setTeamPresetStatus(
+            getTeamPresetText("invalidData", "One of the selected player loadouts is invalid."),
+            "danger",
+        );
+        return;
+    }
+
+    const name = document.getElementById("inputTeamPresetName").value.trim() || snapshot.generatedName;
+    const selectedPresetId = document.getElementById("selectTeamPreset").value;
+    const result = persistTeamPreset(target, name, snapshot, selectedPresetId);
+    if (result.status === "duplicate") {
+        setTeamPresetStatus(
+            getTeamPresetText("duplicateName", "A preset with that name already exists for this target."),
+            "danger",
+        );
+        return;
+    }
+    if (result.status === "error") {
         setTeamPresetStatus(
             getTeamPresetText("storageError", "The preset could not be saved in this browser."),
             "danger",
@@ -4674,10 +4663,48 @@ function saveCurrentTeamPreset() {
         return;
     }
 
-    lastAutoLoadedTeamPresetTargetKey = targetKey;
-    refreshTeamPresetControls({ preferredPresetId: presetId });
+    lastAutoLoadedTeamPresetTargetKey = result.preset.targetKey;
+    refreshTeamPresetControls({ preferredPresetId: result.preset.id });
     setTeamPresetStatus(
         getTeamPresetText("saved", "Saved preset: {{name}}", { name }),
+        "success",
+    );
+}
+
+function autoSaveCurrentTeamPreset(selectedPlayerNumbers) {
+    const target = getCurrentTeamPresetTarget();
+    if (!target) {
+        return;
+    }
+
+    let snapshot;
+    try {
+        snapshot = captureCurrentTeamPreset(selectedPlayerNumbers);
+    } catch (error) {
+        console.warn("Unable to automatically save the current team preset.", error);
+        return;
+    }
+
+    const result = persistTeamPreset(target, snapshot.generatedName, snapshot);
+    if (result.status === "error") {
+        setTeamPresetStatus(
+            getTeamPresetText("storageError", "The preset could not be saved in this browser."),
+            "danger",
+        );
+        return;
+    }
+
+    lastAutoLoadedTeamPresetTargetKey = result.preset.targetKey;
+    refreshTeamPresetControls({ preferredPresetId: result.preset.id });
+    if (result.status === "duplicate") {
+        setTeamPresetStatus(
+            getTeamPresetText("alreadySaved", "Preset already exists; skipped: {{name}}", { name: result.preset.name }),
+        );
+        return;
+    }
+
+    setTeamPresetStatus(
+        getTeamPresetText("autoSaved", "Automatically saved: {{name}}", { name: result.preset.name }),
         "success",
     );
 }
@@ -4838,7 +4865,41 @@ function deleteTeamPreset() {
     );
 }
 
+function initImporterLoadoutNameCapture() {
+    document.addEventListener("click", (event) => {
+        if (!(event.target instanceof Element)) {
+            return;
+        }
+
+        const loadoutButton = event.target.closest("#mwi-load-row .mwi-item-btn");
+        if (!loadoutButton) {
+            return;
+        }
+
+        const slotButtons = [...document.querySelectorAll("#mwi-slot-row .mwi-slot-btn")];
+        const selectedSlotButton = slotButtons.find((button) => button.classList.contains("selected"));
+        if (!selectedSlotButton) {
+            return;
+        }
+
+        const slotFromLabel = selectedSlotButton.textContent?.trim();
+        const playerNumber = /^[1-5]$/.test(slotFromLabel)
+            ? slotFromLabel
+            : String(slotButtons.indexOf(selectedSlotButton) + 1);
+        const loadoutName = normalizeTeamPresetNamePart(loadoutButton.textContent);
+        if (!loadoutName || !/^[1-5]$/.test(playerNumber)) {
+            return;
+        }
+
+        pendingImporterLoadoutNames.set(playerNumber, {
+            name: loadoutName,
+            capturedAt: Date.now(),
+        });
+    }, true);
+}
+
 function initTeamPresets() {
+    initImporterLoadoutNameCapture();
     const targetControlIds = [
         "selectZone",
         "selectDungeon",
@@ -5046,13 +5107,11 @@ document.addEventListener("input", (e) => {
 
         let expensesDifference = 0;
         let revenueDifference = 0;
-        let noRngRevenueDifference = 0;
 
         if (tableId == 'expensesTable') {
             expensesDifference = updateTable('expensesTable', item, newPrice);
             if (revenueSetting == expensesSetting) {
                 revenueDifference = updateTable('revenueTable', item, newPrice);
-                noRngRevenueDifference = updateTable('noRngRevenueTable', item, newPrice);
             }
             if (window.prices) {
                 if (!window.prices[item]) window.prices[item] = { "ask": -1, "bid": -1, "vendor": itemDetailMap[item].sellPrice };
@@ -5064,7 +5123,6 @@ document.addEventListener("input", (e) => {
             }
         } else {
             revenueDifference = updateTable('revenueTable', item, newPrice);
-            noRngRevenueDifference = updateTable('noRngRevenueTable', item, newPrice);
             if (revenueSetting == expensesSetting) {
                 expensesDifference = updateTable('expensesTable', item, newPrice);
             }
@@ -5082,15 +5140,10 @@ document.addEventListener("input", (e) => {
         document.getElementById('expensesSpan').innerText = window.expenses.toLocaleString();
         window.revenue += revenueDifference;
         document.getElementById('revenueSpan').innerText = window.revenue.toLocaleString();
-        window.noRngRevenue += noRngRevenueDifference;
-        document.getElementById('noRngRevenueSpan').innerText = window.noRngRevenue.toLocaleString();
 
         window.profit = window.revenue - window.expenses;
         document.getElementById('profitPreview').innerText = window.profit.toLocaleString();
         document.getElementById('profitSpan').innerText = window.profit.toLocaleString();
-        window.noRngProfit = window.noRngRevenue - window.expenses;
-        document.getElementById('noRngProfitSpan').innerText = window.noRngProfit.toLocaleString();
-        document.getElementById('noRngProfitPreview').innerText = window.noRngProfit.toLocaleString();
     }
 });
 

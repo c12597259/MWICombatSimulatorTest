@@ -30,8 +30,7 @@
         }
 
         body.dark-mode #expensesTable,
-        body.dark-mode #revenueTable,
-        body.dark-mode #noRngRevenueTable {
+        body.dark-mode #revenueTable {
             color: #f0f0f0;
         }
 
@@ -1102,35 +1101,12 @@
                         </div>
                         <div id="simulationResultTotalDamageTaken" class="mb-2"></div>
                         <div class="row pt-2">
-                            <b><span data-i18n="common:profit">Profit</span>: <span id="profitPreview"></span></b>
+                            <b><span data-i18n="common:expectedProfit">Expected Profit</span>: <span id="profitPreview"></span></b>
                         </div>
                         <div class="row pt-2">
-                            <b><span data-i18n="common:noRNGProfit">No RNG Profit</span>: <span id="noRngProfitPreview"></span></b>
-                        </div>
-                        <div class="row pt-2">
-                            <b data-i18n="common:dropTotal">Drops (Total)</b>
+                            <b data-i18n="common:expectedDropsTotal">Expected Drops (Total)</b>
                         </div>
                         <div class="row" id="simulationResultDrops"></div>
-                        <div class="row pt-2 d-none" id="noRngDropsAccordion">
-                            <div class="col">
-                                <div class="accordion">
-                                    <div class="accordion-item">
-                                        <h2 class="accordion-header">
-                                            <button id="buttonNoRngDropsAccordion" class="accordion-button collapsed"
-                                                type="button" data-bs-toggle="collapse"
-                                                data-bs-target="#collapseNoRngDrops" style="padding: 0.5em">
-                                                <b data-i18n="common:noRNGDrops">No RNG Drops</b>
-                                            </button>
-                                        </h2>
-                                        <div id="collapseNoRngDrops" class="accordion-collapse collapse">
-                                            <div class="accordion-body">
-                                                <div id="noRngDrops"></div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
                     </div>
                     <!-- #endregion -->
                 </div>
@@ -1424,8 +1400,8 @@
                                 <button type="button" class="btn btn-primary" id="buttonLoadTeamPreset" data-i18n="common:controls.load">Load</button>
                             </div>
                             <div class="input-group mb-2">
-                                <input type="text" id="inputTeamPresetName" class="form-control" maxlength="60"
-                                    placeholder="Preset name" data-i18n-placeholder="common:teamPresets.namePlaceholder" />
+                                <input type="text" id="inputTeamPresetName" class="form-control" maxlength="240"
+                                    placeholder="Auto: character-loadout" data-i18n-placeholder="common:teamPresets.namePlaceholder" />
                                 <button type="button" class="btn btn-primary" id="buttonSaveTeamPreset" data-i18n="common:teamPresets.saveCurrent">Save Current</button>
                             </div>
                             <div class="d-flex flex-wrap gap-2 mb-2">
@@ -1437,6 +1413,9 @@
                                 <label class="form-check-label" for="autoLoadTeamPreset" data-i18n="common:teamPresets.autoLoad">
                                     Automatically load the default preset when the target changes
                                 </label>
+                            </div>
+                            <div class="form-text" data-i18n="common:teamPresets.autoSaveHint">
+                                Starting a simulation automatically saves the checked players. Checked dungeon slots 4–5 are included too.
                             </div>
                             <div class="form-text" id="teamPresetStatus" aria-live="polite"></div>
                         </div>
@@ -1663,9 +1642,9 @@
                                 <th data-i18n="skillNames./skills/ranged">Ranged</th>
                                 <th data-i18n="skillNames./skills/melee">Melee</th>
                                 <th data-i18n="skillNames./skills/defense">Defense</th>
-                                <th data-i18n="common:noRNGRevenue">noRngRevenue</th>
+                                <th data-i18n="common:expectedRevenue">Expected Revenue</th>
                                 <th data-i18n="common:expense">expenses</th>
-                                <th data-i18n="common:noRNGProfit">noRngProfit</th>
+                                <th data-i18n="common:expectedProfit">Expected Profit</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1899,10 +1878,7 @@
                     <div class="container-fluid">
                         <div class="row">
                             <div class="col-12 mb-4">
-                                <h3><span data-i18n="common:profit">Profit</span>: <span id="profitSpan"></span></h3>
-                            </div>
-                            <div class="col-12 mb-4">
-                                <h3><span data-i18n="common:noRNGProfit">No RNG Profit</span>: <span id="noRngProfitSpan"></span></h3>
+                                <h3><span data-i18n="common:expectedProfit">Expected Profit</span>: <span id="profitSpan"></span></h3>
                             </div>
                             <div class="col-12 mb-4">
                                 <h3><span data-i18n="common:expense">Expenses</span>: <span id="expensesSpan"></span></h3>
@@ -1918,21 +1894,8 @@
                                 </table>
                             </div>
                             <div class="col-12 mb-4">
-                                <h3><span data-i18n="common:revenue">Revenue</span>: <span id="revenueSpan"></span></h3>
+                                <h3><span data-i18n="common:expectedRevenue">Expected Revenue</span>: <span id="revenueSpan"></span></h3>
                                 <table class="table table-bordered table-striped profit-table" id="revenueTable">
-                                    <tbody>
-                                        <tr>
-                                            <th data-i18n="marketplacePanel.item">Item</th>
-                                            <th data-i18n="marketplacePanel.price">Price</th>
-                                            <th data-i18n="common:amount">Amount</th>
-                                            <th data-i18n="common:total">Total</th>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                            <div class="col-12 mb-4">
-                                <h3><span data-i18n="common:noRNGRevenue">No RNG Revenue</span>: <span id="noRngRevenueSpan"></span></h3>
-                                <table class="table table-bordered table-striped profit-table" id="noRngRevenueTable">
                                     <tbody>
                                         <tr>
                                             <th data-i18n="marketplacePanel.item">Item</th>
