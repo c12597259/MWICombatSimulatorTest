@@ -1700,7 +1700,7 @@
     </div>
     <div class="modal" id="importExportModal" tabindex="-1">
         <!-- #region Error Modal -->
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title" data-i18n="common:immportexportSet">Import / Export Set</h5>
@@ -1714,6 +1714,9 @@
                         </li>
                         <li class="nav-item" role="presentation">
                             <a class="nav-link" id="solo-tab" data-bs-toggle="tab" href="#solo" role="tab" aria-controls="solo" aria-selected="false" data-i18n="common:solo">Solo</a>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <a class="nav-link" id="private-sync-tab" data-bs-toggle="tab" href="#private-sync" role="tab" aria-controls="private-sync" aria-selected="false" data-i18n="common:privateSync.tab">Server Loadouts</a>
                         </li>
                     </ul>
                     <!-- Tabs Content -->
@@ -1731,6 +1734,28 @@
                         <div class="tab-pane fade" id="solo" role="tabpanel" aria-labelledby="solo-tab">
                             <!-- Solo Content -->
                             <input type="text" id="inputSetSolo" class="form-control mt-2" placeholder="Import set here for Solo" />
+                        </div>
+                        <div class="tab-pane fade" id="private-sync" role="tabpanel" aria-labelledby="private-sync-tab">
+                            <div class="row g-2 mt-1 align-items-end">
+                                <div class="col-md-5">
+                                    <label class="form-label mb-1" for="selectPrivateSyncAccount" data-i18n="common:privateSync.account">Account</label>
+                                    <select class="form-select" id="selectPrivateSyncAccount"></select>
+                                </div>
+                                <div class="col-md-5">
+                                    <label class="form-label mb-1" for="selectPrivateSyncHistory" data-i18n="common:privateSync.history">Snapshot history</label>
+                                    <select class="form-select" id="selectPrivateSyncHistory"></select>
+                                </div>
+                                <div class="col-md-2 d-grid">
+                                    <button type="button" class="btn btn-outline-primary" id="buttonRefreshPrivateSnapshots" data-i18n="common:privateSync.refresh">Refresh</button>
+                                </div>
+                            </div>
+                            <div class="alert alert-secondary py-2 my-3" id="privateSnapshotStatus" aria-live="polite" data-i18n="common:privateSync.notLoaded">
+                                Open this tab to load private server snapshots.
+                            </div>
+                            <div class="d-grid gap-2" id="privateSnapshotCharacters"></div>
+                            <div class="form-text mt-2" data-i18n="common:privateSync.historyHint">
+                                Choose each character's loadout and target slot. Import twice to mix characters from different accounts.
+                            </div>
                         </div>
                     </div>
                 </div>

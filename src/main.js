@@ -19,6 +19,10 @@ import achievementTierMap from "./combatsimulator/data/achievementTierDetailMap.
 import achievementDetailMap from "./combatsimulator/data/achievementDetailMap.json"
 import { calculateFragmentTimeCosts } from "./fragmentTimeCost.js";
 import {
+    buildPrivatePlayerImportData,
+    groupPrivateSnapshotSummaries,
+} from "./privateSnapshotStore.js";
+import {
     createTeamPresetId,
     createTeamPresetTargetKey,
     getDefaultTeamPreset,
@@ -54,6 +58,13 @@ let currentSimResults = {};
 let currentPlayerTabId = '1';
 let lastAutoLoadedTeamPresetTargetKey = null;
 const pendingImporterLoadoutNames = new Map();
+const PRIVATE_SYNC_BRIDGE_REQUEST = "mwi-private-sync-request-v1";
+const PRIVATE_SYNC_BRIDGE_RESPONSE = "mwi-private-sync-response-v1";
+const PRIVATE_SYNC_SELECTIONS_KEY = "mwiPrivateSyncSelections_v1";
+let privateSyncRequestCounter = 0;
+let privateSnapshotGroups = [];
+let privateSnapshotEnvelope = null;
+const privateSnapshotCache = new Map();
 let playerDataMap = {
     "1": "{\"player\":{\"attackLevel\":1,\"magicLevel\":1,\"meleeLevel\":1,\"rangedLevel\":1,\"defenseLevel\":1,\"staminaLevel\":1,\"intelligenceLevel\":1,\"equipment\":[]},\"food\":{\"/action_types/combat\":[{\"itemHrid\":\"\"},{\"itemHrid\":\"\"},{\"itemHrid\":\"\"}]},\"drinks\":{\"/action_types/combat\":[{\"itemHrid\":\"\"},{\"itemHrid\":\"\"},{\"itemHrid\":\"\"}]},\"abilities\":[{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"}],\"triggerMap\":{},\"zone\":\"/actions/combat/fly\",\"simulationTime\":\"100\",\"houseRooms\":{\"/house_rooms/dairy_barn\":0,\"/house_rooms/garden\":0,\"/house_rooms/log_shed\":0,\"/house_rooms/forge\":0,\"/house_rooms/workshop\":0,\"/house_rooms/sewing_parlor\":0,\"/house_rooms/kitchen\":0,\"/house_rooms/brewery\":0,\"/house_rooms/laboratory\":0,\"/house_rooms/dining_room\":0,\"/house_rooms/library\":0,\"/house_rooms/dojo\":0,\"/house_rooms/gym\":0,\"/house_rooms/armory\":0,\"/house_rooms/archery_range\":0,\"/house_rooms/mystical_study\":0,\"/house_rooms/observatory\":0},\"achievements\":{}}",
     "2": "{\"player\":{\"attackLevel\":1,\"magicLevel\":1,\"meleeLevel\":1,\"rangedLevel\":1,\"defenseLevel\":1,\"staminaLevel\":1,\"intelligenceLevel\":1,\"equipment\":[]},\"food\":{\"/action_types/combat\":[{\"itemHrid\":\"\"},{\"itemHrid\":\"\"},{\"itemHrid\":\"\"}]},\"drinks\":{\"/action_types/combat\":[{\"itemHrid\":\"\"},{\"itemHrid\":\"\"},{\"itemHrid\":\"\"}]},\"abilities\":[{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"}],\"triggerMap\":{},\"zone\":\"/actions/combat/fly\",\"simulationTime\":\"100\",\"houseRooms\":{\"/house_rooms/dairy_barn\":0,\"/house_rooms/garden\":0,\"/house_rooms/log_shed\":0,\"/house_rooms/forge\":0,\"/house_rooms/workshop\":0,\"/house_rooms/sewing_parlor\":0,\"/house_rooms/kitchen\":0,\"/house_rooms/brewery\":0,\"/house_rooms/laboratory\":0,\"/house_rooms/dining_room\":0,\"/house_rooms/library\":0,\"/house_rooms/dojo\":0,\"/house_rooms/gym\":0,\"/house_rooms/armory\":0,\"/house_rooms/archery_range\":0,\"/house_rooms/mystical_study\":0,\"/house_rooms/observatory\":0},\"achievements\":{}}",
@@ -3978,12 +3989,381 @@ function initErrorHandling() {
     });
 }
 
+function getPrivateSyncText(key, fallback, variables = {}) {
+    try {
+        const translationKey = `common:privateSync.${key}`;
+        const translated = i18next.t(translationKey, variables);
+        if (translated && translated !== translationKey && translated !== `privateSync.${key}`) {
+            return translated;
+        }
+    } catch (error) {
+        console.warn("Unable to translate private sync text.", error);
+    }
+    return Object.entries(variables).reduce(
+        (text, [name, value]) => text.replaceAll(`{{${name}}}`, String(value)),
+        fallback,
+    );
+}
+
+function setPrivateSnapshotStatus(message, style = "secondary") {
+    const status = document.getElementById("privateSnapshotStatus");
+    if (!status) return;
+    status.className = `alert alert-${style} py-2 mb-3`;
+    status.textContent = message;
+}
+
+function requestPrivateSyncBridge(action, payload = {}, timeoutMs = 30000) {
+    const requestId = `${Date.now()}-${++privateSyncRequestCounter}-${Math.random().toString(36).slice(2)}`;
+    return new Promise((resolve, reject) => {
+        let timeoutId;
+        const cleanup = () => {
+            if (timeoutId) clearTimeout(timeoutId);
+            window.removeEventListener("message", onMessage);
+        };
+        const onMessage = (event) => {
+            if (
+                event.origin !== location.origin
+                || event.data?.channel !== PRIVATE_SYNC_BRIDGE_RESPONSE
+                || event.data?.requestId !== requestId
+            ) {
+                return;
+            }
+            cleanup();
+            if (event.data.ok) resolve(event.data.data);
+            else reject(new Error(String(event.data.error || "Private sync request failed")));
+        };
+        timeoutId = setTimeout(() => {
+            cleanup();
+            reject(new Error(getPrivateSyncText(
+                "bridgeMissing",
+                "Private sync helper was not detected. Install the main-computer userscript and refresh the page.",
+            )));
+        }, timeoutMs);
+        window.addEventListener("message", onMessage);
+        window.postMessage({
+            channel: PRIVATE_SYNC_BRIDGE_REQUEST,
+            requestId,
+            action,
+            payload,
+        }, location.origin);
+    });
+}
+
+function formatPrivateSnapshotTime(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value || "-");
+    return date.toLocaleString();
+}
+
+function loadPrivateSyncSelections() {
+    try {
+        const value = JSON.parse(localStorage.getItem(PRIVATE_SYNC_SELECTIONS_KEY) || "{}");
+        return value && typeof value === "object" ? value : {};
+    } catch {
+        return {};
+    }
+}
+
+function savePrivateSyncSelection(characterId, values) {
+    try {
+        const selections = loadPrivateSyncSelections();
+        selections[characterId] = { ...(selections[characterId] || {}), ...values };
+        localStorage.setItem(PRIVATE_SYNC_SELECTIONS_KEY, JSON.stringify(selections));
+    } catch (error) {
+        console.warn("Unable to save private sync selection.", error);
+    }
+}
+
+function getPrivateAccountLabel(group, index) {
+    const names = group.characters.map(character => character.characterName).join(" / ");
+    return getPrivateSyncText("accountLabel", "Account {{index}} · {{names}}", {
+        index: index + 1,
+        names,
+    });
+}
+
+function populatePrivateSnapshotHistory() {
+    const accountSelect = document.getElementById("selectPrivateSyncAccount");
+    const historySelect = document.getElementById("selectPrivateSyncHistory");
+    if (!accountSelect || !historySelect) return;
+    const group = privateSnapshotGroups.find(candidate => candidate.id === accountSelect.value);
+    historySelect.replaceChildren();
+    for (const snapshot of group?.snapshots ?? []) {
+        historySelect.add(new Option(getPrivateSyncText(
+            "snapshotLabel",
+            "{{time}} · {{characters}} characters · {{loadouts}} loadouts",
+            {
+                time: formatPrivateSnapshotTime(snapshot.receivedAt),
+                characters: snapshot.characterCount,
+                loadouts: snapshot.loadoutCount,
+            },
+        ), snapshot.snapshotId));
+    }
+}
+
+function renderPrivateSnapshotCharacters(envelope) {
+    const container = document.getElementById("privateSnapshotCharacters");
+    if (!container) return;
+    container.replaceChildren();
+    const characters = [...(Array.isArray(envelope?.snapshot?.characters)
+        ? envelope.snapshot.characters
+        : [])].sort((left, right) => {
+        const modeOrder = (left.gameMode === "standard" ? 0 : 1) - (right.gameMode === "standard" ? 0 : 1);
+        return modeOrder || String(left.characterName).localeCompare(String(right.characterName), "zh-CN");
+    });
+    const savedSelections = loadPrivateSyncSelections();
+
+    characters.forEach((character, index) => {
+        const characterId = String(character.characterId || "");
+        const saved = savedSelections[characterId] || {};
+        const card = document.createElement("div");
+        card.className = "card card-body py-2 private-snapshot-character";
+        card.dataset.characterId = characterId;
+
+        const heading = document.createElement("div");
+        heading.className = "d-flex align-items-center gap-2 mb-2";
+        const include = document.createElement("input");
+        include.type = "checkbox";
+        include.className = "form-check-input mt-0 private-snapshot-include";
+        include.checked = true;
+        include.id = `privateSnapshotCharacter${index}`;
+        const name = document.createElement("label");
+        name.className = "form-check-label fw-semibold";
+        name.htmlFor = include.id;
+        name.textContent = String(character.characterName || `#${characterId}`);
+        const mode = document.createElement("span");
+        mode.className = `badge ${character.gameMode === "standard" ? "text-bg-primary" : "text-bg-warning"}`;
+        mode.textContent = character.gameMode === "standard"
+            ? getPrivateSyncText("modeStandard", "Standard")
+            : getPrivateSyncText("modeIroncow", "Ironcow");
+        heading.append(include, name, mode);
+
+        const controls = document.createElement("div");
+        controls.className = "row g-2";
+        const loadoutColumn = document.createElement("div");
+        loadoutColumn.className = "col-md-8";
+        const loadoutLabel = document.createElement("label");
+        loadoutLabel.className = "form-label small mb-1";
+        loadoutLabel.textContent = getPrivateSyncText("loadout", "Loadout");
+        const loadoutSelect = document.createElement("select");
+        loadoutSelect.className = "form-select form-select-sm private-snapshot-loadout";
+        for (const loadout of (Array.isArray(character.loadouts) ? character.loadouts : [])) {
+            loadoutSelect.add(new Option(String(loadout.loadoutName || loadout.loadoutId), String(loadout.loadoutId)));
+        }
+        if ([...loadoutSelect.options].some(option => option.value === saved.loadoutId)) {
+            loadoutSelect.value = saved.loadoutId;
+        }
+        loadoutSelect.addEventListener("change", () =>
+            savePrivateSyncSelection(characterId, { loadoutId: loadoutSelect.value })
+        );
+        loadoutColumn.append(loadoutLabel, loadoutSelect);
+
+        const slotColumn = document.createElement("div");
+        slotColumn.className = "col-md-4";
+        const slotLabel = document.createElement("label");
+        slotLabel.className = "form-label small mb-1";
+        slotLabel.textContent = getPrivateSyncText("slot", "Import slot");
+        const slotSelect = document.createElement("select");
+        slotSelect.className = "form-select form-select-sm private-snapshot-slot";
+        for (let slot = 1; slot <= 5; slot += 1) {
+            slotSelect.add(new Option(`Player ${slot}`, String(slot)));
+        }
+        const defaultSlot = String(saved.slot || Math.min(index + 1, 5));
+        slotSelect.value = defaultSlot;
+        slotSelect.addEventListener("change", () =>
+            savePrivateSyncSelection(characterId, { slot: slotSelect.value })
+        );
+        slotColumn.append(slotLabel, slotSelect);
+        controls.append(loadoutColumn, slotColumn);
+        card.append(heading, controls);
+        container.append(card);
+    });
+}
+
+async function loadSelectedPrivateSnapshot() {
+    const historySelect = document.getElementById("selectPrivateSyncHistory");
+    const snapshotId = historySelect?.value || "";
+    if (!snapshotId) {
+        privateSnapshotEnvelope = null;
+        renderPrivateSnapshotCharacters(null);
+        return;
+    }
+    setPrivateSnapshotStatus(getPrivateSyncText(
+        "loadingSnapshot",
+        "Loading the selected snapshot…",
+    ), "info");
+    try {
+        const envelope = privateSnapshotCache.get(snapshotId)
+            ?? await requestPrivateSyncBridge("getSnapshot", { snapshotId });
+        privateSnapshotCache.set(snapshotId, envelope);
+        privateSnapshotEnvelope = envelope;
+        renderPrivateSnapshotCharacters(envelope);
+        const characterCount = envelope?.snapshot?.characters?.length ?? 0;
+        setPrivateSnapshotStatus(getPrivateSyncText(
+            "ready",
+            "Snapshot ready: {{characters}} characters.",
+            { characters: characterCount },
+        ), "success");
+    } catch (error) {
+        privateSnapshotEnvelope = null;
+        renderPrivateSnapshotCharacters(null);
+        setPrivateSnapshotStatus(getPrivateSyncText(
+            "loadError",
+            "Unable to read the server: {{error}}",
+            { error: error.message },
+        ), "danger");
+    }
+}
+
+async function refreshPrivateSnapshots() {
+    const accountSelect = document.getElementById("selectPrivateSyncAccount");
+    const historySelect = document.getElementById("selectPrivateSyncHistory");
+    const refreshButton = document.getElementById("buttonRefreshPrivateSnapshots");
+    if (!accountSelect || !historySelect || !refreshButton) return;
+    refreshButton.disabled = true;
+    setPrivateSnapshotStatus(getPrivateSyncText("loading", "Loading server snapshots…"), "info");
+    try {
+        const bridge = await requestPrivateSyncBridge("ping", {}, 4000);
+        if (!bridge?.canRead) {
+            throw new Error(getPrivateSyncText(
+                "readTokenMissing",
+                "The private sync helper has no read token. Install the main-computer userscript.",
+            ));
+        }
+        const result = await requestPrivateSyncBridge("listSnapshotSummaries", { limit: 100 }, 60000);
+        privateSnapshotGroups = groupPrivateSnapshotSummaries(result?.snapshots);
+        privateSnapshotCache.clear();
+        privateSnapshotEnvelope = null;
+        const previousAccount = accountSelect.value;
+        accountSelect.replaceChildren();
+        privateSnapshotGroups.forEach((group, index) => {
+            accountSelect.add(new Option(getPrivateAccountLabel(group, index), group.id));
+        });
+        if (privateSnapshotGroups.some(group => group.id === previousAccount)) {
+            accountSelect.value = previousAccount;
+        }
+        if (!privateSnapshotGroups.length) {
+            historySelect.replaceChildren();
+            renderPrivateSnapshotCharacters(null);
+            setPrivateSnapshotStatus(getPrivateSyncText("empty", "No snapshots are available on the server."), "secondary");
+            return;
+        }
+        populatePrivateSnapshotHistory();
+        await loadSelectedPrivateSnapshot();
+    } catch (error) {
+        privateSnapshotGroups = [];
+        privateSnapshotEnvelope = null;
+        accountSelect.replaceChildren();
+        historySelect.replaceChildren();
+        renderPrivateSnapshotCharacters(null);
+        setPrivateSnapshotStatus(getPrivateSyncText(
+            "loadError",
+            "Unable to read the server: {{error}}",
+            { error: error.message },
+        ), "danger");
+    } finally {
+        refreshButton.disabled = false;
+    }
+}
+
+function doPrivateSnapshotImport() {
+    if (!privateSnapshotEnvelope?.snapshot) {
+        setPrivateSnapshotStatus(getPrivateSyncText(
+            "selectSnapshot",
+            "Load a server snapshot before importing.",
+        ), "warning");
+        return false;
+    }
+    const snapshotId = String(privateSnapshotEnvelope?.snapshotId || "");
+    const characters = Array.isArray(privateSnapshotEnvelope?.snapshot?.characters)
+        ? privateSnapshotEnvelope.snapshot.characters
+        : [];
+    const selected = [...document.querySelectorAll(".private-snapshot-character")]
+        .filter(card => card.querySelector(".private-snapshot-include")?.checked)
+        .map(card => ({
+            characterId: card.dataset.characterId,
+            loadoutId: card.querySelector(".private-snapshot-loadout")?.value || "",
+            slot: card.querySelector(".private-snapshot-slot")?.value || "",
+        }));
+    if (!selected.length) {
+        setPrivateSnapshotStatus(getPrivateSyncText(
+            "selectAtLeastOne",
+            "Select at least one character.",
+        ), "warning");
+        return false;
+    }
+    const slots = selected.map(selection => selection.slot);
+    if (new Set(slots).size !== slots.length) {
+        setPrivateSnapshotStatus(getPrivateSyncText(
+            "duplicateSlot",
+            "Each character must use a different import slot.",
+        ), "warning");
+        return false;
+    }
+
+    const importedSlots = [];
+    try {
+        const preparedImports = selected.map(selection => {
+            const character = characters.find(candidate => String(candidate.characterId) === selection.characterId);
+            const loadout = character?.loadouts?.find(candidate => String(candidate.loadoutId) === selection.loadoutId);
+            return {
+                ...selection,
+                importData: buildPrivatePlayerImportData({ snapshotId, character, loadout }),
+            };
+        });
+        savePreviousPlayer(currentPlayerTabId);
+        for (const prepared of preparedImports) {
+            playerDataMap[prepared.slot] = JSON.stringify(prepared.importData);
+            const tab = document.getElementById(`player${prepared.slot}-tab`);
+            if (tab) tab.textContent = prepared.importData.characterName;
+            document.querySelectorAll(`label[for="player${prepared.slot}"]`).forEach(label => {
+                label.textContent = prepared.importData.characterName;
+            });
+            const checkbox = document.getElementById(`player${prepared.slot}`);
+            if (checkbox) checkbox.checked = true;
+            savePrivateSyncSelection(prepared.characterId, {
+                loadoutId: prepared.loadoutId,
+                slot: prepared.slot,
+            });
+            importedSlots.push(prepared.slot);
+        }
+    } catch (error) {
+        setPrivateSnapshotStatus(getPrivateSyncText(
+            "importError",
+            "Unable to import the selected loadouts: {{error}}",
+            { error: error.message },
+        ), "danger");
+        return false;
+    }
+
+    updateTeamPresetPlayerLabels();
+    if (importedSlots.includes(currentPlayerTabId)) {
+        updateNextPlayer(currentPlayerTabId);
+        updateState();
+        updateUI();
+    }
+    setPrivateSnapshotStatus(getPrivateSyncText(
+        "imported",
+        "Imported {{count}} characters from the server.",
+        { count: importedSlots.length },
+    ), "success");
+    return true;
+}
+
+function updateImportExportModalButtons() {
+    const activeTab = document.querySelector("#importTab .nav-link.active");
+    const exportButton = document.getElementById("buttonExportSet");
+    if (exportButton) exportButton.hidden = activeTab?.id === "private-sync-tab";
+}
+
 function initImportExportModal() {
     let exportSetButton = document.getElementById("buttonExportSet");
     exportSetButton.addEventListener("click", (event) => {
         savePreviousPlayer(currentPlayerTabId);
         const activeTab = document.querySelector('#importTab .nav-link.active');
-        if (activeTab.id === 'group-combat-tab') {
+        if (activeTab.id === 'private-sync-tab') {
+            return;
+        } else if (activeTab.id === 'group-combat-tab') {
             doGroupExport();
         } else if (activeTab.id === 'solo-tab') {
             doSoloExport();
@@ -3991,9 +4371,12 @@ function initImportExportModal() {
     });
 
     let importSetButton = document.getElementById("buttonImportSet");
-    importSetButton.addEventListener("click", (event) => {
+    importSetButton.addEventListener("click", async (event) => {
         const activeTab = document.querySelector('#importTab .nav-link.active');
-        if (activeTab.id === 'group-combat-tab') {
+        if (activeTab.id === 'private-sync-tab') {
+            doPrivateSnapshotImport();
+            return;
+        } else if (activeTab.id === 'group-combat-tab') {
             doGroupImport();
         } else if (activeTab.id === 'solo-tab') {
             doSoloImport();
@@ -4002,6 +4385,22 @@ function initImportExportModal() {
         updateUI();
         resetImportInputs();
     });
+
+    document.getElementById("buttonRefreshPrivateSnapshots")?.addEventListener("click", refreshPrivateSnapshots);
+    document.getElementById("selectPrivateSyncAccount")?.addEventListener("change", async () => {
+        populatePrivateSnapshotHistory();
+        await loadSelectedPrivateSnapshot();
+    });
+    document.getElementById("selectPrivateSyncHistory")?.addEventListener("change", loadSelectedPrivateSnapshot);
+    document.querySelectorAll("#importTab [data-bs-toggle=\"tab\"]").forEach(tab => {
+        tab.addEventListener("shown.bs.tab", async event => {
+            updateImportExportModalButtons();
+            if (event.target.id === "private-sync-tab" && !privateSnapshotGroups.length) {
+                await refreshPrivateSnapshots();
+            }
+        });
+    });
+    updateImportExportModalButtons();
 }
 
 function resetImportInputs() {

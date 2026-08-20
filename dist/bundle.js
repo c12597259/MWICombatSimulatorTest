@@ -1938,6 +1938,161 @@ function calculateFragmentTimeCosts({
 
 /***/ }),
 
+/***/ "./src/privateSnapshotStore.js":
+/*!*************************************!*\
+  !*** ./src/privateSnapshotStore.js ***!
+  \*************************************/
+/***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
+
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   buildPrivatePlayerImportData: () => (/* binding */ buildPrivatePlayerImportData),
+/* harmony export */   groupPrivateSnapshotSummaries: () => (/* binding */ groupPrivateSnapshotSummaries),
+/* harmony export */   normalizePrivateSnapshotSummaries: () => (/* binding */ normalizePrivateSnapshotSummaries)
+/* harmony export */ });
+const SNAPSHOT_ID_PATTERN = /^[0-9TZ-]+-[a-f0-9]{12}$/;
+
+function toTimestamp(value) {
+    const timestamp = Date.parse(String(value ?? ""));
+    return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function normalizeCharacterSummary(value) {
+    if (!value || typeof value !== "object") return null;
+    const characterId = String(value.characterId ?? "").trim();
+    if (!characterId) return null;
+    return {
+        characterId,
+        characterName: String(value.characterName ?? `#${characterId}`).trim() || `#${characterId}`,
+        gameMode: String(value.gameMode ?? "").trim(),
+        loadoutCount: Math.max(0, Math.trunc(Number(value.loadoutCount) || 0)),
+    };
+}
+
+function normalizeSnapshotSummary(value) {
+    if (!value || typeof value !== "object") return null;
+    const snapshotId = String(value.snapshotId ?? "").trim();
+    if (!SNAPSHOT_ID_PATTERN.test(snapshotId)) return null;
+    const characters = (Array.isArray(value.characters) ? value.characters : [])
+        .map(normalizeCharacterSummary)
+        .filter(Boolean);
+    if (!characters.length) return null;
+    return {
+        snapshotId,
+        receivedAt: String(value.receivedAt ?? ""),
+        exportedAt: String(value.exportedAt ?? ""),
+        characterCount: characters.length,
+        loadoutCount: Math.max(0, Math.trunc(Number(value.loadoutCount) || 0)),
+        characters,
+    };
+}
+
+function normalizePrivateSnapshotSummaries(value) {
+    return (Array.isArray(value) ? value : [])
+        .map(normalizeSnapshotSummary)
+        .filter(Boolean)
+        .sort((left, right) =>
+            toTimestamp(right.receivedAt) - toTimestamp(left.receivedAt)
+            || right.snapshotId.localeCompare(left.snapshotId)
+        );
+}
+
+function groupPrivateSnapshotSummaries(value) {
+    const snapshots = normalizePrivateSnapshotSummaries(value);
+    const parents = snapshots.map((_, index) => index);
+    const find = (index) => {
+        while (parents[index] !== index) {
+            parents[index] = parents[parents[index]];
+            index = parents[index];
+        }
+        return index;
+    };
+    const union = (left, right) => {
+        const leftRoot = find(left);
+        const rightRoot = find(right);
+        if (leftRoot !== rightRoot) parents[rightRoot] = leftRoot;
+    };
+    const characterIdSets = snapshots.map(snapshot =>
+        new Set(snapshot.characters.map(character => character.characterId))
+    );
+
+    for (let left = 0; left < snapshots.length; left += 1) {
+        for (let right = left + 1; right < snapshots.length; right += 1) {
+            if ([...characterIdSets[left]].some(characterId => characterIdSets[right].has(characterId))) {
+                union(left, right);
+            }
+        }
+    }
+
+    const grouped = new Map();
+    snapshots.forEach((snapshot, index) => {
+        const root = find(index);
+        const group = grouped.get(root) ?? [];
+        group.push(snapshot);
+        grouped.set(root, group);
+    });
+
+    return [...grouped.values()]
+        .map(groupSnapshots => {
+            groupSnapshots.sort((left, right) =>
+                toTimestamp(right.receivedAt) - toTimestamp(left.receivedAt)
+                || right.snapshotId.localeCompare(left.snapshotId)
+            );
+            const characterMap = new Map();
+            for (const snapshot of groupSnapshots) {
+                for (const character of snapshot.characters) {
+                    if (!characterMap.has(character.characterId)) {
+                        characterMap.set(character.characterId, character);
+                    }
+                }
+            }
+            const characters = [...characterMap.values()].sort((left, right) =>
+                left.characterName.localeCompare(right.characterName, "zh-CN")
+            );
+            return {
+                id: [...characterMap.keys()].sort().join("|"),
+                latestReceivedAt: groupSnapshots[0].receivedAt,
+                latestSnapshotId: groupSnapshots[0].snapshotId,
+                snapshots: groupSnapshots,
+                characters,
+            };
+        })
+        .sort((left, right) =>
+            toTimestamp(right.latestReceivedAt) - toTimestamp(left.latestReceivedAt)
+            || left.id.localeCompare(right.id)
+        );
+}
+
+function cloneJson(value) {
+    return JSON.parse(JSON.stringify(value));
+}
+
+function buildPrivatePlayerImportData({ snapshotId, character, loadout }) {
+    if (!SNAPSHOT_ID_PATTERN.test(String(snapshotId ?? ""))) {
+        throw new Error("Invalid private snapshot ID");
+    }
+    if (!character || typeof character !== "object" || !String(character.characterId ?? "").trim()) {
+        throw new Error("Invalid private snapshot character");
+    }
+    if (!loadout || typeof loadout !== "object" || !loadout.simulationInput?.player) {
+        throw new Error("Invalid private snapshot loadout");
+    }
+
+    const importData = cloneJson(loadout.simulationInput);
+    importData.characterName = String(character.characterName ?? "").trim()
+        || `#${String(character.characterId)}`;
+    importData.loadoutName = String(loadout.loadoutName ?? "").trim() || "Server loadout";
+    importData.privateSnapshot = {
+        snapshotId: String(snapshotId),
+        characterId: String(character.characterId),
+        gameMode: String(character.gameMode ?? ""),
+    };
+    return importData;
+}
+
+
+/***/ }),
+
 /***/ "./src/teamPresetStore.js":
 /*!********************************!*\
   !*** ./src/teamPresetStore.js ***!
@@ -2075,7 +2230,7 @@ function createTeamPresetId() {
   \************************/
 /***/ ((module) => {
 
-module.exports = /*#__PURE__*/JSON.parse('{"2026年5月5日":["更新装备数据和本地化名称"],"2026年4月7日":["增加字段显示迷宫尝试次数和迷宫成功率"],"2026年3月5日":["优化狂怒相关的模拟性能"],"2026年3月3日":["支持迷宫封印对应的个人增益"],"2026年2月24日":["更新迷宫补丁的数据","新增支持迷宫单体/批量模拟"],"2026年2月1日":["修正战斗等级计算的精度","修正地下城完成或失败后重新进入战斗的时间间隔 by wangchyan","修正诅咒和削弱的持续时间 by wangchyan","修正诅咒和狂怒的触发逻辑 by wangchyan","修正地下城团灭重置机制的部分逻辑 by wangchyan","修复守护光环和速度光环部分增益未正确受对应等级加强的异常 by wangchyan","修复无敌技能未正确影响韧性数值的缺陷 by wangchyan","修复初次进入战斗时未能优先吃喝的异常 by wangchyan","战斗时长相关的统计现在仅计算已完成的战斗，不再包含当前未结束的战斗 by wangchyan"],"2026年1月11日":["修复trigger错误计算已阵亡单位的问题 by wangchyan"],"2025年12月31日":["实验性功能新增HP/MP可视化图表 by wangchyan","修复防御伤害未正确受damge加成的异常 by wangchyan","修复守护光环的治疗加成效果未生效的异常 by wangchyan","修复快速治疗等技能未正确选择最低%生命为目标的错误 by wangchyan"],"2025年12月30日":["地下城增加最短完成时间记录"],"2025年12月24日":["修复技能释放选择的缺陷，之前可能存在异常缺蓝等情况"],"2025年12月18日":["支持成就系统及对应buff效果","地下城怪物的掉落不再生效"],"2025年12月6日":["修复游戏更新后技能在无trigger情况下由[]变为null时造成的异常"],"2025年11月7日":["兼容支持从CN镜像站调用API获取价格"],"2025年10月14日":["修复怪物攻击间隔数值未能适配攻击等级的问题"],"2025年9月17日":["修复暴击光环的trigger缺陷"],"2025年9月9日":["复活时不再错误的清空所有buff","团灭日志增加反伤、荆棘和DOT伤害记录"],"2025年8月21日":["增加单挑战斗批量模拟和对应怪物选项","增加MooPass和社区buff的选项及对应功能","精炼装备数值加强","秘法主教属性削弱","init_client_info_v1.20250819.0.json游戏数据更新"],"2025年8月20日":["修复经验和掉落计算在极端情况下的可能异常"],"2025年8月19日":["合并Test和Temp分支的rework内容","init_client_info_v1.20250818.0.json游戏数据更新"],"2025年8月18日":["修复贯穿技能可能对相同目标造成重复伤害的问题","修复团灭日志在黑夜模式下的显示异常","战斗等级公式更新","钟乳石魔像的荆棘数值调整","init_client_info_v1.20250626.0_0817.json游戏数据更新"],"2025年8月16日":["增加停止模拟按钮 by BKN46","增加技能顺序调整按钮 by BKN46","增加团灭日志 by TruthLight","怪物属性更新","奥术反射更名为报应","init_client_info_v1.20250626.0_0815.json游戏数据更新"],"2025年8月14日":["怪物属性更新","远程和法师装备属性调整","反伤计算上限调整","修复战斗间隔释放技能的异常","修复技能释放判断逻辑的异常","法力值耗尽比例更加准确","调整远程经验的15%和魔法经验的12%映射到攻击经验","init_client_info_v1.20250626.0_0813.json游戏数据更新"],"2025年8月11日":["怪物属性更新","近战和物理技能施法时间更新","盾击和重锤数值调整","双手盾防御经验加成调整","init_client_info_v1.20250626.0_0811.json游戏数据更新"],"2025年8月8日":["实现组队等级差过大时对掉落和经验的惩罚","实现怪物经验随狂暴进度百分比增加","暴击光环数值调整","增加战斗等级数值显示","增加等级差距惩罚数值显示","init_client_info_v1.20250626.0_0807.json游戏数据更新"],"2025年8月7日":["修复组队战斗时一些重复物品掉落数量异常的缺陷 by contr4l","init_client_info_v1.20250626.0_0806.json游戏数据更新"],"2025年8月3日":["怪物狂暴机制及对应trigger生效","精炼装备更新，护符数值调整，守护光环增加闪避率","init_client_info_v1.20250626.0_0802.json游戏数据更新","狂怒层数修正为5层","招架结算机制调整"],"2025年7月31日":["物品数据和怪物属性更新","尖刺外壳和奥术反射重做","强化数值更新","删除异常trigger","狮鹫盾的虚弱重做","君王剑招架对队友生效","狂怒特效最大层数修正为6层","涟漪特效增加10MP恢复","反伤正确显示其命中率","反伤机制调整","同步双手盾属性和反伤荆棘技能数值的调整"],"2025年7月22日":["暴击光环受远程等级加成","光环基础数值和等级加成调整"],"2025年7月17日":["批量模拟支持勾选星球","经验分配比例调整至30%+70%","光环及对应trigger，并按对应技能等级百分比加成","水火自然默认调整为元素光环","init_client_info_v1.20250626.0_0717.json游戏数据更新"],"2025年7月11日":["怪物经验和技能等级公式更新","闪避和抗性计算公式更新","力量更替为近战以及对应的兼容","init_client_info_v1.20250626.0_0711.json游戏数据更新"],"2025年7月10日":["修复贯穿技能由敌人释放时可能多次击中相同目标的缺陷"],"2025年7月9日":["掉落和掉率调整","经验调整","疫病射击和破甲之刺调整","怪物自动恢复移除","疫病射击trigger调整","获取价格使用官方API"],"2025年7月7日":["怪物属性缩放和地图多难度","法师技能调整和装备上\'技能伤害\'词缀生效","攻击等级和房屋等级对施法速度的影响生效","物品调整","精准重做以攻击等级计算","TEST 远程魔法经验的10%映射到攻击经验！","经验重做和护符装备"]}');
+module.exports = /*#__PURE__*/JSON.parse('{"2026年8月21日":["导入/导出新增服务器配装：支持按账号、历史快照、角色和配装导入到指定玩家槽位"],"2026年5月5日":["更新装备数据和本地化名称"],"2026年4月7日":["增加字段显示迷宫尝试次数和迷宫成功率"],"2026年3月5日":["优化狂怒相关的模拟性能"],"2026年3月3日":["支持迷宫封印对应的个人增益"],"2026年2月24日":["更新迷宫补丁的数据","新增支持迷宫单体/批量模拟"],"2026年2月1日":["修正战斗等级计算的精度","修正地下城完成或失败后重新进入战斗的时间间隔 by wangchyan","修正诅咒和削弱的持续时间 by wangchyan","修正诅咒和狂怒的触发逻辑 by wangchyan","修正地下城团灭重置机制的部分逻辑 by wangchyan","修复守护光环和速度光环部分增益未正确受对应等级加强的异常 by wangchyan","修复无敌技能未正确影响韧性数值的缺陷 by wangchyan","修复初次进入战斗时未能优先吃喝的异常 by wangchyan","战斗时长相关的统计现在仅计算已完成的战斗，不再包含当前未结束的战斗 by wangchyan"],"2026年1月11日":["修复trigger错误计算已阵亡单位的问题 by wangchyan"],"2025年12月31日":["实验性功能新增HP/MP可视化图表 by wangchyan","修复防御伤害未正确受damge加成的异常 by wangchyan","修复守护光环的治疗加成效果未生效的异常 by wangchyan","修复快速治疗等技能未正确选择最低%生命为目标的错误 by wangchyan"],"2025年12月30日":["地下城增加最短完成时间记录"],"2025年12月24日":["修复技能释放选择的缺陷，之前可能存在异常缺蓝等情况"],"2025年12月18日":["支持成就系统及对应buff效果","地下城怪物的掉落不再生效"],"2025年12月6日":["修复游戏更新后技能在无trigger情况下由[]变为null时造成的异常"],"2025年11月7日":["兼容支持从CN镜像站调用API获取价格"],"2025年10月14日":["修复怪物攻击间隔数值未能适配攻击等级的问题"],"2025年9月17日":["修复暴击光环的trigger缺陷"],"2025年9月9日":["复活时不再错误的清空所有buff","团灭日志增加反伤、荆棘和DOT伤害记录"],"2025年8月21日":["增加单挑战斗批量模拟和对应怪物选项","增加MooPass和社区buff的选项及对应功能","精炼装备数值加强","秘法主教属性削弱","init_client_info_v1.20250819.0.json游戏数据更新"],"2025年8月20日":["修复经验和掉落计算在极端情况下的可能异常"],"2025年8月19日":["合并Test和Temp分支的rework内容","init_client_info_v1.20250818.0.json游戏数据更新"],"2025年8月18日":["修复贯穿技能可能对相同目标造成重复伤害的问题","修复团灭日志在黑夜模式下的显示异常","战斗等级公式更新","钟乳石魔像的荆棘数值调整","init_client_info_v1.20250626.0_0817.json游戏数据更新"],"2025年8月16日":["增加停止模拟按钮 by BKN46","增加技能顺序调整按钮 by BKN46","增加团灭日志 by TruthLight","怪物属性更新","奥术反射更名为报应","init_client_info_v1.20250626.0_0815.json游戏数据更新"],"2025年8月14日":["怪物属性更新","远程和法师装备属性调整","反伤计算上限调整","修复战斗间隔释放技能的异常","修复技能释放判断逻辑的异常","法力值耗尽比例更加准确","调整远程经验的15%和魔法经验的12%映射到攻击经验","init_client_info_v1.20250626.0_0813.json游戏数据更新"],"2025年8月11日":["怪物属性更新","近战和物理技能施法时间更新","盾击和重锤数值调整","双手盾防御经验加成调整","init_client_info_v1.20250626.0_0811.json游戏数据更新"],"2025年8月8日":["实现组队等级差过大时对掉落和经验的惩罚","实现怪物经验随狂暴进度百分比增加","暴击光环数值调整","增加战斗等级数值显示","增加等级差距惩罚数值显示","init_client_info_v1.20250626.0_0807.json游戏数据更新"],"2025年8月7日":["修复组队战斗时一些重复物品掉落数量异常的缺陷 by contr4l","init_client_info_v1.20250626.0_0806.json游戏数据更新"],"2025年8月3日":["怪物狂暴机制及对应trigger生效","精炼装备更新，护符数值调整，守护光环增加闪避率","init_client_info_v1.20250626.0_0802.json游戏数据更新","狂怒层数修正为5层","招架结算机制调整"],"2025年7月31日":["物品数据和怪物属性更新","尖刺外壳和奥术反射重做","强化数值更新","删除异常trigger","狮鹫盾的虚弱重做","君王剑招架对队友生效","狂怒特效最大层数修正为6层","涟漪特效增加10MP恢复","反伤正确显示其命中率","反伤机制调整","同步双手盾属性和反伤荆棘技能数值的调整"],"2025年7月22日":["暴击光环受远程等级加成","光环基础数值和等级加成调整"],"2025年7月17日":["批量模拟支持勾选星球","经验分配比例调整至30%+70%","光环及对应trigger，并按对应技能等级百分比加成","水火自然默认调整为元素光环","init_client_info_v1.20250626.0_0717.json游戏数据更新"],"2025年7月11日":["怪物经验和技能等级公式更新","闪避和抗性计算公式更新","力量更替为近战以及对应的兼容","init_client_info_v1.20250626.0_0711.json游戏数据更新"],"2025年7月10日":["修复贯穿技能由敌人释放时可能多次击中相同目标的缺陷"],"2025年7月9日":["掉落和掉率调整","经验调整","疫病射击和破甲之刺调整","怪物自动恢复移除","疫病射击trigger调整","获取价格使用官方API"],"2025年7月7日":["怪物属性缩放和地图多难度","法师技能调整和装备上\'技能伤害\'词缀生效","攻击等级和房屋等级对施法速度的影响生效","物品调整","精准重做以攻击等级计算","TEST 远程魔法经验的10%映射到攻击经验！","经验重做和护符装备"]}');
 
 /***/ }),
 
@@ -2383,8 +2538,10 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _combatsimulator_data_achievementTierDetailMap_json__WEBPACK_IMPORTED_MODULE_17__ = __webpack_require__(/*! ./combatsimulator/data/achievementTierDetailMap.json */ "./src/combatsimulator/data/achievementTierDetailMap.json");
 /* harmony import */ var _combatsimulator_data_achievementDetailMap_json__WEBPACK_IMPORTED_MODULE_18__ = __webpack_require__(/*! ./combatsimulator/data/achievementDetailMap.json */ "./src/combatsimulator/data/achievementDetailMap.json");
 /* harmony import */ var _fragmentTimeCost_js__WEBPACK_IMPORTED_MODULE_19__ = __webpack_require__(/*! ./fragmentTimeCost.js */ "./src/fragmentTimeCost.js");
-/* harmony import */ var _teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__ = __webpack_require__(/*! ./teamPresetStore.js */ "./src/teamPresetStore.js");
-/* harmony import */ var _patchNote_json__WEBPACK_IMPORTED_MODULE_21__ = __webpack_require__(/*! ../patchNote.json */ "./patchNote.json");
+/* harmony import */ var _privateSnapshotStore_js__WEBPACK_IMPORTED_MODULE_20__ = __webpack_require__(/*! ./privateSnapshotStore.js */ "./src/privateSnapshotStore.js");
+/* harmony import */ var _teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__ = __webpack_require__(/*! ./teamPresetStore.js */ "./src/teamPresetStore.js");
+/* harmony import */ var _patchNote_json__WEBPACK_IMPORTED_MODULE_22__ = __webpack_require__(/*! ../patchNote.json */ "./patchNote.json");
+
 
 
 
@@ -2434,6 +2591,13 @@ let currentSimResults = {};
 let currentPlayerTabId = '1';
 let lastAutoLoadedTeamPresetTargetKey = null;
 const pendingImporterLoadoutNames = new Map();
+const PRIVATE_SYNC_BRIDGE_REQUEST = "mwi-private-sync-request-v1";
+const PRIVATE_SYNC_BRIDGE_RESPONSE = "mwi-private-sync-response-v1";
+const PRIVATE_SYNC_SELECTIONS_KEY = "mwiPrivateSyncSelections_v1";
+let privateSyncRequestCounter = 0;
+let privateSnapshotGroups = [];
+let privateSnapshotEnvelope = null;
+const privateSnapshotCache = new Map();
 let playerDataMap = {
     "1": "{\"player\":{\"attackLevel\":1,\"magicLevel\":1,\"meleeLevel\":1,\"rangedLevel\":1,\"defenseLevel\":1,\"staminaLevel\":1,\"intelligenceLevel\":1,\"equipment\":[]},\"food\":{\"/action_types/combat\":[{\"itemHrid\":\"\"},{\"itemHrid\":\"\"},{\"itemHrid\":\"\"}]},\"drinks\":{\"/action_types/combat\":[{\"itemHrid\":\"\"},{\"itemHrid\":\"\"},{\"itemHrid\":\"\"}]},\"abilities\":[{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"}],\"triggerMap\":{},\"zone\":\"/actions/combat/fly\",\"simulationTime\":\"100\",\"houseRooms\":{\"/house_rooms/dairy_barn\":0,\"/house_rooms/garden\":0,\"/house_rooms/log_shed\":0,\"/house_rooms/forge\":0,\"/house_rooms/workshop\":0,\"/house_rooms/sewing_parlor\":0,\"/house_rooms/kitchen\":0,\"/house_rooms/brewery\":0,\"/house_rooms/laboratory\":0,\"/house_rooms/dining_room\":0,\"/house_rooms/library\":0,\"/house_rooms/dojo\":0,\"/house_rooms/gym\":0,\"/house_rooms/armory\":0,\"/house_rooms/archery_range\":0,\"/house_rooms/mystical_study\":0,\"/house_rooms/observatory\":0},\"achievements\":{}}",
     "2": "{\"player\":{\"attackLevel\":1,\"magicLevel\":1,\"meleeLevel\":1,\"rangedLevel\":1,\"defenseLevel\":1,\"staminaLevel\":1,\"intelligenceLevel\":1,\"equipment\":[]},\"food\":{\"/action_types/combat\":[{\"itemHrid\":\"\"},{\"itemHrid\":\"\"},{\"itemHrid\":\"\"}]},\"drinks\":{\"/action_types/combat\":[{\"itemHrid\":\"\"},{\"itemHrid\":\"\"},{\"itemHrid\":\"\"}]},\"abilities\":[{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"}],\"triggerMap\":{},\"zone\":\"/actions/combat/fly\",\"simulationTime\":\"100\",\"houseRooms\":{\"/house_rooms/dairy_barn\":0,\"/house_rooms/garden\":0,\"/house_rooms/log_shed\":0,\"/house_rooms/forge\":0,\"/house_rooms/workshop\":0,\"/house_rooms/sewing_parlor\":0,\"/house_rooms/kitchen\":0,\"/house_rooms/brewery\":0,\"/house_rooms/laboratory\":0,\"/house_rooms/dining_room\":0,\"/house_rooms/library\":0,\"/house_rooms/dojo\":0,\"/house_rooms/gym\":0,\"/house_rooms/armory\":0,\"/house_rooms/archery_range\":0,\"/house_rooms/mystical_study\":0,\"/house_rooms/observatory\":0},\"achievements\":{}}",
@@ -6358,12 +6522,381 @@ function initErrorHandling() {
     });
 }
 
+function getPrivateSyncText(key, fallback, variables = {}) {
+    try {
+        const translationKey = `common:privateSync.${key}`;
+        const translated = i18next.t(translationKey, variables);
+        if (translated && translated !== translationKey && translated !== `privateSync.${key}`) {
+            return translated;
+        }
+    } catch (error) {
+        console.warn("Unable to translate private sync text.", error);
+    }
+    return Object.entries(variables).reduce(
+        (text, [name, value]) => text.replaceAll(`{{${name}}}`, String(value)),
+        fallback,
+    );
+}
+
+function setPrivateSnapshotStatus(message, style = "secondary") {
+    const status = document.getElementById("privateSnapshotStatus");
+    if (!status) return;
+    status.className = `alert alert-${style} py-2 mb-3`;
+    status.textContent = message;
+}
+
+function requestPrivateSyncBridge(action, payload = {}, timeoutMs = 30000) {
+    const requestId = `${Date.now()}-${++privateSyncRequestCounter}-${Math.random().toString(36).slice(2)}`;
+    return new Promise((resolve, reject) => {
+        let timeoutId;
+        const cleanup = () => {
+            if (timeoutId) clearTimeout(timeoutId);
+            window.removeEventListener("message", onMessage);
+        };
+        const onMessage = (event) => {
+            if (
+                event.origin !== location.origin
+                || event.data?.channel !== PRIVATE_SYNC_BRIDGE_RESPONSE
+                || event.data?.requestId !== requestId
+            ) {
+                return;
+            }
+            cleanup();
+            if (event.data.ok) resolve(event.data.data);
+            else reject(new Error(String(event.data.error || "Private sync request failed")));
+        };
+        timeoutId = setTimeout(() => {
+            cleanup();
+            reject(new Error(getPrivateSyncText(
+                "bridgeMissing",
+                "Private sync helper was not detected. Install the main-computer userscript and refresh the page.",
+            )));
+        }, timeoutMs);
+        window.addEventListener("message", onMessage);
+        window.postMessage({
+            channel: PRIVATE_SYNC_BRIDGE_REQUEST,
+            requestId,
+            action,
+            payload,
+        }, location.origin);
+    });
+}
+
+function formatPrivateSnapshotTime(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value || "-");
+    return date.toLocaleString();
+}
+
+function loadPrivateSyncSelections() {
+    try {
+        const value = JSON.parse(localStorage.getItem(PRIVATE_SYNC_SELECTIONS_KEY) || "{}");
+        return value && typeof value === "object" ? value : {};
+    } catch {
+        return {};
+    }
+}
+
+function savePrivateSyncSelection(characterId, values) {
+    try {
+        const selections = loadPrivateSyncSelections();
+        selections[characterId] = { ...(selections[characterId] || {}), ...values };
+        localStorage.setItem(PRIVATE_SYNC_SELECTIONS_KEY, JSON.stringify(selections));
+    } catch (error) {
+        console.warn("Unable to save private sync selection.", error);
+    }
+}
+
+function getPrivateAccountLabel(group, index) {
+    const names = group.characters.map(character => character.characterName).join(" / ");
+    return getPrivateSyncText("accountLabel", "Account {{index}} · {{names}}", {
+        index: index + 1,
+        names,
+    });
+}
+
+function populatePrivateSnapshotHistory() {
+    const accountSelect = document.getElementById("selectPrivateSyncAccount");
+    const historySelect = document.getElementById("selectPrivateSyncHistory");
+    if (!accountSelect || !historySelect) return;
+    const group = privateSnapshotGroups.find(candidate => candidate.id === accountSelect.value);
+    historySelect.replaceChildren();
+    for (const snapshot of group?.snapshots ?? []) {
+        historySelect.add(new Option(getPrivateSyncText(
+            "snapshotLabel",
+            "{{time}} · {{characters}} characters · {{loadouts}} loadouts",
+            {
+                time: formatPrivateSnapshotTime(snapshot.receivedAt),
+                characters: snapshot.characterCount,
+                loadouts: snapshot.loadoutCount,
+            },
+        ), snapshot.snapshotId));
+    }
+}
+
+function renderPrivateSnapshotCharacters(envelope) {
+    const container = document.getElementById("privateSnapshotCharacters");
+    if (!container) return;
+    container.replaceChildren();
+    const characters = [...(Array.isArray(envelope?.snapshot?.characters)
+        ? envelope.snapshot.characters
+        : [])].sort((left, right) => {
+        const modeOrder = (left.gameMode === "standard" ? 0 : 1) - (right.gameMode === "standard" ? 0 : 1);
+        return modeOrder || String(left.characterName).localeCompare(String(right.characterName), "zh-CN");
+    });
+    const savedSelections = loadPrivateSyncSelections();
+
+    characters.forEach((character, index) => {
+        const characterId = String(character.characterId || "");
+        const saved = savedSelections[characterId] || {};
+        const card = document.createElement("div");
+        card.className = "card card-body py-2 private-snapshot-character";
+        card.dataset.characterId = characterId;
+
+        const heading = document.createElement("div");
+        heading.className = "d-flex align-items-center gap-2 mb-2";
+        const include = document.createElement("input");
+        include.type = "checkbox";
+        include.className = "form-check-input mt-0 private-snapshot-include";
+        include.checked = true;
+        include.id = `privateSnapshotCharacter${index}`;
+        const name = document.createElement("label");
+        name.className = "form-check-label fw-semibold";
+        name.htmlFor = include.id;
+        name.textContent = String(character.characterName || `#${characterId}`);
+        const mode = document.createElement("span");
+        mode.className = `badge ${character.gameMode === "standard" ? "text-bg-primary" : "text-bg-warning"}`;
+        mode.textContent = character.gameMode === "standard"
+            ? getPrivateSyncText("modeStandard", "Standard")
+            : getPrivateSyncText("modeIroncow", "Ironcow");
+        heading.append(include, name, mode);
+
+        const controls = document.createElement("div");
+        controls.className = "row g-2";
+        const loadoutColumn = document.createElement("div");
+        loadoutColumn.className = "col-md-8";
+        const loadoutLabel = document.createElement("label");
+        loadoutLabel.className = "form-label small mb-1";
+        loadoutLabel.textContent = getPrivateSyncText("loadout", "Loadout");
+        const loadoutSelect = document.createElement("select");
+        loadoutSelect.className = "form-select form-select-sm private-snapshot-loadout";
+        for (const loadout of (Array.isArray(character.loadouts) ? character.loadouts : [])) {
+            loadoutSelect.add(new Option(String(loadout.loadoutName || loadout.loadoutId), String(loadout.loadoutId)));
+        }
+        if ([...loadoutSelect.options].some(option => option.value === saved.loadoutId)) {
+            loadoutSelect.value = saved.loadoutId;
+        }
+        loadoutSelect.addEventListener("change", () =>
+            savePrivateSyncSelection(characterId, { loadoutId: loadoutSelect.value })
+        );
+        loadoutColumn.append(loadoutLabel, loadoutSelect);
+
+        const slotColumn = document.createElement("div");
+        slotColumn.className = "col-md-4";
+        const slotLabel = document.createElement("label");
+        slotLabel.className = "form-label small mb-1";
+        slotLabel.textContent = getPrivateSyncText("slot", "Import slot");
+        const slotSelect = document.createElement("select");
+        slotSelect.className = "form-select form-select-sm private-snapshot-slot";
+        for (let slot = 1; slot <= 5; slot += 1) {
+            slotSelect.add(new Option(`Player ${slot}`, String(slot)));
+        }
+        const defaultSlot = String(saved.slot || Math.min(index + 1, 5));
+        slotSelect.value = defaultSlot;
+        slotSelect.addEventListener("change", () =>
+            savePrivateSyncSelection(characterId, { slot: slotSelect.value })
+        );
+        slotColumn.append(slotLabel, slotSelect);
+        controls.append(loadoutColumn, slotColumn);
+        card.append(heading, controls);
+        container.append(card);
+    });
+}
+
+async function loadSelectedPrivateSnapshot() {
+    const historySelect = document.getElementById("selectPrivateSyncHistory");
+    const snapshotId = historySelect?.value || "";
+    if (!snapshotId) {
+        privateSnapshotEnvelope = null;
+        renderPrivateSnapshotCharacters(null);
+        return;
+    }
+    setPrivateSnapshotStatus(getPrivateSyncText(
+        "loadingSnapshot",
+        "Loading the selected snapshot…",
+    ), "info");
+    try {
+        const envelope = privateSnapshotCache.get(snapshotId)
+            ?? await requestPrivateSyncBridge("getSnapshot", { snapshotId });
+        privateSnapshotCache.set(snapshotId, envelope);
+        privateSnapshotEnvelope = envelope;
+        renderPrivateSnapshotCharacters(envelope);
+        const characterCount = envelope?.snapshot?.characters?.length ?? 0;
+        setPrivateSnapshotStatus(getPrivateSyncText(
+            "ready",
+            "Snapshot ready: {{characters}} characters.",
+            { characters: characterCount },
+        ), "success");
+    } catch (error) {
+        privateSnapshotEnvelope = null;
+        renderPrivateSnapshotCharacters(null);
+        setPrivateSnapshotStatus(getPrivateSyncText(
+            "loadError",
+            "Unable to read the server: {{error}}",
+            { error: error.message },
+        ), "danger");
+    }
+}
+
+async function refreshPrivateSnapshots() {
+    const accountSelect = document.getElementById("selectPrivateSyncAccount");
+    const historySelect = document.getElementById("selectPrivateSyncHistory");
+    const refreshButton = document.getElementById("buttonRefreshPrivateSnapshots");
+    if (!accountSelect || !historySelect || !refreshButton) return;
+    refreshButton.disabled = true;
+    setPrivateSnapshotStatus(getPrivateSyncText("loading", "Loading server snapshots…"), "info");
+    try {
+        const bridge = await requestPrivateSyncBridge("ping", {}, 4000);
+        if (!bridge?.canRead) {
+            throw new Error(getPrivateSyncText(
+                "readTokenMissing",
+                "The private sync helper has no read token. Install the main-computer userscript.",
+            ));
+        }
+        const result = await requestPrivateSyncBridge("listSnapshotSummaries", { limit: 100 }, 60000);
+        privateSnapshotGroups = (0,_privateSnapshotStore_js__WEBPACK_IMPORTED_MODULE_20__.groupPrivateSnapshotSummaries)(result?.snapshots);
+        privateSnapshotCache.clear();
+        privateSnapshotEnvelope = null;
+        const previousAccount = accountSelect.value;
+        accountSelect.replaceChildren();
+        privateSnapshotGroups.forEach((group, index) => {
+            accountSelect.add(new Option(getPrivateAccountLabel(group, index), group.id));
+        });
+        if (privateSnapshotGroups.some(group => group.id === previousAccount)) {
+            accountSelect.value = previousAccount;
+        }
+        if (!privateSnapshotGroups.length) {
+            historySelect.replaceChildren();
+            renderPrivateSnapshotCharacters(null);
+            setPrivateSnapshotStatus(getPrivateSyncText("empty", "No snapshots are available on the server."), "secondary");
+            return;
+        }
+        populatePrivateSnapshotHistory();
+        await loadSelectedPrivateSnapshot();
+    } catch (error) {
+        privateSnapshotGroups = [];
+        privateSnapshotEnvelope = null;
+        accountSelect.replaceChildren();
+        historySelect.replaceChildren();
+        renderPrivateSnapshotCharacters(null);
+        setPrivateSnapshotStatus(getPrivateSyncText(
+            "loadError",
+            "Unable to read the server: {{error}}",
+            { error: error.message },
+        ), "danger");
+    } finally {
+        refreshButton.disabled = false;
+    }
+}
+
+function doPrivateSnapshotImport() {
+    if (!privateSnapshotEnvelope?.snapshot) {
+        setPrivateSnapshotStatus(getPrivateSyncText(
+            "selectSnapshot",
+            "Load a server snapshot before importing.",
+        ), "warning");
+        return false;
+    }
+    const snapshotId = String(privateSnapshotEnvelope?.snapshotId || "");
+    const characters = Array.isArray(privateSnapshotEnvelope?.snapshot?.characters)
+        ? privateSnapshotEnvelope.snapshot.characters
+        : [];
+    const selected = [...document.querySelectorAll(".private-snapshot-character")]
+        .filter(card => card.querySelector(".private-snapshot-include")?.checked)
+        .map(card => ({
+            characterId: card.dataset.characterId,
+            loadoutId: card.querySelector(".private-snapshot-loadout")?.value || "",
+            slot: card.querySelector(".private-snapshot-slot")?.value || "",
+        }));
+    if (!selected.length) {
+        setPrivateSnapshotStatus(getPrivateSyncText(
+            "selectAtLeastOne",
+            "Select at least one character.",
+        ), "warning");
+        return false;
+    }
+    const slots = selected.map(selection => selection.slot);
+    if (new Set(slots).size !== slots.length) {
+        setPrivateSnapshotStatus(getPrivateSyncText(
+            "duplicateSlot",
+            "Each character must use a different import slot.",
+        ), "warning");
+        return false;
+    }
+
+    const importedSlots = [];
+    try {
+        const preparedImports = selected.map(selection => {
+            const character = characters.find(candidate => String(candidate.characterId) === selection.characterId);
+            const loadout = character?.loadouts?.find(candidate => String(candidate.loadoutId) === selection.loadoutId);
+            return {
+                ...selection,
+                importData: (0,_privateSnapshotStore_js__WEBPACK_IMPORTED_MODULE_20__.buildPrivatePlayerImportData)({ snapshotId, character, loadout }),
+            };
+        });
+        savePreviousPlayer(currentPlayerTabId);
+        for (const prepared of preparedImports) {
+            playerDataMap[prepared.slot] = JSON.stringify(prepared.importData);
+            const tab = document.getElementById(`player${prepared.slot}-tab`);
+            if (tab) tab.textContent = prepared.importData.characterName;
+            document.querySelectorAll(`label[for="player${prepared.slot}"]`).forEach(label => {
+                label.textContent = prepared.importData.characterName;
+            });
+            const checkbox = document.getElementById(`player${prepared.slot}`);
+            if (checkbox) checkbox.checked = true;
+            savePrivateSyncSelection(prepared.characterId, {
+                loadoutId: prepared.loadoutId,
+                slot: prepared.slot,
+            });
+            importedSlots.push(prepared.slot);
+        }
+    } catch (error) {
+        setPrivateSnapshotStatus(getPrivateSyncText(
+            "importError",
+            "Unable to import the selected loadouts: {{error}}",
+            { error: error.message },
+        ), "danger");
+        return false;
+    }
+
+    updateTeamPresetPlayerLabels();
+    if (importedSlots.includes(currentPlayerTabId)) {
+        updateNextPlayer(currentPlayerTabId);
+        updateState();
+        updateUI();
+    }
+    setPrivateSnapshotStatus(getPrivateSyncText(
+        "imported",
+        "Imported {{count}} characters from the server.",
+        { count: importedSlots.length },
+    ), "success");
+    return true;
+}
+
+function updateImportExportModalButtons() {
+    const activeTab = document.querySelector("#importTab .nav-link.active");
+    const exportButton = document.getElementById("buttonExportSet");
+    if (exportButton) exportButton.hidden = activeTab?.id === "private-sync-tab";
+}
+
 function initImportExportModal() {
     let exportSetButton = document.getElementById("buttonExportSet");
     exportSetButton.addEventListener("click", (event) => {
         savePreviousPlayer(currentPlayerTabId);
         const activeTab = document.querySelector('#importTab .nav-link.active');
-        if (activeTab.id === 'group-combat-tab') {
+        if (activeTab.id === 'private-sync-tab') {
+            return;
+        } else if (activeTab.id === 'group-combat-tab') {
             doGroupExport();
         } else if (activeTab.id === 'solo-tab') {
             doSoloExport();
@@ -6371,9 +6904,12 @@ function initImportExportModal() {
     });
 
     let importSetButton = document.getElementById("buttonImportSet");
-    importSetButton.addEventListener("click", (event) => {
+    importSetButton.addEventListener("click", async (event) => {
         const activeTab = document.querySelector('#importTab .nav-link.active');
-        if (activeTab.id === 'group-combat-tab') {
+        if (activeTab.id === 'private-sync-tab') {
+            doPrivateSnapshotImport();
+            return;
+        } else if (activeTab.id === 'group-combat-tab') {
             doGroupImport();
         } else if (activeTab.id === 'solo-tab') {
             doSoloImport();
@@ -6382,6 +6918,22 @@ function initImportExportModal() {
         updateUI();
         resetImportInputs();
     });
+
+    document.getElementById("buttonRefreshPrivateSnapshots")?.addEventListener("click", refreshPrivateSnapshots);
+    document.getElementById("selectPrivateSyncAccount")?.addEventListener("change", async () => {
+        populatePrivateSnapshotHistory();
+        await loadSelectedPrivateSnapshot();
+    });
+    document.getElementById("selectPrivateSyncHistory")?.addEventListener("change", loadSelectedPrivateSnapshot);
+    document.querySelectorAll("#importTab [data-bs-toggle=\"tab\"]").forEach(tab => {
+        tab.addEventListener("shown.bs.tab", async event => {
+            updateImportExportModalButtons();
+            if (event.target.id === "private-sync-tab" && !privateSnapshotGroups.length) {
+                await refreshPrivateSnapshots();
+            }
+        });
+    });
+    updateImportExportModalButtons();
 }
 
 function resetImportInputs() {
@@ -6985,7 +7537,7 @@ function refreshTeamPresetControls({ allowAutoLoad = false, preferredPresetId = 
     const presetSelect = document.getElementById("selectTeamPreset");
     const presetNameInput = document.getElementById("inputTeamPresetName");
     const targetLabel = document.getElementById("teamPresetTargetLabel");
-    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.loadTeamPresetStore)();
+    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.loadTeamPresetStore)();
     document.getElementById("autoLoadTeamPreset").checked = store.autoLoad;
 
     presetSelect.replaceChildren();
@@ -7007,13 +7559,13 @@ function refreshTeamPresetControls({ allowAutoLoad = false, preferredPresetId = 
         return;
     }
 
-    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.createTeamPresetTargetKey)(target);
+    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.createTeamPresetTargetKey)(target);
     const targetChanged = lastAutoLoadedTeamPresetTargetKey !== targetKey;
     if (allowAutoLoad) {
         lastAutoLoadedTeamPresetTargetKey = targetKey;
     }
-    const presets = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.getTeamPresetsForTarget)(store, targetKey);
-    const defaultPreset = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.getDefaultTeamPreset)(store, targetKey);
+    const presets = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.getTeamPresetsForTarget)(store, targetKey);
+    const defaultPreset = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.getDefaultTeamPreset)(store, targetKey);
     const previousSelection = preferredPresetId ?? presetSelect.dataset.selectedPresetId ?? "";
 
     presetSelect.add(new Option(getTeamPresetText("newPreset", "+ New preset..."), ""));
@@ -7081,8 +7633,8 @@ function captureCurrentTeamPreset(selectedPlayerNumbers) {
 }
 
 function persistTeamPreset(target, name, snapshot, existingPresetId = "") {
-    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.loadTeamPresetStore)();
-    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.createTeamPresetTargetKey)(target);
+    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.loadTeamPresetStore)();
+    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.createTeamPresetTargetKey)(target);
     const existingPreset = store.presets.find((preset) =>
         preset.id === existingPresetId && preset.targetKey === targetKey
     );
@@ -7096,7 +7648,7 @@ function persistTeamPreset(target, name, snapshot, existingPresetId = "") {
     }
 
     const now = new Date().toISOString();
-    const presetId = existingPreset?.id ?? (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.createTeamPresetId)();
+    const presetId = existingPreset?.id ?? (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.createTeamPresetId)();
     const preset = {
         id: presetId,
         name,
@@ -7119,7 +7671,7 @@ function persistTeamPreset(target, name, snapshot, existingPresetId = "") {
     }
 
     try {
-        (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.saveTeamPresetStore)(store);
+        (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.saveTeamPresetStore)(store);
     } catch (error) {
         console.error("Unable to save team preset.", error);
         return { status: "error", error };
@@ -7231,8 +7783,8 @@ function loadTeamPreset(presetId) {
         return;
     }
 
-    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.createTeamPresetTargetKey)(target);
-    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.loadTeamPresetStore)();
+    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.createTeamPresetTargetKey)(target);
+    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.loadTeamPresetStore)();
     const preset = store.presets.find((candidate) =>
         candidate.id === presetId && candidate.targetKey === targetKey
     );
@@ -7306,8 +7858,8 @@ function setDefaultTeamPreset() {
         return;
     }
 
-    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.createTeamPresetTargetKey)(target);
-    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.loadTeamPresetStore)();
+    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.createTeamPresetTargetKey)(target);
+    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.loadTeamPresetStore)();
     const preset = store.presets.find((candidate) =>
         candidate.id === presetId && candidate.targetKey === targetKey
     );
@@ -7317,7 +7869,7 @@ function setDefaultTeamPreset() {
 
     store.defaults[targetKey] = preset.id;
     try {
-        (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.saveTeamPresetStore)(store);
+        (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.saveTeamPresetStore)(store);
     } catch (error) {
         console.error("Unable to set the default team preset.", error);
         setTeamPresetStatus(
@@ -7341,8 +7893,8 @@ function deleteTeamPreset() {
         return;
     }
 
-    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.createTeamPresetTargetKey)(target);
-    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.loadTeamPresetStore)();
+    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.createTeamPresetTargetKey)(target);
+    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.loadTeamPresetStore)();
     const preset = store.presets.find((candidate) =>
         candidate.id === presetId && candidate.targetKey === targetKey
     );
@@ -7364,7 +7916,7 @@ function deleteTeamPreset() {
         delete store.defaults[targetKey];
     }
     try {
-        (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.saveTeamPresetStore)(store);
+        (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.saveTeamPresetStore)(store);
     } catch (error) {
         console.error("Unable to delete team preset.", error);
         setTeamPresetStatus(
@@ -7435,7 +7987,7 @@ function initTeamPresets() {
 
     document.getElementById("selectTeamPreset").addEventListener("change", (event) => {
         event.target.dataset.selectedPresetId = event.target.value;
-        const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.loadTeamPresetStore)();
+        const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.loadTeamPresetStore)();
         const selectedPreset = store.presets.find((preset) => preset.id === event.target.value);
         document.getElementById("inputTeamPresetName").value = selectedPreset?.name ?? "";
         updateTeamPresetActionButtons();
@@ -7448,10 +8000,10 @@ function initTeamPresets() {
     document.getElementById("buttonDefaultTeamPreset").addEventListener("click", setDefaultTeamPreset);
     document.getElementById("buttonDeleteTeamPreset").addEventListener("click", deleteTeamPreset);
     document.getElementById("autoLoadTeamPreset").addEventListener("change", (event) => {
-        const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.loadTeamPresetStore)();
+        const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.loadTeamPresetStore)();
         store.autoLoad = event.target.checked;
         try {
-            (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.saveTeamPresetStore)(store);
+            (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.saveTeamPresetStore)(store);
         } catch (error) {
             console.error("Unable to update team preset auto-load.", error);
             event.target.checked = !event.target.checked;
@@ -7688,14 +8240,14 @@ function updateTable(tableId, item, price) {
 
 function initPatchNotes() {
     const patchNotesRows = document.getElementById("patchNotes");
-    for (const pn in _patchNote_json__WEBPACK_IMPORTED_MODULE_21__) {
+    for (const pn in _patchNote_json__WEBPACK_IMPORTED_MODULE_22__) {
         const patchNoteContainer = document.createElement("div");
         patchNotesRows.setAttribute('class', 'col-12 mb-4');
 
         const patchNoteElement = document.createElement("h6");
         patchNoteElement.innerHTML = pn;
         const patchNoteList = document.createElement("ul");
-        for (const note of _patchNote_json__WEBPACK_IMPORTED_MODULE_21__[pn]) {
+        for (const note of _patchNote_json__WEBPACK_IMPORTED_MODULE_22__[pn]) {
             const noteElement = document.createElement("li");
             noteElement.innerHTML = note;
             patchNoteList.appendChild(noteElement);
