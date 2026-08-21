@@ -1938,6 +1938,342 @@ function calculateFragmentTimeCosts({
 
 /***/ }),
 
+/***/ "./src/teamPresetComparison.js":
+/*!*************************************!*\
+  !*** ./src/teamPresetComparison.js ***!
+  \*************************************/
+/***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
+
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   comparePlayerLoadouts: () => (/* binding */ comparePlayerLoadouts),
+/* harmony export */   compareTeamPresetWithCurrent: () => (/* binding */ compareTeamPresetWithCurrent)
+/* harmony export */ });
+const PLAYER_LEVEL_FIELDS = [
+    "staminaLevel",
+    "intelligenceLevel",
+    "attackLevel",
+    "meleeLevel",
+    "defenseLevel",
+    "rangedLevel",
+    "magicLevel",
+];
+
+const VALID_PLAYER_SLOTS = new Set(["1", "2", "3", "4", "5"]);
+
+function isPlainObject(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function parsePlayerData(value, slot) {
+    try {
+        const parsed = typeof value === "string" ? JSON.parse(value) : value;
+        if (!isPlainObject(parsed)) {
+            throw new TypeError("Player data must be an object.");
+        }
+        return parsed;
+    } catch (error) {
+        const wrappedError = new Error(`Invalid player data in slot ${slot}.`);
+        wrappedError.cause = error;
+        wrappedError.slot = slot;
+        throw wrappedError;
+    }
+}
+
+function normalizeNumber(value, fallback = 0) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+}
+
+function normalizePlayerSlots(values) {
+    if (!Array.isArray(values)) {
+        return [];
+    }
+    return [...new Set(values.map(String).filter((slot) => VALID_PLAYER_SLOTS.has(slot)))]
+        .sort((left, right) => Number(left) - Number(right));
+}
+
+function normalizeEquipmentLocation(itemLocationHrid) {
+    const location = String(itemLocationHrid || "");
+    if (location.endsWith("/main_hand") || location.endsWith("/two_hand")) {
+        return "/item_locations/weapon";
+    }
+    return location;
+}
+
+function normalizeEquipment(playerData) {
+    const equipmentMap = new Map();
+    const equipment = Array.isArray(playerData?.player?.equipment)
+        ? playerData.player.equipment
+        : [];
+
+    for (const item of equipment) {
+        if (!isPlainObject(item) || !item.itemHrid) {
+            continue;
+        }
+        const locationHrid = normalizeEquipmentLocation(item.itemLocationHrid);
+        if (!locationHrid) {
+            continue;
+        }
+        equipmentMap.set(locationHrid, {
+            itemHrid: String(item.itemHrid),
+            enhancementLevel: normalizeNumber(item.enhancementLevel),
+        });
+    }
+    return equipmentMap;
+}
+
+function normalizeAbilities(playerData) {
+    const abilities = Array.isArray(playerData?.abilities) ? playerData.abilities : [];
+    const slotCount = Math.max(5, abilities.length);
+    return Array.from({ length: slotCount }, (_, index) => {
+        const ability = isPlainObject(abilities[index]) ? abilities[index] : {};
+        const abilityHrid = String(ability.abilityHrid || "");
+        return {
+            abilityHrid,
+            level: abilityHrid ? normalizeNumber(ability.level, 1) : 1,
+        };
+    });
+}
+
+function normalizeConsumables(playerData, type) {
+    const container = playerData?.[type];
+    const consumables = Array.isArray(container)
+        ? container
+        : (Array.isArray(container?.["/action_types/combat"])
+            ? container["/action_types/combat"]
+            : []);
+    const slotCount = Math.max(3, consumables.length);
+    return Array.from({ length: slotCount }, (_, index) => {
+        const consumable = isPlainObject(consumables[index]) ? consumables[index] : {};
+        return String(consumable.itemHrid || "");
+    });
+}
+
+function deepDifferenceCount(left, right) {
+    if (Object.is(left, right)) {
+        return 0;
+    }
+
+    if (Array.isArray(left) || Array.isArray(right)) {
+        const leftArray = Array.isArray(left) ? left : [];
+        const rightArray = Array.isArray(right) ? right : [];
+        let differenceCount = 0;
+        const length = Math.max(leftArray.length, rightArray.length);
+        for (let index = 0; index < length; index += 1) {
+            differenceCount += deepDifferenceCount(leftArray[index], rightArray[index]);
+        }
+        return differenceCount;
+    }
+
+    if (isPlainObject(left) || isPlainObject(right)) {
+        const leftObject = isPlainObject(left) ? left : {};
+        const rightObject = isPlainObject(right) ? right : {};
+        let differenceCount = 0;
+        const keys = new Set([...Object.keys(leftObject), ...Object.keys(rightObject)]);
+        for (const key of keys) {
+            differenceCount += deepDifferenceCount(leftObject[key], rightObject[key]);
+        }
+        return differenceCount;
+    }
+
+    return 1;
+}
+
+function compareLevelChanges(baseline, current, changes) {
+    for (const field of PLAYER_LEVEL_FIELDS) {
+        const baselineValue = field === "meleeLevel"
+            ? baseline?.player?.[field] ?? baseline?.player?.powerLevel
+            : baseline?.player?.[field];
+        const currentValue = field === "meleeLevel"
+            ? current?.player?.[field] ?? current?.player?.powerLevel
+            : current?.player?.[field];
+        const before = normalizeNumber(baselineValue, 1);
+        const after = normalizeNumber(currentValue, 1);
+        if (before !== after) {
+            changes.push({ kind: "level", section: "levels", field, before, after });
+        }
+    }
+}
+
+function compareEquipmentChanges(baseline, current, changes) {
+    const baselineEquipment = normalizeEquipment(baseline);
+    const currentEquipment = normalizeEquipment(current);
+    const locations = [...new Set([...baselineEquipment.keys(), ...currentEquipment.keys()])].sort();
+
+    for (const locationHrid of locations) {
+        const before = baselineEquipment.get(locationHrid) ?? null;
+        const after = currentEquipment.get(locationHrid) ?? null;
+        if (
+            before?.itemHrid !== after?.itemHrid ||
+            before?.enhancementLevel !== after?.enhancementLevel
+        ) {
+            changes.push({ kind: "equipment", section: "equipment", locationHrid, before, after });
+        }
+    }
+}
+
+function compareAbilityChanges(baseline, current, changes) {
+    const baselineAbilities = normalizeAbilities(baseline);
+    const currentAbilities = normalizeAbilities(current);
+    const slotCount = Math.max(baselineAbilities.length, currentAbilities.length);
+
+    for (let index = 0; index < slotCount; index += 1) {
+        const before = baselineAbilities[index] ?? { abilityHrid: "", level: 1 };
+        const after = currentAbilities[index] ?? { abilityHrid: "", level: 1 };
+        if (before.abilityHrid !== after.abilityHrid || before.level !== after.level) {
+            changes.push({ kind: "ability", section: "abilities", index, before, after });
+        }
+    }
+}
+
+function compareConsumableChanges(baseline, current, type, changes) {
+    const baselineConsumables = normalizeConsumables(baseline, type);
+    const currentConsumables = normalizeConsumables(current, type);
+    const slotCount = Math.max(baselineConsumables.length, currentConsumables.length);
+
+    for (let index = 0; index < slotCount; index += 1) {
+        const before = baselineConsumables[index] || "";
+        const after = currentConsumables[index] || "";
+        if (before !== after) {
+            changes.push({
+                kind: "consumable",
+                section: type,
+                consumableType: type,
+                index,
+                before,
+                after,
+            });
+        }
+    }
+}
+
+function compareTriggerChanges(baseline, current, changes) {
+    const before = isPlainObject(baseline?.triggerMap) ? baseline.triggerMap : {};
+    const after = isPlainObject(current?.triggerMap) ? current.triggerMap : {};
+    const differenceCount = deepDifferenceCount(before, after);
+    if (differenceCount > 0) {
+        changes.push({
+            kind: "triggers",
+            section: "triggers",
+            before,
+            after,
+            beforeCount: Object.keys(before).length,
+            afterCount: Object.keys(after).length,
+            differenceCount,
+        });
+    }
+}
+
+function compareNumberMapChanges(baselineMap, currentMap, kind, section, changes) {
+    const beforeMap = isPlainObject(baselineMap) ? baselineMap : {};
+    const afterMap = isPlainObject(currentMap) ? currentMap : {};
+    const keys = [...new Set([...Object.keys(beforeMap), ...Object.keys(afterMap)])].sort();
+    for (const hrid of keys) {
+        const before = normalizeNumber(beforeMap[hrid]);
+        const after = normalizeNumber(afterMap[hrid]);
+        if (before !== after) {
+            changes.push({ kind, section, hrid, before, after });
+        }
+    }
+}
+
+function compareAchievementChanges(baseline, current, changes) {
+    const beforeMap = isPlainObject(baseline?.achievements) ? baseline.achievements : {};
+    const afterMap = isPlainObject(current?.achievements) ? current.achievements : {};
+    const keys = [...new Set([...Object.keys(beforeMap), ...Object.keys(afterMap)])].sort();
+    for (const hrid of keys) {
+        const before = beforeMap[hrid] === true;
+        const after = afterMap[hrid] === true;
+        if (before !== after) {
+            changes.push({ kind: "achievement", section: "achievements", hrid, before, after });
+        }
+    }
+}
+
+function getCharacterIdentity(playerData) {
+    const id = playerData?.characterId ?? playerData?.characterMeta?.id;
+    const name = playerData?.characterName ?? playerData?.characterMeta?.name;
+    return {
+        id: id === undefined || id === null ? "" : String(id),
+        name: typeof name === "string" ? name.trim() : "",
+    };
+}
+
+function comparePlayerLoadouts(baseline, current) {
+    const changes = [];
+    const baselineIdentity = getCharacterIdentity(baseline);
+    const currentIdentity = getCharacterIdentity(current);
+    const idsChanged = baselineIdentity.id && currentIdentity.id && baselineIdentity.id !== currentIdentity.id;
+    const namesChanged = !baselineIdentity.id && !currentIdentity.id &&
+        baselineIdentity.name && currentIdentity.name && baselineIdentity.name !== currentIdentity.name;
+    if (idsChanged || namesChanged) {
+        changes.push({
+            kind: "character",
+            section: "team",
+            before: baselineIdentity,
+            after: currentIdentity,
+        });
+    }
+
+    compareLevelChanges(baseline, current, changes);
+    compareEquipmentChanges(baseline, current, changes);
+    compareAbilityChanges(baseline, current, changes);
+    compareConsumableChanges(baseline, current, "food", changes);
+    compareConsumableChanges(baseline, current, "drinks", changes);
+    compareTriggerChanges(baseline, current, changes);
+    compareNumberMapChanges(baseline?.houseRooms, current?.houseRooms, "houseRoom", "houseRooms", changes);
+    compareAchievementChanges(baseline, current, changes);
+    return changes;
+}
+
+function compareTeamPresetWithCurrent(preset, currentPlayerDataMap, currentSelectedPlayers) {
+    if (!isPlainObject(preset) || !isPlainObject(preset.playerDataMap)) {
+        throw new TypeError("A valid team preset is required.");
+    }
+
+    const baselineSlots = normalizePlayerSlots(preset.selectedPlayers);
+    const currentSlots = normalizePlayerSlots(currentSelectedPlayers);
+    const allSlots = [...new Set([...baselineSlots, ...currentSlots])]
+        .sort((left, right) => Number(left) - Number(right));
+    const players = [];
+
+    for (const slot of allSlots) {
+        const isInBaseline = baselineSlots.includes(slot);
+        const isInCurrent = currentSlots.includes(slot);
+        const baselineData = isInBaseline
+            ? parsePlayerData(preset.playerDataMap[slot], slot)
+            : null;
+        const currentData = isInCurrent
+            ? parsePlayerData(currentPlayerDataMap?.[slot], slot)
+            : null;
+        let status;
+        let changes;
+
+        if (!isInBaseline) {
+            status = "added";
+            changes = [{ kind: "membership", section: "team", before: false, after: true }];
+        } else if (!isInCurrent) {
+            status = "removed";
+            changes = [{ kind: "membership", section: "team", before: true, after: false }];
+        } else {
+            changes = comparePlayerLoadouts(baselineData, currentData);
+            status = changes.length > 0 ? "changed" : "unchanged";
+        }
+
+        players.push({ slot, status, baselineData, currentData, changes });
+    }
+
+    return {
+        players,
+        totalChanges: players.reduce((total, playerComparison) => total + playerComparison.changes.length, 0),
+        changedPlayers: players.filter((playerComparison) => playerComparison.status !== "unchanged").length,
+    };
+}
+
+
+/***/ }),
+
 /***/ "./src/teamPresetStore.js":
 /*!********************************!*\
   !*** ./src/teamPresetStore.js ***!
@@ -2384,7 +2720,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _combatsimulator_data_achievementDetailMap_json__WEBPACK_IMPORTED_MODULE_18__ = __webpack_require__(/*! ./combatsimulator/data/achievementDetailMap.json */ "./src/combatsimulator/data/achievementDetailMap.json");
 /* harmony import */ var _fragmentTimeCost_js__WEBPACK_IMPORTED_MODULE_19__ = __webpack_require__(/*! ./fragmentTimeCost.js */ "./src/fragmentTimeCost.js");
 /* harmony import */ var _teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__ = __webpack_require__(/*! ./teamPresetStore.js */ "./src/teamPresetStore.js");
-/* harmony import */ var _patchNote_json__WEBPACK_IMPORTED_MODULE_21__ = __webpack_require__(/*! ../patchNote.json */ "./patchNote.json");
+/* harmony import */ var _teamPresetComparison_js__WEBPACK_IMPORTED_MODULE_21__ = __webpack_require__(/*! ./teamPresetComparison.js */ "./src/teamPresetComparison.js");
+/* harmony import */ var _patchNote_json__WEBPACK_IMPORTED_MODULE_22__ = __webpack_require__(/*! ../patchNote.json */ "./patchNote.json");
+
 
 
 
@@ -7004,6 +7342,7 @@ function refreshTeamPresetControls({ allowAutoLoad = false, preferredPresetId = 
         );
         presetNameInput.value = "";
         updateTeamPresetActionButtons();
+        refreshTeamPresetComparisonControls({ preferredPresetId: "" });
         return;
     }
 
@@ -7035,6 +7374,7 @@ function refreshTeamPresetControls({ allowAutoLoad = false, preferredPresetId = 
         { target: getTeamPresetTargetLabel(target) },
     );
     updateTeamPresetActionButtons();
+    refreshTeamPresetComparisonControls({ preferredPresetId: presetSelect.value });
 
     if (
         allowAutoLoad &&
@@ -7381,6 +7721,615 @@ function deleteTeamPreset() {
     );
 }
 
+const TEAM_COMPARISON_SECTION_ORDER = [
+    "team",
+    "levels",
+    "equipment",
+    "abilities",
+    "food",
+    "drinks",
+    "triggers",
+    "houseRooms",
+    "achievements",
+];
+
+const TEAM_COMPARISON_LEVEL_LABELS = {
+    staminaLevel: ["skillNames./skills/stamina", "Stamina"],
+    intelligenceLevel: ["skillNames./skills/intelligence", "Intelligence"],
+    attackLevel: ["skillNames./skills/attack", "Attack"],
+    meleeLevel: ["skillNames./skills/melee", "Melee"],
+    defenseLevel: ["skillNames./skills/defense", "Defense"],
+    rangedLevel: ["skillNames./skills/ranged", "Ranged"],
+    magicLevel: ["skillNames./skills/magic", "Magic"],
+};
+
+const TEAM_COMPARISON_EQUIPMENT_LABELS = {
+    head: ["characterItemsUtil.head", "Head"],
+    neck: ["characterItemsUtil.neck", "Neck"],
+    earrings: ["characterItemsUtil.earrings", "Earrings"],
+    body: ["characterItemsUtil.body", "Body"],
+    legs: ["characterItemsUtil.legs", "Legs"],
+    feet: ["characterItemsUtil.feet", "Feet"],
+    hands: ["characterItemsUtil.hands", "Hands"],
+    ring: ["characterItemsUtil.ring", "Ring"],
+    weapon: ["characterItemsUtil.mainHand", "Weapon"],
+    off_hand: ["characterItemsUtil.offHand", "Offhand"],
+    pouch: ["characterItemsUtil.pouch", "Pouch"],
+    back: ["characterItemsUtil.back", "Back"],
+    charm: ["characterItemsUtil.charm", "Charm"],
+};
+
+function getTeamComparisonText(key, fallback, values = {}) {
+    try {
+        if (typeof i18next !== "undefined" && i18next.isInitialized) {
+            const translationKey = `common:teamComparison.${key}`;
+            const translated = i18next.t(translationKey, values);
+            if (typeof translated === "string" && translated !== translationKey) {
+                return translated;
+            }
+        }
+    } catch (error) {
+        console.warn("Unable to translate team comparison text.", error);
+    }
+    return interpolateTeamPresetFallback(fallback, values);
+}
+
+function getLocalizedGameText(key, fallback) {
+    try {
+        if (typeof i18next !== "undefined" && i18next.isInitialized) {
+            const translated = i18next.t(key);
+            if (typeof translated === "string" && translated !== key) {
+                return translated;
+            }
+        }
+    } catch (error) {
+        console.warn("Unable to translate game data text.", error);
+    }
+    return fallback;
+}
+
+function humanizeHrid(hrid) {
+    const text = String(hrid || "").split("/").filter(Boolean).pop() || "";
+    return text
+        .replaceAll("_", " ")
+        .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function setTeamPresetComparisonStatus(message = "", style = "muted") {
+    const status = document.getElementById("teamPresetComparisonStatus");
+    if (!status) {
+        return;
+    }
+    status.textContent = message;
+    status.classList.remove("text-muted", "text-success", "text-danger");
+    status.classList.add(`text-${style}`);
+}
+
+function refreshTeamPresetComparisonControls({ preferredPresetId = null } = {}) {
+    const comparisonSelect = document.getElementById("selectTeamPresetComparison");
+    const compareButton = document.getElementById("buttonCompareTeamPreset");
+    if (!comparisonSelect || !compareButton) {
+        return;
+    }
+
+    const target = getCurrentTeamPresetTarget();
+    const previousSelection = comparisonSelect.dataset.selectedPresetId || "";
+    comparisonSelect.replaceChildren();
+
+    if (!target) {
+        comparisonSelect.add(new Option(
+            getTeamComparisonText("unsupported", "Select one combat zone or dungeon first."),
+            "",
+        ));
+        comparisonSelect.disabled = true;
+        compareButton.disabled = true;
+        comparisonSelect.dataset.selectedPresetId = "";
+        setTeamPresetComparisonStatus(
+            getTeamComparisonText("unsupported", "Select one combat zone or dungeon first."),
+        );
+        return;
+    }
+
+    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.loadTeamPresetStore)();
+    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.createTeamPresetTargetKey)(target);
+    const presets = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.getTeamPresetsForTarget)(store, targetKey);
+    const defaultPreset = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.getDefaultTeamPreset)(store, targetKey);
+    comparisonSelect.add(new Option(
+        getTeamComparisonText("selectBaseline", "Baseline: select a team preset"),
+        "",
+    ));
+
+    for (const preset of presets) {
+        const defaultBadge = getTeamComparisonText("defaultBadge", "default");
+        const optionLabel = preset.id === defaultPreset?.id
+            ? `${preset.name} ★ (${defaultBadge})`
+            : preset.name;
+        comparisonSelect.add(new Option(optionLabel, preset.id));
+    }
+
+    const mainPresetSelection = document.getElementById("selectTeamPreset")?.value || "";
+    const requestedSelection = preferredPresetId ?? mainPresetSelection ?? previousSelection;
+    const candidates = [requestedSelection, previousSelection, mainPresetSelection, defaultPreset?.id]
+        .filter(Boolean);
+    const selectedPresetId = candidates.find((presetId) =>
+        presets.some((preset) => preset.id === presetId)
+    ) || "";
+
+    comparisonSelect.value = selectedPresetId;
+    comparisonSelect.dataset.selectedPresetId = selectedPresetId;
+    comparisonSelect.disabled = presets.length === 0;
+    compareButton.disabled = !selectedPresetId;
+    setTeamPresetComparisonStatus(
+        presets.length === 0
+            ? getTeamComparisonText("noPresets", "There are no team presets for the current target.")
+            : "",
+    );
+}
+
+function syncTeamPresetSelectionFromComparison(presetId) {
+    const comparisonSelect = document.getElementById("selectTeamPresetComparison");
+    comparisonSelect.dataset.selectedPresetId = presetId;
+    document.getElementById("buttonCompareTeamPreset").disabled = !presetId;
+    setTeamPresetComparisonStatus();
+
+    const teamPresetSelect = document.getElementById("selectTeamPreset");
+    if (!teamPresetSelect || ![...teamPresetSelect.options].some((option) => option.value === presetId)) {
+        return;
+    }
+    teamPresetSelect.value = presetId;
+    teamPresetSelect.dataset.selectedPresetId = presetId;
+    const target = getCurrentTeamPresetTarget();
+    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.loadTeamPresetStore)();
+    const targetKey = target ? (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.createTeamPresetTargetKey)(target) : "";
+    const selectedPreset = store.presets.find((preset) =>
+        preset.id === presetId && preset.targetKey === targetKey
+    );
+    document.getElementById("inputTeamPresetName").value = selectedPreset?.name ?? "";
+    updateTeamPresetActionButtons();
+}
+
+function getSelectedTeamPresetForComparison() {
+    const presetId = document.getElementById("selectTeamPresetComparison")?.value || "";
+    const target = getCurrentTeamPresetTarget();
+    if (!presetId || !target) {
+        return null;
+    }
+    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.createTeamPresetTargetKey)(target);
+    return (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.loadTeamPresetStore)().presets.find((preset) =>
+        preset.id === presetId && preset.targetKey === targetKey
+    ) ?? null;
+}
+
+function getCurrentComparisonPlayerSlots(preset) {
+    const checkedPlayerSlots = [...document.querySelectorAll(".player-checkbox:checked")]
+        .filter((checkbox) => checkbox.closest(".form-check")?.style.display !== "none")
+        .map((checkbox) => checkbox.id.replace("player", ""));
+    return checkedPlayerSlots.length > 0 ? checkedPlayerSlots : preset.selectedPlayers;
+}
+
+function resolveItemName(itemHrid) {
+    if (!itemHrid) {
+        return getTeamComparisonText("none", "None");
+    }
+    return getLocalizedGameText(
+        `itemNames.${itemHrid}`,
+        _combatsimulator_data_itemDetailMap_json__WEBPACK_IMPORTED_MODULE_3__[itemHrid]?.name || humanizeHrid(itemHrid),
+    );
+}
+
+function resolveAbilityName(abilityHrid) {
+    if (!abilityHrid) {
+        return getTeamComparisonText("none", "None");
+    }
+    return getLocalizedGameText(
+        `abilityNames.${abilityHrid}`,
+        _combatsimulator_data_abilityDetailMap_json__WEBPACK_IMPORTED_MODULE_2__[abilityHrid]?.name || humanizeHrid(abilityHrid),
+    );
+}
+
+function resolveHouseRoomName(roomHrid) {
+    return getLocalizedGameText(
+        `houseRoomNames.${roomHrid}`,
+        _combatsimulator_data_houseRoomDetailMap_json__WEBPACK_IMPORTED_MODULE_4__[roomHrid]?.name || humanizeHrid(roomHrid),
+    );
+}
+
+function resolveAchievementName(achievementHrid) {
+    return getLocalizedGameText(
+        `achievementNames.${achievementHrid}`,
+        _combatsimulator_data_achievementDetailMap_json__WEBPACK_IMPORTED_MODULE_18__[achievementHrid]?.name || humanizeHrid(achievementHrid),
+    );
+}
+
+function resolveEquipmentLocationName(locationHrid) {
+    const location = String(locationHrid || "").split("/").filter(Boolean).pop() || "";
+    const [translationKey, fallback] = TEAM_COMPARISON_EQUIPMENT_LABELS[location]
+        || ["", humanizeHrid(location)];
+    return translationKey ? getLocalizedGameText(translationKey, fallback) : fallback;
+}
+
+function formatEquipmentComparisonValue(value) {
+    if (!value?.itemHrid) {
+        return getTeamComparisonText("none", "None");
+    }
+    return `${resolveItemName(value.itemHrid)} +${Number(value.enhancementLevel) || 0}`;
+}
+
+function formatAbilityComparisonValue(value) {
+    if (!value?.abilityHrid) {
+        return getTeamComparisonText("none", "None");
+    }
+    return `${resolveAbilityName(value.abilityHrid)} Lv${Number(value.level) || 1}`;
+}
+
+function formatCharacterIdentity(identity) {
+    if (identity?.name) {
+        return identity.name;
+    }
+    if (identity?.id) {
+        return `#${identity.id}`;
+    }
+    return getTeamComparisonText("none", "None");
+}
+
+function formatTeamComparisonValue(change, side) {
+    const value = change[side];
+    switch (change.kind) {
+        case "membership":
+            return getTeamComparisonText(value ? "present" : "absent", value ? "Selected" : "Not selected");
+        case "character":
+            return formatCharacterIdentity(value);
+        case "level":
+        case "houseRoom":
+            return String(value);
+        case "equipment":
+            return formatEquipmentComparisonValue(value);
+        case "ability":
+            return formatAbilityComparisonValue(value);
+        case "consumable":
+            return resolveItemName(value);
+        case "triggers":
+            return getTeamComparisonText(
+                "triggerCount",
+                "{{count}} trigger groups",
+                { count: side === "before" ? change.beforeCount : change.afterCount },
+            );
+        case "achievement":
+            return getTeamComparisonText(value ? "completed" : "notCompleted", value ? "Completed" : "Not completed");
+        default:
+            return String(value ?? "");
+    }
+}
+
+function formatNumericDifference(before, after) {
+    const difference = Number(after) - Number(before);
+    return difference > 0 ? `+${difference}` : String(difference);
+}
+
+function formatTeamComparisonDifference(change) {
+    switch (change.kind) {
+        case "membership":
+            return getTeamComparisonText(change.after ? "added" : "removed", change.after ? "Added" : "Removed");
+        case "level":
+        case "houseRoom":
+            return formatNumericDifference(change.before, change.after);
+        case "equipment":
+            if (!change.before) return getTeamComparisonText("added", "Added");
+            if (!change.after) return getTeamComparisonText("removed", "Removed");
+            if (change.before.itemHrid === change.after.itemHrid) {
+                return formatNumericDifference(change.before.enhancementLevel, change.after.enhancementLevel);
+            }
+            return getTeamComparisonText("replaced", "Replaced");
+        case "ability":
+            if (!change.before?.abilityHrid) return getTeamComparisonText("added", "Added");
+            if (!change.after?.abilityHrid) return getTeamComparisonText("removed", "Removed");
+            if (change.before.abilityHrid === change.after.abilityHrid) {
+                return formatNumericDifference(change.before.level, change.after.level);
+            }
+            return getTeamComparisonText("adjusted", "Adjusted");
+        case "consumable":
+            if (!change.before) return getTeamComparisonText("added", "Added");
+            if (!change.after) return getTeamComparisonText("removed", "Removed");
+            return getTeamComparisonText("replaced", "Replaced");
+        case "triggers":
+            return getTeamComparisonText(
+                "differenceCount",
+                "{{count}} adjustments",
+                { count: change.differenceCount },
+            );
+        case "achievement":
+            return getTeamComparisonText(
+                change.after ? "completedChange" : "cancelledChange",
+                change.after ? "Completed" : "Removed",
+            );
+        case "character":
+            return getTeamComparisonText("replaced", "Replaced");
+        default:
+            return getTeamComparisonText("adjusted", "Adjusted");
+    }
+}
+
+function resolveTeamComparisonItemLabel(change) {
+    switch (change.kind) {
+        case "membership":
+            return getTeamComparisonText("membership", "Party Status");
+        case "character":
+            return getTeamComparisonText("character", "Character");
+        case "level": {
+            const [translationKey, fallback] = TEAM_COMPARISON_LEVEL_LABELS[change.field]
+                || ["", change.field];
+            return translationKey ? getLocalizedGameText(translationKey, fallback) : fallback;
+        }
+        case "equipment":
+            return resolveEquipmentLocationName(change.locationHrid);
+        case "ability":
+            return getTeamComparisonText(
+                "abilitySlot",
+                "Ability Slot {{slot}}",
+                { slot: change.index + 1 },
+            );
+        case "consumable":
+            return getTeamComparisonText(
+                "consumableSlot",
+                "Slot {{slot}}",
+                { slot: change.index + 1 },
+            );
+        case "triggers":
+            return getTeamComparisonText("sections.triggers", "Triggers");
+        case "houseRoom":
+            return resolveHouseRoomName(change.hrid);
+        case "achievement":
+            return resolveAchievementName(change.hrid);
+        default:
+            return change.kind;
+    }
+}
+
+function getTeamComparisonCharacterName(playerComparison, preset, side) {
+    const isBaseline = side === "baseline";
+    const playerData = isBaseline ? playerComparison.baselineData : playerComparison.currentData;
+    const serializedName = playerData?.characterName || playerData?.characterMeta?.name;
+    if (typeof serializedName === "string" && serializedName.trim()) {
+        return serializedName.trim();
+    }
+    if (isBaseline && preset.playerNames?.[playerComparison.slot]) {
+        return preset.playerNames[playerComparison.slot];
+    }
+    if (!isBaseline) {
+        const tabName = document.getElementById(`player${playerComparison.slot}-tab`)?.textContent?.trim();
+        if (tabName) {
+            return tabName;
+        }
+    }
+    return `Player ${playerComparison.slot}`;
+}
+
+function appendTeamComparisonTableCell(row, tagName, text, className = "") {
+    const cell = document.createElement(tagName);
+    cell.textContent = text;
+    if (className) {
+        cell.className = className;
+    }
+    row.appendChild(cell);
+    return cell;
+}
+
+function renderTeamPresetComparison(preset, comparison) {
+    const summary = document.getElementById("teamPresetComparisonSummary");
+    const results = document.getElementById("teamPresetComparisonResults");
+    summary.replaceChildren();
+    results.replaceChildren();
+
+    const direction = document.createElement("div");
+    direction.className = "fw-semibold";
+    direction.textContent = getTeamComparisonText(
+        "direction",
+        "Baseline preset '{{name}}' → current team",
+        { name: preset.name },
+    );
+    summary.appendChild(direction);
+
+    const totals = document.createElement("div");
+    totals.className = "text-muted small mt-1";
+    totals.textContent = getTeamComparisonText(
+        "summary",
+        "{{players}} players, {{changes}} differences found.",
+        { players: comparison.players.length, changes: comparison.totalChanges },
+    );
+    summary.appendChild(totals);
+
+    if (comparison.totalChanges === 0) {
+        const noChanges = document.createElement("div");
+        noChanges.className = "alert alert-success mb-0";
+        noChanges.textContent = getTeamComparisonText(
+            "noChanges",
+            "The current team exactly matches this preset.",
+        );
+        results.appendChild(noChanges);
+        return;
+    }
+
+    for (const playerComparison of comparison.players) {
+        const card = document.createElement("div");
+        card.className = "card team-comparison-player-card mb-3";
+        const cardHeader = document.createElement("div");
+        cardHeader.className = "card-header d-flex flex-wrap justify-content-between align-items-center gap-2";
+        const playerTitle = document.createElement("strong");
+        const slotLabel = getTeamComparisonText(
+            "slot",
+            "Slot {{slot}}",
+            { slot: playerComparison.slot },
+        );
+        const baselineName = getTeamComparisonCharacterName(playerComparison, preset, "baseline");
+        const currentName = getTeamComparisonCharacterName(playerComparison, preset, "current");
+        const playerName = baselineName === currentName
+            ? currentName
+            : `${baselineName} → ${currentName}`;
+        playerTitle.textContent = `${slotLabel} · ${playerName}`;
+        cardHeader.appendChild(playerTitle);
+
+        const badge = document.createElement("span");
+        badge.className = playerComparison.changes.length > 0
+            ? "badge text-bg-warning"
+            : "badge text-bg-success";
+        badge.textContent = playerComparison.changes.length > 0
+            ? getTeamComparisonText(
+                "changeCount",
+                "{{count}} changes",
+                { count: playerComparison.changes.length },
+            )
+            : getTeamComparisonText("playerNoChanges", "No changes for this player.");
+        cardHeader.appendChild(badge);
+        card.appendChild(cardHeader);
+
+        const cardBody = document.createElement("div");
+        cardBody.className = "card-body p-0";
+        if (playerComparison.changes.length === 0) {
+            const unchanged = document.createElement("div");
+            unchanged.className = "p-3 text-success";
+            unchanged.textContent = getTeamComparisonText(
+                "playerNoChanges",
+                "No changes for this player.",
+            );
+            cardBody.appendChild(unchanged);
+        } else {
+            const tableWrapper = document.createElement("div");
+            tableWrapper.className = "table-responsive";
+            const table = document.createElement("table");
+            table.className = "table table-sm table-striped table-bordered align-middle";
+            const tableHead = document.createElement("thead");
+            const headingRow = document.createElement("tr");
+            appendTeamComparisonTableCell(
+                headingRow,
+                "th",
+                getTeamComparisonText("columns.item", "Item"),
+            );
+            appendTeamComparisonTableCell(
+                headingRow,
+                "th",
+                getTeamComparisonText("columns.preset", "Preset"),
+            );
+            appendTeamComparisonTableCell(
+                headingRow,
+                "th",
+                getTeamComparisonText("columns.current", "Current"),
+            );
+            appendTeamComparisonTableCell(
+                headingRow,
+                "th",
+                getTeamComparisonText("columns.change", "Change"),
+            );
+            tableHead.appendChild(headingRow);
+            table.appendChild(tableHead);
+
+            const tableBody = document.createElement("tbody");
+            for (const section of TEAM_COMPARISON_SECTION_ORDER) {
+                const sectionChanges = playerComparison.changes.filter((change) => change.section === section);
+                if (sectionChanges.length === 0) {
+                    continue;
+                }
+                const sectionRow = document.createElement("tr");
+                const sectionCell = appendTeamComparisonTableCell(
+                    sectionRow,
+                    "th",
+                    getTeamComparisonText(`sections.${section}`, humanizeHrid(section)),
+                    "table-secondary",
+                );
+                sectionCell.colSpan = 4;
+                tableBody.appendChild(sectionRow);
+
+                for (const change of sectionChanges) {
+                    const row = document.createElement("tr");
+                    appendTeamComparisonTableCell(row, "th", resolveTeamComparisonItemLabel(change));
+                    appendTeamComparisonTableCell(
+                        row,
+                        "td",
+                        formatTeamComparisonValue(change, "before"),
+                        "team-comparison-value",
+                    );
+                    appendTeamComparisonTableCell(
+                        row,
+                        "td",
+                        formatTeamComparisonValue(change, "after"),
+                        "team-comparison-value",
+                    );
+                    appendTeamComparisonTableCell(
+                        row,
+                        "td",
+                        formatTeamComparisonDifference(change),
+                        "text-nowrap fw-semibold",
+                    );
+                    tableBody.appendChild(row);
+                }
+            }
+            table.appendChild(tableBody);
+            tableWrapper.appendChild(table);
+            cardBody.appendChild(tableWrapper);
+        }
+        card.appendChild(cardBody);
+        results.appendChild(card);
+    }
+}
+
+function compareCurrentTeamToSelectedPreset() {
+    const preset = getSelectedTeamPresetForComparison();
+    if (!preset) {
+        refreshTeamPresetComparisonControls();
+        return;
+    }
+
+    savePreviousPlayer(currentPlayerTabId);
+    try {
+        const comparison = (0,_teamPresetComparison_js__WEBPACK_IMPORTED_MODULE_21__.compareTeamPresetWithCurrent)(
+            preset,
+            playerDataMap,
+            getCurrentComparisonPlayerSlots(preset),
+        );
+        renderTeamPresetComparison(preset, comparison);
+        setTeamPresetComparisonStatus();
+        bootstrap.Modal.getOrCreateInstance(
+            document.getElementById("teamPresetComparisonModal"),
+        ).show();
+    } catch (error) {
+        console.error("Unable to compare the current team with its preset.", error);
+        setTeamPresetComparisonStatus(
+            getTeamComparisonText(
+                "invalidData",
+                "Player data in slot {{slot}} is invalid and cannot be compared.",
+                { slot: error.slot || "?" },
+            ),
+            "danger",
+        );
+    }
+}
+
+function retireLegacyLoadoutControls() {
+    const legacySelect = document.getElementById("selectLoadout");
+    if (!legacySelect || legacySelect.closest("#teamPresetComparisonBar")) {
+        return false;
+    }
+    const legacyRow = legacySelect.closest(".row");
+    if (legacyRow) {
+        legacyRow.remove();
+    } else {
+        legacySelect.remove();
+    }
+    return true;
+}
+
+function initLegacyLoadoutControlRetirement() {
+    if (retireLegacyLoadoutControls()) {
+        return;
+    }
+    const observer = new MutationObserver(() => {
+        if (retireLegacyLoadoutControls()) {
+            observer.disconnect();
+        }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    setTimeout(() => observer.disconnect(), 15000);
+}
+
 function initImporterLoadoutNameCapture() {
     document.addEventListener("click", (event) => {
         if (!(event.target instanceof Element)) {
@@ -7416,6 +8365,7 @@ function initImporterLoadoutNameCapture() {
 
 function initTeamPresets() {
     initImporterLoadoutNameCapture();
+    initLegacyLoadoutControlRetirement();
     const targetControlIds = [
         "selectZone",
         "selectDungeon",
@@ -7439,8 +8389,16 @@ function initTeamPresets() {
         const selectedPreset = store.presets.find((preset) => preset.id === event.target.value);
         document.getElementById("inputTeamPresetName").value = selectedPreset?.name ?? "";
         updateTeamPresetActionButtons();
+        refreshTeamPresetComparisonControls({ preferredPresetId: event.target.value });
         setTeamPresetStatus();
     });
+    document.getElementById("selectTeamPresetComparison").addEventListener("change", (event) => {
+        syncTeamPresetSelectionFromComparison(event.target.value);
+    });
+    document.getElementById("buttonCompareTeamPreset").addEventListener(
+        "click",
+        compareCurrentTeamToSelectedPreset,
+    );
     document.getElementById("buttonLoadTeamPreset").addEventListener("click", () => {
         loadTeamPreset(document.getElementById("selectTeamPreset").value);
     });
@@ -7472,7 +8430,9 @@ function initTeamPresets() {
     });
 
     if (typeof i18next !== "undefined" && typeof i18next.on === "function") {
-        i18next.on("languageChanged", () => refreshTeamPresetControls());
+        const refreshLocalizedTeamPresetControls = () => refreshTeamPresetControls();
+        i18next.on("languageChanged", refreshLocalizedTeamPresetControls);
+        i18next.on("initialized", refreshLocalizedTeamPresetControls);
     }
     refreshTeamPresetControls({ allowAutoLoad: true });
 }
@@ -7688,14 +8648,14 @@ function updateTable(tableId, item, price) {
 
 function initPatchNotes() {
     const patchNotesRows = document.getElementById("patchNotes");
-    for (const pn in _patchNote_json__WEBPACK_IMPORTED_MODULE_21__) {
+    for (const pn in _patchNote_json__WEBPACK_IMPORTED_MODULE_22__) {
         const patchNoteContainer = document.createElement("div");
         patchNotesRows.setAttribute('class', 'col-12 mb-4');
 
         const patchNoteElement = document.createElement("h6");
         patchNoteElement.innerHTML = pn;
         const patchNoteList = document.createElement("ul");
-        for (const note of _patchNote_json__WEBPACK_IMPORTED_MODULE_21__[pn]) {
+        for (const note of _patchNote_json__WEBPACK_IMPORTED_MODULE_22__[pn]) {
             const noteElement = document.createElement("li");
             noteElement.innerHTML = note;
             patchNoteList.appendChild(noteElement);

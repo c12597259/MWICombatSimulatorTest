@@ -100,6 +100,26 @@
             padding: 15px; /* Padding inside the box */
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* Optional shadow for better visibility */
         }
+
+        #teamPresetComparisonBar .form-select {
+            min-width: 0;
+        }
+
+        #teamPresetComparisonModal .team-comparison-player-card .table {
+            margin-bottom: 0;
+        }
+
+        #teamPresetComparisonModal .team-comparison-value {
+            min-width: 10rem;
+            overflow-wrap: anywhere;
+        }
+
+        body.dark-mode #teamPresetComparisonModal .table {
+            --bs-table-color: #f0f0f0;
+            --bs-table-bg: #444;
+            --bs-table-striped-bg: #4d4d4d;
+            --bs-table-border-color: #666;
+        }
     </style>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -133,6 +153,17 @@
         </ul>
         <div class="row pt-3">
             <div class="col-md-5">
+                <div class="row mb-3" id="teamPresetComparisonBar">
+                    <div class="col">
+                        <div class="input-group">
+                            <select id="selectTeamPresetComparison" class="form-select"
+                                aria-label="Team preset comparison baseline"></select>
+                            <button type="button" class="btn btn-warning" id="buttonCompareTeamPreset"
+                                data-i18n="common:teamComparison.compare">Compare</button>
+                        </div>
+                        <div class="form-text" id="teamPresetComparisonStatus" aria-live="polite"></div>
+                    </div>
+                </div>
                 <div class="row mb-3">
                     <div class="col-md-4">
                         <!-- #region Levels -->
@@ -1973,6 +2004,24 @@
             </div>
         </div>
         <!-- #endregion -->
+    </div>
+    <div class="modal" id="teamPresetComparisonModal" tabindex="-1">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" data-i18n="common:teamComparison.title">Team Loadout Differences</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="teamPresetComparisonSummary" class="mb-3"></div>
+                    <div id="teamPresetComparisonResults"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"
+                        data-i18n="common:controls.close">Close</button>
+                </div>
+            </div>
+        </div>
     </div>
     <script src="js/i18n.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.2.0/js/bootstrap.bundle.min.js" integrity="sha512-9GacT4119eY3AcosfWtHMsT5JyZudrexyEVzTBWV3viP/YfB9e2pEy3N7WXL3SV6ASXpTU0vzzSxsbfsuUH4sQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>

@@ -4,7 +4,7 @@
     "description": "",
     "main": "index.js",
     "scripts": {
-        "test": "node --test tests/fragmentTimeCost.test.mjs",
+        "test": "node --test tests/fragmentTimeCost.test.mjs tests/teamPresetComparison.test.mjs",
         "build": "webpack",
         "watch": "webpack --watch",
         "start": "webpack serve --mode development --open"
