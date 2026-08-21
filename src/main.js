@@ -27,6 +27,13 @@ import {
     saveTeamPresetStore,
 } from "./teamPresetStore.js";
 import { compareTeamPresetWithCurrent } from "./teamPresetComparison.js";
+import {
+    PRIVATE_LOADOUT_BASELINE_BRIDGE_ATTRIBUTE,
+    PRIVATE_LOADOUT_BASELINE_REQUEST_EVENT,
+    PRIVATE_LOADOUT_BASELINE_RESPONSE_EVENT,
+    buildPrivateLoadoutReferences,
+    resolvePrivateLoadoutBaseline,
+} from "./privateLoadoutBaseline.js";
 
 import patchNote from "../patchNote.json";
 
@@ -4695,10 +4702,17 @@ function captureCurrentTeamPreset(selectedPlayerNumbers) {
         generatedNameParts.push(`${characterName}-${loadoutName}`);
     }
 
+    const loadoutReferences = Object.fromEntries(buildPrivateLoadoutReferences({
+        selectedPlayers: selectedPlayerNumbers,
+        playerDataMap: selectedPlayerData,
+        playerNames: selectedPlayerNames,
+    }).map((reference) => [reference.slot, reference]));
+
     return {
         selectedPlayers: selectedPlayerNumbers.map(String),
         playerDataMap: selectedPlayerData,
         playerNames: selectedPlayerNames,
+        loadoutReferences,
         generatedName: generatedNameParts.join(" "),
     };
 }
@@ -4728,6 +4742,7 @@ function persistTeamPreset(target, name, snapshot, existingPresetId = "") {
         selectedPlayers: snapshot.selectedPlayers,
         playerDataMap: snapshot.playerDataMap,
         playerNames: snapshot.playerNames,
+        loadoutReferences: snapshot.loadoutReferences,
         createdAt: existingPreset?.createdAt ?? now,
         updatedAt: now,
     };
@@ -5084,7 +5099,7 @@ function setTeamPresetComparisonStatus(message = "", style = "muted") {
         return;
     }
     status.textContent = message;
-    status.classList.remove("text-muted", "text-success", "text-danger");
+    status.classList.remove("text-muted", "text-success", "text-danger", "text-warning");
     status.classList.add(`text-${style}`);
 }
 
@@ -5188,6 +5203,120 @@ function getCurrentComparisonPlayerSlots(preset) {
         .filter((checkbox) => checkbox.closest(".form-check")?.style.display !== "none")
         .map((checkbox) => checkbox.id.replace("player", ""));
     return checkedPlayerSlots.length > 0 ? checkedPlayerSlots : preset.selectedPlayers;
+}
+
+function createPrivateLoadoutBaselineRequestId() {
+    if (globalThis.crypto?.randomUUID) {
+        return globalThis.crypto.randomUUID();
+    }
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function requestPrivateLoadoutBaselines(references, timeoutMs = 20000) {
+    if (document.documentElement.dataset[PRIVATE_LOADOUT_BASELINE_BRIDGE_ATTRIBUTE] !== "1") {
+        return Promise.resolve({ errorCode: "bridge-unavailable", results: [] });
+    }
+
+    const requestId = createPrivateLoadoutBaselineRequestId();
+    return new Promise((resolve) => {
+        let timeoutId;
+        const cleanup = () => {
+            clearTimeout(timeoutId);
+            document.removeEventListener(PRIVATE_LOADOUT_BASELINE_RESPONSE_EVENT, handleResponse);
+        };
+        const handleResponse = (event) => {
+            let response;
+            try {
+                response = typeof event.detail === "string" ? JSON.parse(event.detail) : null;
+            } catch {
+                return;
+            }
+            if (response?.requestId !== requestId) {
+                return;
+            }
+            cleanup();
+            resolve(response);
+        };
+
+        document.addEventListener(PRIVATE_LOADOUT_BASELINE_RESPONSE_EVENT, handleResponse);
+        timeoutId = setTimeout(() => {
+            cleanup();
+            resolve({ requestId, errorCode: "timeout", results: [] });
+        }, timeoutMs);
+
+        document.dispatchEvent(new CustomEvent(PRIVATE_LOADOUT_BASELINE_REQUEST_EVENT, {
+            detail: JSON.stringify({ requestId, references }),
+        }));
+    });
+}
+
+function getPrivateLoadoutFallbackReason(reason) {
+    const reasons = {
+        "bridge-unavailable": "未检测到新版私有同步脚本",
+        "server-error": "服务器数据读取失败",
+        timeout: "等待服务器配装超时",
+        "missing-reference": "预设快照中缺少角色名或配装名",
+        "missing-character": "服务器中找不到该角色",
+        "ambiguous-character": "服务器中有多个同名角色，无法确定",
+        "missing-loadout": "该角色在服务器中没有这个配装",
+        "ambiguous-loadout": "该角色有多个同名配装，无法确定",
+        "invalid-server-data": "服务器上的配装数据不完整",
+        "invalid-response": "私有同步脚本返回了无效配装",
+    };
+    const fallback = reasons[reason] || "未能匹配服务器配装";
+    return getTeamComparisonText(`fallbackReasons.${reason}`, fallback);
+}
+
+function getPrivateLoadoutReferenceLabel(reference) {
+    const character = reference.characterName || reference.characterId
+        || getTeamComparisonText("unknownCharacter", "Unknown character");
+    const loadout = reference.loadoutName || reference.loadoutId
+        || getTeamComparisonText("unknownLoadout", "Unknown loadout");
+    return `${character}-${loadout}`;
+}
+
+function appendPrivateLoadoutResolutionSummary(summary, resolution) {
+    const notice = document.createElement("div");
+    notice.className = resolution.allMatched
+        ? "alert alert-info py-2 mt-2 mb-0"
+        : "alert alert-warning py-2 mt-2 mb-0";
+
+    const message = document.createElement("div");
+    if (resolution.allMatched) {
+        message.textContent = getTeamComparisonText(
+            "serverMatched",
+            "Matched {{count}} latest game loadouts from the private server using this preset.",
+            { count: resolution.matchedSlots.length },
+        );
+    } else if (resolution.usesServerData) {
+        message.textContent = getTeamComparisonText(
+            "serverPartiallyMatched",
+            "Matched {{matched}} server loadouts; {{fallback}} slots use the saved preset snapshot.",
+            {
+                matched: resolution.matchedSlots.length,
+                fallback: resolution.fallbackSlots.length,
+            },
+        );
+    } else {
+        message.textContent = getTeamComparisonText(
+            "serverNotMatched",
+            "No server loadouts could be matched. The saved preset snapshot is used as the fallback baseline.",
+        );
+    }
+    notice.appendChild(message);
+
+    if (resolution.fallbackSlots.length > 0) {
+        const list = document.createElement("ul");
+        list.className = "mb-0 mt-1 ps-4 small";
+        for (const fallback of resolution.fallbackSlots) {
+            const item = document.createElement("li");
+            const slot = getTeamComparisonText("slot", "Slot {{slot}}", { slot: fallback.slot });
+            item.textContent = `${slot} · ${getPrivateLoadoutReferenceLabel(fallback.reference)}: ${getPrivateLoadoutFallbackReason(fallback.reason)}`;
+            list.appendChild(item);
+        }
+        notice.appendChild(list);
+    }
+    summary.appendChild(notice);
 }
 
 function resolveItemName(itemHrid) {
@@ -5397,7 +5526,7 @@ function appendTeamComparisonTableCell(row, tagName, text, className = "") {
     return cell;
 }
 
-function renderTeamPresetComparison(preset, comparison) {
+function renderTeamPresetComparison(preset, comparison, resolution) {
     const summary = document.getElementById("teamPresetComparisonSummary");
     const results = document.getElementById("teamPresetComparisonResults");
     summary.replaceChildren();
@@ -5405,11 +5534,15 @@ function renderTeamPresetComparison(preset, comparison) {
 
     const direction = document.createElement("div");
     direction.className = "fw-semibold";
-    direction.textContent = getTeamComparisonText(
-        "direction",
-        "Baseline preset '{{name}}' → current team",
-        { name: preset.name },
-    );
+    const directionKey = resolution.allMatched
+        ? "serverDirection"
+        : (resolution.usesServerData ? "mixedDirection" : "fallbackDirection");
+    const directionFallback = resolution.allMatched
+        ? "Latest game loadouts located by preset '{{name}}' → current team"
+        : (resolution.usesServerData
+            ? "Server game loadouts plus preset snapshot fallbacks from '{{name}}' → current team"
+            : "Saved snapshot of preset '{{name}}' → current team");
+    direction.textContent = getTeamComparisonText(directionKey, directionFallback, { name: preset.name });
     summary.appendChild(direction);
 
     const totals = document.createElement("div");
@@ -5420,13 +5553,16 @@ function renderTeamPresetComparison(preset, comparison) {
         { players: comparison.players.length, changes: comparison.totalChanges },
     );
     summary.appendChild(totals);
+    appendPrivateLoadoutResolutionSummary(summary, resolution);
 
     if (comparison.totalChanges === 0) {
         const noChanges = document.createElement("div");
         noChanges.className = "alert alert-success mb-0";
         noChanges.textContent = getTeamComparisonText(
-            "noChanges",
-            "The current team exactly matches this preset.",
+            resolution.allMatched ? "noChangesFromServer" : "noChanges",
+            resolution.allMatched
+                ? "The current team exactly matches the game loadouts found on the private server."
+                : "The current team exactly matches the selected baseline.",
         );
         results.appendChild(noChanges);
         return;
@@ -5448,7 +5584,12 @@ function renderTeamPresetComparison(preset, comparison) {
         const playerName = baselineName === currentName
             ? currentName
             : `${baselineName} → ${currentName}`;
-        playerTitle.textContent = `${slotLabel} · ${playerName}`;
+        const baselineLoadoutName = playerComparison.baselineData?.loadoutName
+            || resolution.matchedSlots.find((match) => match.slot === playerComparison.slot)?.loadoutName
+            || "";
+        playerTitle.textContent = baselineLoadoutName
+            ? `${slotLabel} · ${playerName} · ${baselineLoadoutName}`
+            : `${slotLabel} · ${playerName}`;
         cardHeader.appendChild(playerTitle);
 
         const badge = document.createElement("span");
@@ -5490,7 +5631,9 @@ function renderTeamPresetComparison(preset, comparison) {
             appendTeamComparisonTableCell(
                 headingRow,
                 "th",
-                getTeamComparisonText("columns.preset", "Preset"),
+                resolution.matchedSlots.some((match) => match.slot === playerComparison.slot)
+                    ? getTeamComparisonText("columns.gameLoadout", "Game loadout")
+                    : getTeamComparisonText("columns.presetSnapshot", "Preset snapshot"),
             );
             appendTeamComparisonTableCell(
                 headingRow,
@@ -5554,22 +5697,60 @@ function renderTeamPresetComparison(preset, comparison) {
     }
 }
 
-function compareCurrentTeamToSelectedPreset() {
+async function compareCurrentTeamToSelectedPreset() {
     const preset = getSelectedTeamPresetForComparison();
     if (!preset) {
         refreshTeamPresetComparisonControls();
         return;
     }
 
+    const compareButton = document.getElementById("buttonCompareTeamPreset");
+    if (compareButton?.dataset.loading === "true") {
+        return;
+    }
+    if (compareButton) {
+        compareButton.dataset.loading = "true";
+        compareButton.disabled = true;
+    }
+    setTeamPresetComparisonStatus(
+        getTeamComparisonText(
+            "loadingServer",
+            "Finding the latest game loadouts on the private server...",
+        ),
+    );
+
     savePreviousPlayer(currentPlayerTabId);
     try {
-        const comparison = compareTeamPresetWithCurrent(
+        const references = buildPrivateLoadoutReferences(preset);
+        const response = await requestPrivateLoadoutBaselines(references);
+        const resolution = resolvePrivateLoadoutBaseline(
             preset,
+            response,
+            response?.errorCode || "bridge-unavailable",
+        );
+        const comparison = compareTeamPresetWithCurrent(
+            resolution.baselinePreset,
             playerDataMap,
             getCurrentComparisonPlayerSlots(preset),
         );
-        renderTeamPresetComparison(preset, comparison);
-        setTeamPresetComparisonStatus();
+        renderTeamPresetComparison(preset, comparison, resolution);
+        setTeamPresetComparisonStatus(
+            resolution.allMatched
+                ? getTeamComparisonText(
+                    "serverMatchedShort",
+                    "Using the latest game loadouts matched from the private server.",
+                )
+                : (resolution.usesServerData
+                    ? getTeamComparisonText(
+                        "usingFallbackShort",
+                        "Some baselines use the saved preset snapshot; see the comparison details.",
+                    )
+                    : getTeamComparisonText(
+                        "usingSnapshotShort",
+                        "No server loadout was matched; the saved preset snapshot is being used.",
+                    )),
+            resolution.allMatched ? "success" : "warning",
+        );
         bootstrap.Modal.getOrCreateInstance(
             document.getElementById("teamPresetComparisonModal"),
         ).show();
@@ -5583,6 +5764,11 @@ function compareCurrentTeamToSelectedPreset() {
             ),
             "danger",
         );
+    } finally {
+        if (compareButton) {
+            compareButton.dataset.loading = "false";
+            compareButton.disabled = !document.getElementById("selectTeamPresetComparison")?.value;
+        }
     }
 }
 
