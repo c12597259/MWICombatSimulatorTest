@@ -12030,6 +12030,13 @@ document.addEventListener('DOMContentLoaded', function () {
         switcherContainer.style.right = '10px';
         switcherContainer.style.zIndex = '1000';
 
+        const enhancementSimulatorButton = document.createElement('a');
+        enhancementSimulatorButton.className = 'btn btn-sm btn-outline-success';
+        enhancementSimulatorButton.textContent = '强化模拟';
+        enhancementSimulatorButton.href = 'https://doh-nuts.github.io/Enhancelator/';
+        enhancementSimulatorButton.target = '_blank';
+        enhancementSimulatorButton.rel = 'noopener noreferrer';
+
         const enButton = document.createElement('button');
         enButton.className = 'btn btn-sm ' + (i18next.language === 'en' ? 'btn-primary' : 'btn-outline-primary');
         enButton.textContent = "English";
@@ -12048,6 +12055,8 @@ document.addEventListener('DOMContentLoaded', function () {
             enButton.className = 'btn btn-sm btn-outline-primary';
         };
 
+        switcherContainer.appendChild(enhancementSimulatorButton);
+        switcherContainer.appendChild(document.createTextNode(' '));
         switcherContainer.appendChild(enButton);
         switcherContainer.appendChild(document.createTextNode(' '));
         switcherContainer.appendChild(zhButton);
