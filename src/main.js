@@ -1956,6 +1956,11 @@ function getPlayerFragmentProductionData(playerToDisplay) {
                 characterHouseRoomMap: productionProfile.characterHouseRoomMap
                     ?? importData.characterHouseRoomMap,
                 buffs: productionProfile.buffs ?? importData.productionBuffs,
+                effectiveBuffsCaptured: productionProfile.effectiveBuffsCaptured === true,
+                effectiveActionTypeBuffs: productionProfile.effectiveActionTypeBuffs
+                    ?? importData.effectiveActionTypeBuffs,
+                effectiveActionHridBuffs: productionProfile.effectiveActionHridBuffs
+                    ?? importData.effectiveActionHridBuffs,
             },
             houseRooms: importData.houseRooms ?? {},
         };
@@ -3242,6 +3247,7 @@ function parsePlayerJson(playerJson, hrid) {
         abilities: [],
         ...playerJson.player,
         houseRooms: playerJson.houseRooms,
+        guildCombatBuffs: playerJson.guildCombatBuffs ?? [],
     };
     playerData.equipment = {};
     const triggerMap = playerJson.triggerMap;
@@ -4385,6 +4391,9 @@ function savePreviousPlayer(playerId) {
 function updateNextPlayer(currentPlayerNumber) {
     let playerImportData = playerDataMap[currentPlayerNumber];
     let importSet = JSON.parse(playerImportData);
+    player.guildCombatBuffs = Array.isArray(importSet.guildCombatBuffs)
+        ? structuredClone(importSet.guildCombatBuffs)
+        : [];
     ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"].forEach((skill) => {
         let levelInput = document.getElementById("inputLevel_" + skill);
         if (skill == "melee" && !importSet.player["meleeLevel"] && importSet.player["powerLevel"]) {

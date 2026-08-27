@@ -146,3 +146,82 @@ test("does not label an incomplete buff snapshot as personalized", () => {
     assert.equal(result.mode, "estimated");
     assert.ok(result.issues.includes("defaultBuffs"));
 });
+
+test("uses captured game action buffs and boosted profession levels", () => {
+    const actionDetailMap = {
+        "/actions/cooking/test_food": {
+            hrid: "/actions/cooking/test_food",
+            type: "/action_types/cooking",
+            name: "Test Food",
+            baseTimeCost: 10e9,
+            levelRequirement: { skillHrid: "/skills/cooking", level: 1 },
+            inputItems: [],
+            outputItems: [{ itemHrid: "/items/test_food", count: 1 }],
+        },
+    };
+    const productionProfile = {
+        complete: true,
+        effectiveBuffsCaptured: true,
+        characterSkills: [{ skillHrid: "/skills/cooking", level: 11 }],
+        actionTypeDrinkSlotsMap: {},
+        effectiveActionTypeBuffs: {
+            "/action_types/cooking": [
+                { typeHrid: "/buff_types/cooking_level", flatBoost: 2, ratioBoost: 0 },
+                { typeHrid: "/buff_types/action_speed", flatBoost: 0.2, ratioBoost: 0 },
+                { typeHrid: "/buff_types/efficiency", flatBoost: 0.3, ratioBoost: 0 },
+                { typeHrid: "/buff_types/gourmet", flatBoost: 0.5, ratioBoost: 0 },
+            ],
+        },
+        effectiveActionHridBuffs: {},
+    };
+    // 360 base actions * 1.2 speed * (1 + 0.30 + 0.12 level efficiency)
+    // * 1.5 gourmet output = 920.16 items/hour.
+    const result = calculateFragmentTimeCosts({
+        expectedDropMap: { "/items/blue_key_fragment": 1 },
+        simulatedHours: 1,
+        consumablesUsed: { "/items/test_food": 920.16 },
+        productionProfile,
+        actionDetailMap,
+    });
+
+    assert.equal(result.mode, "personalized");
+    assert.ok(Math.abs(result.craftMinutesPerSimHour - 60) < 1e-9);
+    assert.ok(!result.issues.includes("defaultTools"));
+    assert.ok(!result.issues.includes("defaultBuffs"));
+});
+
+test("applies captured action-level penalties before profession efficiency", () => {
+    const actionDetailMap = {
+        "/actions/cooking/test_food": {
+            hrid: "/actions/cooking/test_food",
+            type: "/action_types/cooking",
+            name: "Test Food",
+            baseTimeCost: 10e9,
+            levelRequirement: { skillHrid: "/skills/cooking", level: 1 },
+            inputItems: [],
+            outputItems: [{ itemHrid: "/items/test_food", count: 1 }],
+        },
+    };
+    const result = calculateFragmentTimeCosts({
+        expectedDropMap: { "/items/blue_key_fragment": 1 },
+        simulatedHours: 1,
+        consumablesUsed: { "/items/test_food": 378 },
+        productionProfile: {
+            complete: true,
+            effectiveBuffsCaptured: true,
+            characterSkills: [{ skillHrid: "/skills/cooking", level: 11 }],
+            actionTypeDrinkSlotsMap: {},
+            effectiveActionTypeBuffs: {
+                "/action_types/cooking": [
+                    { typeHrid: "/buff_types/action_level", flatBoost: 5, ratioBoost: 0 },
+                ],
+            },
+            effectiveActionHridBuffs: {},
+        },
+        actionDetailMap,
+    });
+
+    // Required level becomes 6, so level efficiency is 5%: 360 * 1.05 = 378.
+    assert.equal(result.mode, "personalized");
+    assert.ok(Math.abs(result.craftMinutesPerSimHour - 60) < 1e-9);
+});
