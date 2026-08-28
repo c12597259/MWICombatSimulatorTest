@@ -181,13 +181,29 @@ class CombatUnit {
             });
         });
 
+        const maxHitpointsBoost = this.getBuffBoost("/buff_types/max_hitpoints");
         this.combatDetails.maxHitpoints = Math.floor(
-            (10 * (10 + this.combatDetails.staminaLevel) + this.combatDetails.combatStats.maxHitpoints)
-            * (1 + this.combatDetails.combatStats.maxHitpointsRatio)
+            (
+                10 * (10 + this.combatDetails.staminaLevel)
+                + this.combatDetails.combatStats.maxHitpoints
+                + maxHitpointsBoost.flatBoost
+            ) * (
+                1
+                + this.combatDetails.combatStats.maxHitpointsRatio
+                + maxHitpointsBoost.ratioBoost
+            )
         );
+        const maxManapointsBoost = this.getBuffBoost("/buff_types/max_manapoints");
         this.combatDetails.maxManapoints = Math.floor(
-            (10 * (10 + this.combatDetails.intelligenceLevel) + this.combatDetails.combatStats.maxManapoints)
-            * (1 + this.combatDetails.combatStats.maxManapointsRatio)
+            (
+                10 * (10 + this.combatDetails.intelligenceLevel)
+                + this.combatDetails.combatStats.maxManapoints
+                + maxManapointsBoost.flatBoost
+            ) * (
+                1
+                + this.combatDetails.combatStats.maxManapointsRatio
+                + maxManapointsBoost.ratioBoost
+            )
         );
 
         let accuracyRatioBoostFromFury = this.getBuffBoost("/buff_types/fury_accuracy").ratioBoost;

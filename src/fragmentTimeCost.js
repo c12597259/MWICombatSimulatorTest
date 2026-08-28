@@ -476,13 +476,19 @@ export function calculateFragmentTimeCosts({
     const fragments = KEY_FRAGMENT_HRIDS
         .map((itemHrid) => ({ itemHrid, expectedAmount: getDropAmount(itemHrid) }))
         .filter((fragment) => fragment.expectedAmount > 0)
-        .map((fragment) => ({
-            ...fragment,
-            combatMinutesPerFragment: hours * 60 / fragment.expectedAmount,
-            totalMinutesPerFragment: hours
+        .map((fragment) => {
+            const combatMinutesPerFragment = hours * 60 / fragment.expectedAmount;
+            const totalMinutesPerFragment = hours
                 * (60 + craftResult.totalMinutesPerHour)
-                / fragment.expectedAmount,
-        }));
+                / fragment.expectedAmount;
+            return {
+                ...fragment,
+                combatMinutesPerFragment,
+                totalMinutesPerFragment,
+                combatFragmentsPerDay: 1440 / combatMinutesPerFragment,
+                totalFragmentsPerDay: 1440 / totalMinutesPerFragment,
+            };
+        });
 
     const profileIsComplete = normalizedProfile.complete && craftResult.issues.length === 0;
     return {

@@ -139,6 +139,16 @@
         body.dark-mode #teamPresetComparisonModal .team-comparison-value {
             color: #f0f0f0;
         }
+
+        body.dark-mode #houseRoomsModal .text-secondary,
+        body.dark-mode #fragmentTimeCostSection .text-muted {
+            color: #c8c8c8 !important;
+        }
+
+        body.dark-mode #buttonSimulationResultDamageDetails {
+            color: #f0f0f0;
+            border-color: #aaa;
+        }
     </style>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -1150,13 +1160,26 @@
                             <div class="col-md-2 text-end"><b>%</b></div>
                         </div>
                         <div id="simulationResultTotalDamageTaken" class="mb-2"></div>
+                        <div id="simulationResultDamageDetailsEntry" class="d-none mb-2">
+                            <button
+                                id="buttonSimulationResultDamageDetails"
+                                class="btn btn-outline-secondary btn-sm collapsed"
+                                type="button"
+                                data-bs-toggle="collapse"
+                                data-bs-target="#simulationResultDamageDetails"
+                                aria-expanded="false"
+                                aria-controls="simulationResultDamageDetails"
+                            >
+                                <span data-i18n="common:simulationResults.details">Details</span>
+                            </button>
+                            <div id="simulationResultDamageDetails" class="collapse mt-2">
+                                <div id="simulationResultDamageDoneDetails"></div>
+                                <div id="simulationResultDamageTakenDetails"></div>
+                            </div>
+                        </div>
                         <div class="row pt-2">
                             <b><span data-i18n="common:expectedProfit">Expected Profit</span>: <span id="profitPreview"></span></b>
                         </div>
-                        <div class="row pt-2">
-                            <b data-i18n="common:expectedDropsTotal">Expected Drops (Total)</b>
-                        </div>
-                        <div class="row" id="simulationResultDrops"></div>
                         <div class="pt-3 d-none" id="fragmentTimeCostSection">
                             <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
                                 <b data-i18n="common:fragmentTimeCost.title">Key Fragment Time Cost</b>
@@ -1164,8 +1187,8 @@
                             </div>
                             <div class="small text-muted" data-i18n="common:fragmentTimeCost.fragment">Fragment</div>
                             <div class="row small text-muted">
-                                <div class="col-6 text-end" data-i18n="common:fragmentTimeCost.combatOnly">Combat only (min/fragment)</div>
-                                <div class="col-6 text-end" data-i18n="common:fragmentTimeCost.withCrafting">With crafting (min/fragment)</div>
+                                <div class="col-6 text-end" data-i18n="common:fragmentTimeCost.combatOnly">Combat only</div>
+                                <div class="col-6 text-end" data-i18n="common:fragmentTimeCost.withCrafting">With crafting</div>
                             </div>
                             <div id="simulationResultFragmentTimeCost"></div>
                             <div class="form-text">
@@ -1175,6 +1198,10 @@
                             </div>
                             <div class="form-text" id="fragmentTimeCostNote"></div>
                         </div>
+                        <div class="row pt-2">
+                            <b data-i18n="common:expectedDropsTotal">Expected Drops (Total)</b>
+                        </div>
+                        <div class="row" id="simulationResultDrops"></div>
                     </div>
                     <!-- #endregion -->
                 </div>
@@ -1837,7 +1864,7 @@
         </div>
         <!-- endregion -->
     </div>
-        <div class="modal" id="ExperimentalFeaturesModal" tabindex="-1">
+    <div class="modal" id="ExperimentalFeaturesModal" tabindex="-1">
         <!-- #region Patch Notes Modal -->
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
@@ -1986,7 +2013,7 @@
     </div>
     <div class="modal" id="houseRoomsModal" tabindex="-1">
         <!-- #region House Rooms Modal -->
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title" data-i18n="characterManagement.house">House Rooms</h5>
@@ -1995,6 +2022,12 @@
                 <div class="modal-body">
                     <div class="container-fluid">
                         <div id="houseRoomsList"></div>
+                        <hr class="my-4">
+                        <h6 data-i18n="common:guildCombatBuffs.title">Guild Combat Shrines</h6>
+                        <p class="small text-secondary" data-i18n="common:guildCombatBuffs.description">
+                            Imported effective levels can be adjusted for the current character.
+                        </p>
+                        <div id="guildCombatBuffLevelsList"></div>
                     </div>
                 </div>
                 <div class="modal-footer">

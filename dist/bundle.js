@@ -501,13 +501,29 @@ class CombatUnit {
             });
         });
 
+        const maxHitpointsBoost = this.getBuffBoost("/buff_types/max_hitpoints");
         this.combatDetails.maxHitpoints = Math.floor(
-            (10 * (10 + this.combatDetails.staminaLevel) + this.combatDetails.combatStats.maxHitpoints)
-            * (1 + this.combatDetails.combatStats.maxHitpointsRatio)
+            (
+                10 * (10 + this.combatDetails.staminaLevel)
+                + this.combatDetails.combatStats.maxHitpoints
+                + maxHitpointsBoost.flatBoost
+            ) * (
+                1
+                + this.combatDetails.combatStats.maxHitpointsRatio
+                + maxHitpointsBoost.ratioBoost
+            )
         );
+        const maxManapointsBoost = this.getBuffBoost("/buff_types/max_manapoints");
         this.combatDetails.maxManapoints = Math.floor(
-            (10 * (10 + this.combatDetails.intelligenceLevel) + this.combatDetails.combatStats.maxManapoints)
-            * (1 + this.combatDetails.combatStats.maxManapointsRatio)
+            (
+                10 * (10 + this.combatDetails.intelligenceLevel)
+                + this.combatDetails.combatStats.maxManapoints
+                + maxManapointsBoost.flatBoost
+            ) * (
+                1
+                + this.combatDetails.combatStats.maxManapointsRatio
+                + maxManapointsBoost.ratioBoost
+            )
         );
 
         let accuracyRatioBoostFromFury = this.getBuffBoost("/buff_types/fury_accuracy").ratioBoost;
@@ -1152,6 +1168,8 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _equipment__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ./equipment */ "./src/combatsimulator/equipment.js");
 /* harmony import */ var _houseRoom__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(/*! ./houseRoom */ "./src/combatsimulator/houseRoom.js");
 /* harmony import */ var _achievement__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(/*! ./achievement */ "./src/combatsimulator/achievement.js");
+/* harmony import */ var _guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(/*! ../guildCombatShrines.js */ "./src/guildCombatShrines.js");
+
 
 
 
@@ -1172,6 +1190,7 @@ class Player extends _combatUnit__WEBPACK_IMPORTED_MODULE_1__["default"] {
         "/equipment_types/pouch": null,
         "/equipment_types/back": null,
     };
+    guildCombatBuffLevels = { ..._guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_6__.GUILD_COMBAT_SHRINE_DEFAULTS };
 
     constructor() {
         super();
@@ -1207,8 +1226,13 @@ class Player extends _combatUnit__WEBPACK_IMPORTED_MODULE_1__["default"] {
         });
 
         player.achievements = new _achievement__WEBPACK_IMPORTED_MODULE_5__["default"](dto.achievements);
+        player.guildCombatBuffLevels = (0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_6__.resolveGuildCombatShrineLevels)(
+            dto.guildCombatBuffLevels ?? dto.guildShrineLevels,
+            dto.guildCombatBuffs,
+        );
         player.guildCombatBuffs = (Array.isArray(dto.guildCombatBuffs) ? dto.guildCombatBuffs : [])
             .filter((buff) => typeof buff?.typeHrid === "string" && buff.typeHrid.startsWith("/buff_types/"))
+            .filter((buff) => !(0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_6__.isKnownGuildCombatShrineBuffType)(buff.typeHrid))
             .map((buff, index) => ({
                 uniqueHrid: String(buff.uniqueHrid || `guild:${index}`),
                 typeHrid: buff.typeHrid,
@@ -1220,6 +1244,13 @@ class Player extends _combatUnit__WEBPACK_IMPORTED_MODULE_1__["default"] {
         player.debuffOnLevelGap = dto.debuffOnLevelGap;
 
         return player;
+    }
+
+    getBuffBoosts(type) {
+        return [
+            ...super.getBuffBoosts(type),
+            ...(0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_6__.getGuildCombatShrineBoosts)(type, this.guildCombatBuffLevels),
+        ];
     }
 
     updateCombatDetails() {
@@ -2033,13 +2064,19 @@ function calculateFragmentTimeCosts({
     const fragments = KEY_FRAGMENT_HRIDS
         .map((itemHrid) => ({ itemHrid, expectedAmount: getDropAmount(itemHrid) }))
         .filter((fragment) => fragment.expectedAmount > 0)
-        .map((fragment) => ({
-            ...fragment,
-            combatMinutesPerFragment: hours * 60 / fragment.expectedAmount,
-            totalMinutesPerFragment: hours
+        .map((fragment) => {
+            const combatMinutesPerFragment = hours * 60 / fragment.expectedAmount;
+            const totalMinutesPerFragment = hours
                 * (60 + craftResult.totalMinutesPerHour)
-                / fragment.expectedAmount,
-        }));
+                / fragment.expectedAmount;
+            return {
+                ...fragment,
+                combatMinutesPerFragment,
+                totalMinutesPerFragment,
+                combatFragmentsPerDay: 1440 / combatMinutesPerFragment,
+                totalFragmentsPerDay: 1440 / totalMinutesPerFragment,
+            };
+        });
 
     const profileIsComplete = normalizedProfile.complete && craftResult.issues.length === 0;
     return {
@@ -2049,6 +2086,183 @@ function calculateFragmentTimeCosts({
         mode: !hasConsumables ? "exact" : (profileIsComplete ? "personalized" : "estimated"),
         issues: craftResult.issues,
     };
+}
+
+
+/***/ }),
+
+/***/ "./src/guildCombatShrines.js":
+/*!***********************************!*\
+  !*** ./src/guildCombatShrines.js ***!
+  \***********************************/
+/***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
+
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   GUILD_COMBAT_SHRINE_DEFAULTS: () => (/* binding */ GUILD_COMBAT_SHRINE_DEFAULTS),
+/* harmony export */   GUILD_COMBAT_SHRINE_DETAILS: () => (/* binding */ GUILD_COMBAT_SHRINE_DETAILS),
+/* harmony export */   getGuildCombatShrineBoosts: () => (/* binding */ getGuildCombatShrineBoosts),
+/* harmony export */   hasExplicitGuildCombatShrineLevels: () => (/* binding */ hasExplicitGuildCombatShrineLevels),
+/* harmony export */   inferGuildCombatShrineLevels: () => (/* binding */ inferGuildCombatShrineLevels),
+/* harmony export */   isKnownGuildCombatShrineBuffType: () => (/* binding */ isKnownGuildCombatShrineBuffType),
+/* harmony export */   normalizeGuildCombatShrineLevel: () => (/* binding */ normalizeGuildCombatShrineLevel),
+/* harmony export */   normalizeGuildCombatShrineLevels: () => (/* binding */ normalizeGuildCombatShrineLevels),
+/* harmony export */   resolveGuildCombatShrineLevels: () => (/* binding */ resolveGuildCombatShrineLevels)
+/* harmony export */ });
+const GUILD_COMBAT_SHRINE_DETAILS = Object.freeze([
+    {
+        key: "force",
+        buffTypes: ["/buff_types/damage"],
+        ratioPerLevel: 0.003,
+    },
+    {
+        key: "tempo",
+        buffTypes: ["/buff_types/attack_speed", "/buff_types/cast_speed"],
+        ratioPerLevel: 0.004,
+    },
+    {
+        key: "spirit",
+        buffTypes: ["/buff_types/max_hitpoints", "/buff_types/max_manapoints"],
+        ratioPerLevel: 0.01,
+    },
+    {
+        key: "rarity",
+        buffTypes: ["/buff_types/rare_find"],
+        ratioPerLevel: 0.015,
+    },
+    {
+        key: "scholar",
+        buffTypes: ["/buff_types/wisdom"],
+        ratioPerLevel: 0.005,
+    },
+]);
+
+const GUILD_COMBAT_SHRINE_DEFAULTS = Object.freeze(
+    Object.fromEntries(GUILD_COMBAT_SHRINE_DETAILS.map(({ key }) => [key, 0])),
+);
+
+const SHRINE_KEYS = new Set(GUILD_COMBAT_SHRINE_DETAILS.map(({ key }) => key));
+const KNOWN_BUFF_TYPES = new Set(
+    GUILD_COMBAT_SHRINE_DETAILS.flatMap(({ buffTypes }) => buffTypes),
+);
+
+function normalizeGuildCombatShrineLevel(level) {
+    const numericLevel = Number(level);
+    if (!Number.isFinite(numericLevel)) {
+        return 0;
+    }
+    return Math.max(0, Math.min(20, Math.floor(numericLevel)));
+}
+
+function findShrineKey(key, entry) {
+    const candidate = `${String(key ?? "")} ${String(entry?.shrineHrid ?? "")}`.toLowerCase();
+    return GUILD_COMBAT_SHRINE_DETAILS.find(({ key: shrineKey }) => (
+        candidate === shrineKey
+        || candidate.includes(`/${shrineKey}_combat`)
+        || candidate.includes(`/combat_${shrineKey}`)
+        || candidate.includes(shrineKey)
+    ))?.key;
+}
+
+function readShrineLevel(entry) {
+    if (entry && typeof entry === "object") {
+        return entry.activeLevel ?? entry.effectiveLevel ?? entry.purchasedLevel ?? entry.level;
+    }
+    return entry;
+}
+
+function hasExplicitGuildCombatShrineLevels(levels) {
+    if (!levels || typeof levels !== "object") {
+        return false;
+    }
+    return Object.entries(levels).some(([key, entry]) => (
+        SHRINE_KEYS.has(key) || findShrineKey(key, entry)
+    ));
+}
+
+function normalizeGuildCombatShrineLevels(levels = {}) {
+    const normalized = { ...GUILD_COMBAT_SHRINE_DEFAULTS };
+    if (!levels || typeof levels !== "object") {
+        return normalized;
+    }
+
+    for (const [key, entry] of Object.entries(levels)) {
+        const shrineKey = SHRINE_KEYS.has(key) ? key : findShrineKey(key, entry);
+        if (!shrineKey) {
+            continue;
+        }
+        normalized[shrineKey] = normalizeGuildCombatShrineLevel(readShrineLevel(entry));
+    }
+    return normalized;
+}
+
+function inferLevelFromBuff(buff, detail) {
+    if (!buff || !detail.buffTypes.includes(buff.typeHrid)) {
+        return 0;
+    }
+    const boost = buff.typeHrid === "/buff_types/cast_speed"
+        || buff.typeHrid === "/buff_types/rare_find"
+        || buff.typeHrid === "/buff_types/wisdom"
+        ? Number(buff.flatBoost)
+        : Number(buff.ratioBoost);
+    if (!Number.isFinite(boost) || boost <= 0) {
+        return 0;
+    }
+    return normalizeGuildCombatShrineLevel(Math.round(boost / detail.ratioPerLevel));
+}
+
+function inferGuildCombatShrineLevels(guildCombatBuffs = []) {
+    const inferred = { ...GUILD_COMBAT_SHRINE_DEFAULTS };
+    if (!Array.isArray(guildCombatBuffs)) {
+        return inferred;
+    }
+
+    for (const detail of GUILD_COMBAT_SHRINE_DETAILS) {
+        inferred[detail.key] = guildCombatBuffs.reduce(
+            (highestLevel, buff) => Math.max(highestLevel, inferLevelFromBuff(buff, detail)),
+            0,
+        );
+    }
+    return inferred;
+}
+
+function resolveGuildCombatShrineLevels(levels, guildCombatBuffs = []) {
+    return hasExplicitGuildCombatShrineLevels(levels)
+        ? normalizeGuildCombatShrineLevels(levels)
+        : inferGuildCombatShrineLevels(guildCombatBuffs);
+}
+
+function isKnownGuildCombatShrineBuffType(typeHrid) {
+    return KNOWN_BUFF_TYPES.has(typeHrid);
+}
+
+function getGuildCombatShrineBoosts(typeHrid, levels = {}) {
+    const normalized = normalizeGuildCombatShrineLevels(levels);
+    const boosts = [];
+
+    if (typeHrid === "/buff_types/damage" && normalized.force > 0) {
+        boosts.push({ ratioBoost: 0.003 * normalized.force, flatBoost: 0 });
+    }
+    if (typeHrid === "/buff_types/attack_speed" && normalized.tempo > 0) {
+        boosts.push({ ratioBoost: 0.004 * normalized.tempo, flatBoost: 0 });
+    }
+    if (typeHrid === "/buff_types/cast_speed" && normalized.tempo > 0) {
+        boosts.push({ ratioBoost: 0, flatBoost: 0.004 * normalized.tempo });
+    }
+    if (typeHrid === "/buff_types/max_hitpoints" && normalized.spirit > 0) {
+        boosts.push({ ratioBoost: 0.01 * normalized.spirit, flatBoost: 0 });
+    }
+    if (typeHrid === "/buff_types/max_manapoints" && normalized.spirit > 0) {
+        boosts.push({ ratioBoost: 0.01 * normalized.spirit, flatBoost: 0 });
+    }
+    if (typeHrid === "/buff_types/rare_find" && normalized.rarity > 0) {
+        boosts.push({ ratioBoost: 0, flatBoost: 0.015 * normalized.rarity });
+    }
+    if (typeHrid === "/buff_types/wisdom" && normalized.scholar > 0) {
+        boosts.push({ ratioBoost: 0, flatBoost: 0.005 * normalized.scholar });
+    }
+
+    return boosts;
 }
 
 
@@ -2701,7 +2915,7 @@ function createTeamPresetId() {
   \************************/
 /***/ ((module) => {
 
-module.exports = /*#__PURE__*/JSON.parse('{"2026年8月28日":["支持从私有配装数据导入每名角色实际生效的公会神龛战斗增益","钥匙碎片总耗时支持使用角色专业等级及游戏当前生效的专业增益精确计算"],"2026年5月5日":["更新装备数据和本地化名称"],"2026年4月7日":["增加字段显示迷宫尝试次数和迷宫成功率"],"2026年3月5日":["优化狂怒相关的模拟性能"],"2026年3月3日":["支持迷宫封印对应的个人增益"],"2026年2月24日":["更新迷宫补丁的数据","新增支持迷宫单体/批量模拟"],"2026年2月1日":["修正战斗等级计算的精度","修正地下城完成或失败后重新进入战斗的时间间隔 by wangchyan","修正诅咒和削弱的持续时间 by wangchyan","修正诅咒和狂怒的触发逻辑 by wangchyan","修正地下城团灭重置机制的部分逻辑 by wangchyan","修复守护光环和速度光环部分增益未正确受对应等级加强的异常 by wangchyan","修复无敌技能未正确影响韧性数值的缺陷 by wangchyan","修复初次进入战斗时未能优先吃喝的异常 by wangchyan","战斗时长相关的统计现在仅计算已完成的战斗，不再包含当前未结束的战斗 by wangchyan"],"2026年1月11日":["修复trigger错误计算已阵亡单位的问题 by wangchyan"],"2025年12月31日":["实验性功能新增HP/MP可视化图表 by wangchyan","修复防御伤害未正确受damge加成的异常 by wangchyan","修复守护光环的治疗加成效果未生效的异常 by wangchyan","修复快速治疗等技能未正确选择最低%生命为目标的错误 by wangchyan"],"2025年12月30日":["地下城增加最短完成时间记录"],"2025年12月24日":["修复技能释放选择的缺陷，之前可能存在异常缺蓝等情况"],"2025年12月18日":["支持成就系统及对应buff效果","地下城怪物的掉落不再生效"],"2025年12月6日":["修复游戏更新后技能在无trigger情况下由[]变为null时造成的异常"],"2025年11月7日":["兼容支持从CN镜像站调用API获取价格"],"2025年10月14日":["修复怪物攻击间隔数值未能适配攻击等级的问题"],"2025年9月17日":["修复暴击光环的trigger缺陷"],"2025年9月9日":["复活时不再错误的清空所有buff","团灭日志增加反伤、荆棘和DOT伤害记录"],"2025年8月21日":["增加单挑战斗批量模拟和对应怪物选项","增加MooPass和社区buff的选项及对应功能","精炼装备数值加强","秘法主教属性削弱","init_client_info_v1.20250819.0.json游戏数据更新"],"2025年8月20日":["修复经验和掉落计算在极端情况下的可能异常"],"2025年8月19日":["合并Test和Temp分支的rework内容","init_client_info_v1.20250818.0.json游戏数据更新"],"2025年8月18日":["修复贯穿技能可能对相同目标造成重复伤害的问题","修复团灭日志在黑夜模式下的显示异常","战斗等级公式更新","钟乳石魔像的荆棘数值调整","init_client_info_v1.20250626.0_0817.json游戏数据更新"],"2025年8月16日":["增加停止模拟按钮 by BKN46","增加技能顺序调整按钮 by BKN46","增加团灭日志 by TruthLight","怪物属性更新","奥术反射更名为报应","init_client_info_v1.20250626.0_0815.json游戏数据更新"],"2025年8月14日":["怪物属性更新","远程和法师装备属性调整","反伤计算上限调整","修复战斗间隔释放技能的异常","修复技能释放判断逻辑的异常","法力值耗尽比例更加准确","调整远程经验的15%和魔法经验的12%映射到攻击经验","init_client_info_v1.20250626.0_0813.json游戏数据更新"],"2025年8月11日":["怪物属性更新","近战和物理技能施法时间更新","盾击和重锤数值调整","双手盾防御经验加成调整","init_client_info_v1.20250626.0_0811.json游戏数据更新"],"2025年8月8日":["实现组队等级差过大时对掉落和经验的惩罚","实现怪物经验随狂暴进度百分比增加","暴击光环数值调整","增加战斗等级数值显示","增加等级差距惩罚数值显示","init_client_info_v1.20250626.0_0807.json游戏数据更新"],"2025年8月7日":["修复组队战斗时一些重复物品掉落数量异常的缺陷 by contr4l","init_client_info_v1.20250626.0_0806.json游戏数据更新"],"2025年8月3日":["怪物狂暴机制及对应trigger生效","精炼装备更新，护符数值调整，守护光环增加闪避率","init_client_info_v1.20250626.0_0802.json游戏数据更新","狂怒层数修正为5层","招架结算机制调整"],"2025年7月31日":["物品数据和怪物属性更新","尖刺外壳和奥术反射重做","强化数值更新","删除异常trigger","狮鹫盾的虚弱重做","君王剑招架对队友生效","狂怒特效最大层数修正为6层","涟漪特效增加10MP恢复","反伤正确显示其命中率","反伤机制调整","同步双手盾属性和反伤荆棘技能数值的调整"],"2025年7月22日":["暴击光环受远程等级加成","光环基础数值和等级加成调整"],"2025年7月17日":["批量模拟支持勾选星球","经验分配比例调整至30%+70%","光环及对应trigger，并按对应技能等级百分比加成","水火自然默认调整为元素光环","init_client_info_v1.20250626.0_0717.json游戏数据更新"],"2025年7月11日":["怪物经验和技能等级公式更新","闪避和抗性计算公式更新","力量更替为近战以及对应的兼容","init_client_info_v1.20250626.0_0711.json游戏数据更新"],"2025年7月10日":["修复贯穿技能由敌人释放时可能多次击中相同目标的缺陷"],"2025年7月9日":["掉落和掉率调整","经验调整","疫病射击和破甲之刺调整","怪物自动恢复移除","疫病射击trigger调整","获取价格使用官方API"],"2025年7月7日":["怪物属性缩放和地图多难度","法师技能调整和装备上\'技能伤害\'词缀生效","攻击等级和房屋等级对施法速度的影响生效","物品调整","精准重做以攻击等级计算","TEST 远程魔法经验的10%映射到攻击经验！","经验重做和护符装备"]}');
+module.exports = /*#__PURE__*/JSON.parse('{"2026年8月28日":["支持从私有配装数据导入每名角色实际生效的公会神龛战斗增益","房屋面板新增五种公会战斗神龛等级显示与模拟调整","逐怪物伤害与承伤明细改为默认折叠显示","钥匙碎片时间成本移至期望掉落上方，并新增每日碎片产量","钥匙碎片总耗时支持使用角色专业等级及游戏当前生效的专业增益精确计算"],"2026年5月5日":["更新装备数据和本地化名称"],"2026年4月7日":["增加字段显示迷宫尝试次数和迷宫成功率"],"2026年3月5日":["优化狂怒相关的模拟性能"],"2026年3月3日":["支持迷宫封印对应的个人增益"],"2026年2月24日":["更新迷宫补丁的数据","新增支持迷宫单体/批量模拟"],"2026年2月1日":["修正战斗等级计算的精度","修正地下城完成或失败后重新进入战斗的时间间隔 by wangchyan","修正诅咒和削弱的持续时间 by wangchyan","修正诅咒和狂怒的触发逻辑 by wangchyan","修正地下城团灭重置机制的部分逻辑 by wangchyan","修复守护光环和速度光环部分增益未正确受对应等级加强的异常 by wangchyan","修复无敌技能未正确影响韧性数值的缺陷 by wangchyan","修复初次进入战斗时未能优先吃喝的异常 by wangchyan","战斗时长相关的统计现在仅计算已完成的战斗，不再包含当前未结束的战斗 by wangchyan"],"2026年1月11日":["修复trigger错误计算已阵亡单位的问题 by wangchyan"],"2025年12月31日":["实验性功能新增HP/MP可视化图表 by wangchyan","修复防御伤害未正确受damge加成的异常 by wangchyan","修复守护光环的治疗加成效果未生效的异常 by wangchyan","修复快速治疗等技能未正确选择最低%生命为目标的错误 by wangchyan"],"2025年12月30日":["地下城增加最短完成时间记录"],"2025年12月24日":["修复技能释放选择的缺陷，之前可能存在异常缺蓝等情况"],"2025年12月18日":["支持成就系统及对应buff效果","地下城怪物的掉落不再生效"],"2025年12月6日":["修复游戏更新后技能在无trigger情况下由[]变为null时造成的异常"],"2025年11月7日":["兼容支持从CN镜像站调用API获取价格"],"2025年10月14日":["修复怪物攻击间隔数值未能适配攻击等级的问题"],"2025年9月17日":["修复暴击光环的trigger缺陷"],"2025年9月9日":["复活时不再错误的清空所有buff","团灭日志增加反伤、荆棘和DOT伤害记录"],"2025年8月21日":["增加单挑战斗批量模拟和对应怪物选项","增加MooPass和社区buff的选项及对应功能","精炼装备数值加强","秘法主教属性削弱","init_client_info_v1.20250819.0.json游戏数据更新"],"2025年8月20日":["修复经验和掉落计算在极端情况下的可能异常"],"2025年8月19日":["合并Test和Temp分支的rework内容","init_client_info_v1.20250818.0.json游戏数据更新"],"2025年8月18日":["修复贯穿技能可能对相同目标造成重复伤害的问题","修复团灭日志在黑夜模式下的显示异常","战斗等级公式更新","钟乳石魔像的荆棘数值调整","init_client_info_v1.20250626.0_0817.json游戏数据更新"],"2025年8月16日":["增加停止模拟按钮 by BKN46","增加技能顺序调整按钮 by BKN46","增加团灭日志 by TruthLight","怪物属性更新","奥术反射更名为报应","init_client_info_v1.20250626.0_0815.json游戏数据更新"],"2025年8月14日":["怪物属性更新","远程和法师装备属性调整","反伤计算上限调整","修复战斗间隔释放技能的异常","修复技能释放判断逻辑的异常","法力值耗尽比例更加准确","调整远程经验的15%和魔法经验的12%映射到攻击经验","init_client_info_v1.20250626.0_0813.json游戏数据更新"],"2025年8月11日":["怪物属性更新","近战和物理技能施法时间更新","盾击和重锤数值调整","双手盾防御经验加成调整","init_client_info_v1.20250626.0_0811.json游戏数据更新"],"2025年8月8日":["实现组队等级差过大时对掉落和经验的惩罚","实现怪物经验随狂暴进度百分比增加","暴击光环数值调整","增加战斗等级数值显示","增加等级差距惩罚数值显示","init_client_info_v1.20250626.0_0807.json游戏数据更新"],"2025年8月7日":["修复组队战斗时一些重复物品掉落数量异常的缺陷 by contr4l","init_client_info_v1.20250626.0_0806.json游戏数据更新"],"2025年8月3日":["怪物狂暴机制及对应trigger生效","精炼装备更新，护符数值调整，守护光环增加闪避率","init_client_info_v1.20250626.0_0802.json游戏数据更新","狂怒层数修正为5层","招架结算机制调整"],"2025年7月31日":["物品数据和怪物属性更新","尖刺外壳和奥术反射重做","强化数值更新","删除异常trigger","狮鹫盾的虚弱重做","君王剑招架对队友生效","狂怒特效最大层数修正为6层","涟漪特效增加10MP恢复","反伤正确显示其命中率","反伤机制调整","同步双手盾属性和反伤荆棘技能数值的调整"],"2025年7月22日":["暴击光环受远程等级加成","光环基础数值和等级加成调整"],"2025年7月17日":["批量模拟支持勾选星球","经验分配比例调整至30%+70%","光环及对应trigger，并按对应技能等级百分比加成","水火自然默认调整为元素光环","init_client_info_v1.20250626.0_0717.json游戏数据更新"],"2025年7月11日":["怪物经验和技能等级公式更新","闪避和抗性计算公式更新","力量更替为近战以及对应的兼容","init_client_info_v1.20250626.0_0711.json游戏数据更新"],"2025年7月10日":["修复贯穿技能由敌人释放时可能多次击中相同目标的缺陷"],"2025年7月9日":["掉落和掉率调整","经验调整","疫病射击和破甲之刺调整","怪物自动恢复移除","疫病射击trigger调整","获取价格使用官方API"],"2025年7月7日":["怪物属性缩放和地图多难度","法师技能调整和装备上\'技能伤害\'词缀生效","攻击等级和房屋等级对施法速度的影响生效","物品调整","精准重做以攻击等级计算","TEST 远程魔法经验的10%映射到攻击经验！","经验重做和护符装备"]}');
 
 /***/ }),
 
@@ -3009,10 +3223,12 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _combatsimulator_data_achievementTierDetailMap_json__WEBPACK_IMPORTED_MODULE_17__ = __webpack_require__(/*! ./combatsimulator/data/achievementTierDetailMap.json */ "./src/combatsimulator/data/achievementTierDetailMap.json");
 /* harmony import */ var _combatsimulator_data_achievementDetailMap_json__WEBPACK_IMPORTED_MODULE_18__ = __webpack_require__(/*! ./combatsimulator/data/achievementDetailMap.json */ "./src/combatsimulator/data/achievementDetailMap.json");
 /* harmony import */ var _fragmentTimeCost_js__WEBPACK_IMPORTED_MODULE_19__ = __webpack_require__(/*! ./fragmentTimeCost.js */ "./src/fragmentTimeCost.js");
-/* harmony import */ var _teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__ = __webpack_require__(/*! ./teamPresetStore.js */ "./src/teamPresetStore.js");
-/* harmony import */ var _teamPresetComparison_js__WEBPACK_IMPORTED_MODULE_21__ = __webpack_require__(/*! ./teamPresetComparison.js */ "./src/teamPresetComparison.js");
-/* harmony import */ var _privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_22__ = __webpack_require__(/*! ./privateLoadoutBaseline.js */ "./src/privateLoadoutBaseline.js");
-/* harmony import */ var _patchNote_json__WEBPACK_IMPORTED_MODULE_23__ = __webpack_require__(/*! ../patchNote.json */ "./patchNote.json");
+/* harmony import */ var _guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_20__ = __webpack_require__(/*! ./guildCombatShrines.js */ "./src/guildCombatShrines.js");
+/* harmony import */ var _teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__ = __webpack_require__(/*! ./teamPresetStore.js */ "./src/teamPresetStore.js");
+/* harmony import */ var _teamPresetComparison_js__WEBPACK_IMPORTED_MODULE_22__ = __webpack_require__(/*! ./teamPresetComparison.js */ "./src/teamPresetComparison.js");
+/* harmony import */ var _privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_23__ = __webpack_require__(/*! ./privateLoadoutBaseline.js */ "./src/privateLoadoutBaseline.js");
+/* harmony import */ var _patchNote_json__WEBPACK_IMPORTED_MODULE_24__ = __webpack_require__(/*! ../patchNote.json */ "./patchNote.json");
+
 
 
 
@@ -3207,6 +3423,78 @@ function createHouseInput(hrid) {
     levelInput.dataset.houseHrid = hrid;
 
     return levelInput;
+}
+
+function setGuildCombatBuffLevels(levels = {}) {
+    player.guildCombatBuffLevels = (0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_20__.normalizeGuildCombatShrineLevels)(levels);
+    for (const { key } of _guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_20__.GUILD_COMBAT_SHRINE_DETAILS) {
+        const input = document.querySelector(`[data-guild-combat-buff="${key}"]`);
+        if (input) {
+            input.value = player.guildCombatBuffLevels[key];
+        }
+    }
+}
+
+function updateGuildCombatBuffLevels() {
+    player.guildCombatBuffLevels = (0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_20__.normalizeGuildCombatShrineLevels)(player.guildCombatBuffLevels);
+    for (const { key } of _guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_20__.GUILD_COMBAT_SHRINE_DETAILS) {
+        const input = document.querySelector(`[data-guild-combat-buff="${key}"]`);
+        if (!input) {
+            continue;
+        }
+        const level = (0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_20__.normalizeGuildCombatShrineLevel)(input.value);
+        input.value = level;
+        player.guildCombatBuffLevels[key] = level;
+    }
+}
+
+function initGuildCombatBuffLevels() {
+    const list = document.getElementById("guildCombatBuffLevelsList");
+    const rows = [];
+
+    const header = createElement("div", "row mb-2 fw-semibold small text-secondary");
+    header.innerHTML = `
+        <div class="col-4" data-i18n="common:guildCombatBuffs.shrine">Shrine</div>
+        <div class="col-5" data-i18n="common:guildCombatBuffs.effect">Effect</div>
+        <div class="col-3" data-i18n="common:guildCombatBuffs.level">Level</div>`;
+    rows.push(header);
+
+    for (const { key } of _guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_20__.GUILD_COMBAT_SHRINE_DETAILS) {
+        const row = createElement("div", "row mb-2 align-items-center");
+
+        const nameCol = createElement("div", "col-4");
+        const name = createElement("label", "form-label mb-0", key);
+        name.htmlFor = `inputGuildCombatBuff_${key}`;
+        name.setAttribute("data-i18n", `common:guildCombatBuffs.${key}`);
+        nameCol.appendChild(name);
+
+        const effectCol = createElement("div", "col-5 small text-secondary", key);
+        effectCol.setAttribute("data-i18n", `common:guildCombatBuffs.${key}Effect`);
+
+        const levelCol = createElement("div", "col-3");
+        const levelInput = createElement("input", "form-control");
+        levelInput.type = "number";
+        levelInput.id = `inputGuildCombatBuff_${key}`;
+        levelInput.min = 0;
+        levelInput.max = 20;
+        levelInput.step = 1;
+        levelInput.value = 0;
+        levelInput.dataset.guildCombatBuff = key;
+        levelInput.addEventListener("input", (event) => {
+            player.guildCombatBuffLevels[key] = (0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_20__.normalizeGuildCombatShrineLevel)(event.target.value);
+            updateUI();
+        });
+        levelInput.addEventListener("change", (event) => {
+            event.target.value = (0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_20__.normalizeGuildCombatShrineLevel)(event.target.value);
+        });
+        levelCol.appendChild(levelInput);
+
+        row.append(nameCol, effectCol, levelCol);
+        rows.push(row);
+    }
+
+    list.replaceChildren(...rows);
+    setGuildCombatBuffLevels();
 }
 
 function refreshAchievementStatics() {
@@ -4347,14 +4635,42 @@ function createDamageTakenAccordion(enemyIndex) {
 
 
 function initDamageDoneTaken() {
-    for (let i = 64; i > 0; i--) {
-        document.getElementById("simulationResultTotalDamageDone").insertAdjacentElement('afterend', createDamageDoneAccordion(i));
-        document.getElementById("simulationResultTotalDamageTaken").insertAdjacentElement('afterend', createDamageTakenAccordion(i));
+    const damageDoneDetails = document.getElementById("simulationResultDamageDoneDetails");
+    const damageTakenDetails = document.getElementById("simulationResultDamageTakenDetails");
+    for (let i = 1; i <= 64; i++) {
+        damageDoneDetails.appendChild(createDamageDoneAccordion(i));
+        damageTakenDetails.appendChild(createDamageTakenAccordion(i));
     }
+}
+
+function resetDamageDetails() {
+    const entry = document.getElementById("simulationResultDamageDetailsEntry");
+    const details = document.getElementById("simulationResultDamageDetails");
+    const button = document.getElementById("buttonSimulationResultDamageDetails");
+    entry.classList.add("d-none");
+    details.classList.remove("show");
+    button.classList.add("collapsed");
+    button.setAttribute("aria-expanded", "false");
+
+    for (let i = 1; i <= 64; i++) {
+        for (const kind of ["DamageDone", "DamageTaken"]) {
+            document.getElementById(`collapse${kind}${i}`)?.classList.remove("show");
+            const nestedButton = document.getElementById(
+                `buttonSimulationResult${kind}AccordionEnemy${i}`,
+            );
+            nestedButton?.classList.add("collapsed");
+            nestedButton?.setAttribute("aria-expanded", "false");
+        }
+    }
+}
+
+function showDamageDetailsEntry() {
+    document.getElementById("simulationResultDamageDetailsEntry").classList.remove("d-none");
 }
 
 function showSimulationResult(simResult) {
     currentSimResults = simResult;
+    resetDamageDetails();
     let expensesModalTable = document.querySelector("#expensesTable > tbody");
     expensesModalTable.innerHTML = '<th data-i18n=\"marketplacePanel.item\">Item</th><th data-i18n=\"marketplacePanel.price\">Price</th><th data-i18n=\"common:amount\">Amount</th><th data-i18n=\"common:total\">Total</th>';
     let revenueModalTable = document.querySelector("#revenueTable > tbody");
@@ -4990,6 +5306,24 @@ function formatFragmentTimeCost(value) {
     });
 }
 
+function createFragmentTimeMetric(minutesPerFragment, fragmentsPerDay) {
+    const column = createElement("div", "col-6 text-end");
+    const minutesLine = createElement("div");
+    minutesLine.append(`${formatFragmentTimeCost(minutesPerFragment)} `);
+    const minutesUnit = createElement("span", "small text-muted", "min/fragment");
+    minutesUnit.setAttribute("data-i18n", "common:fragmentTimeCost.minutesPerFragment");
+    minutesLine.appendChild(minutesUnit);
+
+    const dailyLine = createElement("div", "small text-success fw-semibold");
+    dailyLine.append(`${formatFragmentTimeCost(fragmentsPerDay)} `);
+    const dailyUnit = createElement("span", "", "fragments/day");
+    dailyUnit.setAttribute("data-i18n", "common:fragmentTimeCost.fragmentsPerDay");
+    dailyLine.appendChild(dailyUnit);
+
+    column.append(minutesLine, dailyLine);
+    return column;
+}
+
 function showFragmentTimeCosts(simResult, playerToDisplay, expectedDropMap, simulatedHours) {
     const section = document.getElementById("fragmentTimeCostSection");
     const resultDiv = document.getElementById("simulationResultFragmentTimeCost");
@@ -5030,12 +5364,16 @@ function showFragmentTimeCosts(simResult, playerToDisplay, expectedDropMap, simu
             _combatsimulator_data_itemDetailMap_json__WEBPACK_IMPORTED_MODULE_3__[fragment.itemHrid]?.name ?? fragment.itemHrid,
         );
         fragmentName.setAttribute("data-i18n", `itemNames.${fragment.itemHrid}`);
-        const values = createRow(
-            ["col-6 text-end", "col-6 text-end"],
-            [
-                formatFragmentTimeCost(fragment.combatMinutesPerFragment),
-                formatFragmentTimeCost(fragment.totalMinutesPerFragment),
-            ],
+        const values = createElement("div", "row");
+        values.append(
+            createFragmentTimeMetric(
+                fragment.combatMinutesPerFragment,
+                fragment.combatFragmentsPerDay,
+            ),
+            createFragmentTimeMetric(
+                fragment.totalMinutesPerFragment,
+                fragment.totalFragmentsPerDay,
+            ),
         );
         wrapper.append(fragmentName, values);
         return wrapper;
@@ -5629,7 +5967,7 @@ function showDamageDone(simResult, playerToDisplay) {
 
     let totalSecondsSimulated = simResult.simulatedTime / ONE_SECOND;
 
-    for (let i = 1; i < 64; i++) {
+    for (let i = 1; i <= 64; i++) {
         let accordion = document.getElementById("simulationResultDamageDoneAccordionEnemy" + i);
         hideElement(accordion);
     }
@@ -5679,6 +6017,7 @@ function showDamageDone(simResult, playerToDisplay) {
 
         let resultAccordion = document.getElementById("simulationResultDamageDoneAccordionEnemy" + enemyIndex);
         showElement(resultAccordion);
+        showDamageDetailsEntry();
 
         let resultAccordionButton = document.getElementById(
             "buttonSimulationResultDamageDoneAccordionEnemy" + enemyIndex
@@ -5731,7 +6070,7 @@ function showDamageTaken(simResult, playerToDisplay) {
 
     let totalSecondsSimulated = simResult.simulatedTime / ONE_SECOND;
 
-    for (let i = 1; i < 64; i++) {
+    for (let i = 1; i <= 64; i++) {
         let accordion = document.getElementById("simulationResultDamageTakenAccordionEnemy" + i);
         hideElement(accordion);
     }
@@ -5776,6 +6115,7 @@ function showDamageTaken(simResult, playerToDisplay) {
 
         let resultAccordion = document.getElementById("simulationResultDamageTakenAccordionEnemy" + enemyIndex);
         showElement(resultAccordion);
+        showDamageDetailsEntry();
 
         let resultAccordionButton = document.getElementById(
             "buttonSimulationResultDamageTakenAccordionEnemy" + enemyIndex
@@ -6242,6 +6582,9 @@ function startSimulation(selectedPlayers) {
 }
 
 function parsePlayerJson(playerJson, hrid) {
+    const guildCombatBuffs = Array.isArray(playerJson.guildCombatBuffs)
+        ? playerJson.guildCombatBuffs
+        : [];
     let playerData = {
         hrid: hrid,
         food: [],
@@ -6249,7 +6592,11 @@ function parsePlayerJson(playerJson, hrid) {
         abilities: [],
         ...playerJson.player,
         houseRooms: playerJson.houseRooms,
-        guildCombatBuffs: playerJson.guildCombatBuffs ?? [],
+        guildCombatBuffs,
+        guildCombatBuffLevels: (0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_20__.resolveGuildCombatShrineLevels)(
+            playerJson.guildCombatBuffLevels ?? playerJson.guildShrineLevels,
+            guildCombatBuffs,
+        ),
     };
     playerData.equipment = {};
     const triggerMap = playerJson.triggerMap;
@@ -6803,6 +7150,7 @@ function getEquipmentSetFromUI() {
         triggerMap: {},
         houseRooms: {},
         achievements: {},
+        guildCombatBuffLevels: {},
     };
 
     ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"].forEach((skill) => {
@@ -6843,6 +7191,7 @@ function getEquipmentSetFromUI() {
 
     equipmentSet.houseRooms = player.houseRooms;
     equipmentSet.achievements = player.achievements;
+    equipmentSet.guildCombatBuffLevels = player.guildCombatBuffLevels;
 
     return equipmentSet;
 }
@@ -6971,6 +7320,7 @@ function loadEquipmentSetIntoUI(equipmentSet) {
         }
     }
     refreshAchievementStatics();
+    setGuildCombatBuffLevels(equipmentSet.guildCombatBuffLevels ?? {});
 
     updateState();
     updateUI();
@@ -7084,7 +7434,8 @@ function doSoloExport() {
         zone: zoneSelect.value,
         simulationTime: simulationTimeInput.value,
         houseRooms: player.houseRooms,
-        achievements: player.achievements
+        achievements: player.achievements,
+        guildCombatBuffLevels: player.guildCombatBuffLevels,
     };
     try {
         navigator.clipboard.writeText(JSON.stringify(state)).then(() => alert("Current set has been copied to clipboard."));
@@ -7168,6 +7519,13 @@ function doGroupImport() {
 function doSoloImport() {
     let importSet = document.getElementById("inputSetSolo").value;
     importSet = JSON.parse(importSet);
+    player.guildCombatBuffs = Array.isArray(importSet.guildCombatBuffs)
+        ? structuredClone(importSet.guildCombatBuffs)
+        : [];
+    setGuildCombatBuffLevels((0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_20__.resolveGuildCombatShrineLevels)(
+        importSet.guildCombatBuffLevels ?? importSet.guildShrineLevels,
+        player.guildCombatBuffs,
+    ));
     ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"].forEach((skill) => {
         let levelInput = document.getElementById("inputLevel_" + skill);
         if (skill == "melee" && !importSet.player["meleeLevel"] && importSet.player["powerLevel"]) {
@@ -7361,6 +7719,8 @@ function savePreviousPlayer(playerId) {
             "simulationTime",
             "houseRooms",
             "achievements",
+            "guildCombatBuffLevels",
+            "guildShrineLevels",
         ]);
         for (const [key, value] of Object.entries(previousImportData)) {
             if (!simulatorStateKeys.has(key)) {
@@ -7381,7 +7741,8 @@ function savePreviousPlayer(playerId) {
         zone: zoneSelect.value,
         simulationTime: simulationTimeInput.value,
         houseRooms: player.houseRooms,
-        achievements: player.achievements
+        achievements: player.achievements,
+        guildCombatBuffLevels: player.guildCombatBuffLevels,
     };
     try {
         playerDataMap[playerId] = JSON.stringify(state);
@@ -7396,6 +7757,10 @@ function updateNextPlayer(currentPlayerNumber) {
     player.guildCombatBuffs = Array.isArray(importSet.guildCombatBuffs)
         ? structuredClone(importSet.guildCombatBuffs)
         : [];
+    setGuildCombatBuffLevels((0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_20__.resolveGuildCombatShrineLevels)(
+        importSet.guildCombatBuffLevels ?? importSet.guildShrineLevels,
+        player.guildCombatBuffs,
+    ));
     ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"].forEach((skill) => {
         let levelInput = document.getElementById("inputLevel_" + skill);
         if (skill == "melee" && !importSet.player["meleeLevel"] && importSet.player["powerLevel"]) {
@@ -7624,7 +7989,7 @@ function refreshTeamPresetControls({ allowAutoLoad = false, preferredPresetId = 
     const presetSelect = document.getElementById("selectTeamPreset");
     const presetNameInput = document.getElementById("inputTeamPresetName");
     const targetLabel = document.getElementById("teamPresetTargetLabel");
-    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.loadTeamPresetStore)();
+    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.loadTeamPresetStore)();
     document.getElementById("autoLoadTeamPreset").checked = store.autoLoad;
 
     presetSelect.replaceChildren();
@@ -7647,13 +8012,13 @@ function refreshTeamPresetControls({ allowAutoLoad = false, preferredPresetId = 
         return;
     }
 
-    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.createTeamPresetTargetKey)(target);
+    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.createTeamPresetTargetKey)(target);
     const targetChanged = lastAutoLoadedTeamPresetTargetKey !== targetKey;
     if (allowAutoLoad) {
         lastAutoLoadedTeamPresetTargetKey = targetKey;
     }
-    const presets = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.getTeamPresetsForTarget)(store, targetKey);
-    const defaultPreset = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.getDefaultTeamPreset)(store, targetKey);
+    const presets = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.getTeamPresetsForTarget)(store, targetKey);
+    const defaultPreset = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.getDefaultTeamPreset)(store, targetKey);
     const previousSelection = preferredPresetId ?? presetSelect.dataset.selectedPresetId ?? "";
 
     presetSelect.add(new Option(getTeamPresetText("newPreset", "+ New preset..."), ""));
@@ -7713,7 +8078,7 @@ function captureCurrentTeamPreset(selectedPlayerNumbers) {
         generatedNameParts.push(`${characterName}-${loadoutName}`);
     }
 
-    const loadoutReferences = Object.fromEntries((0,_privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_22__.buildPrivateLoadoutReferences)({
+    const loadoutReferences = Object.fromEntries((0,_privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_23__.buildPrivateLoadoutReferences)({
         selectedPlayers: selectedPlayerNumbers,
         playerDataMap: selectedPlayerData,
         playerNames: selectedPlayerNames,
@@ -7729,8 +8094,8 @@ function captureCurrentTeamPreset(selectedPlayerNumbers) {
 }
 
 function persistTeamPreset(target, name, snapshot, existingPresetId = "") {
-    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.loadTeamPresetStore)();
-    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.createTeamPresetTargetKey)(target);
+    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.loadTeamPresetStore)();
+    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.createTeamPresetTargetKey)(target);
     const existingPreset = store.presets.find((preset) =>
         preset.id === existingPresetId && preset.targetKey === targetKey
     );
@@ -7744,7 +8109,7 @@ function persistTeamPreset(target, name, snapshot, existingPresetId = "") {
     }
 
     const now = new Date().toISOString();
-    const presetId = existingPreset?.id ?? (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.createTeamPresetId)();
+    const presetId = existingPreset?.id ?? (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.createTeamPresetId)();
     const preset = {
         id: presetId,
         name,
@@ -7768,7 +8133,7 @@ function persistTeamPreset(target, name, snapshot, existingPresetId = "") {
     }
 
     try {
-        (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.saveTeamPresetStore)(store);
+        (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.saveTeamPresetStore)(store);
     } catch (error) {
         console.error("Unable to save team preset.", error);
         return { status: "error", error };
@@ -7880,8 +8245,8 @@ function loadTeamPreset(presetId) {
         return;
     }
 
-    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.createTeamPresetTargetKey)(target);
-    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.loadTeamPresetStore)();
+    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.createTeamPresetTargetKey)(target);
+    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.loadTeamPresetStore)();
     const preset = store.presets.find((candidate) =>
         candidate.id === presetId && candidate.targetKey === targetKey
     );
@@ -7955,8 +8320,8 @@ function setDefaultTeamPreset() {
         return;
     }
 
-    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.createTeamPresetTargetKey)(target);
-    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.loadTeamPresetStore)();
+    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.createTeamPresetTargetKey)(target);
+    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.loadTeamPresetStore)();
     const preset = store.presets.find((candidate) =>
         candidate.id === presetId && candidate.targetKey === targetKey
     );
@@ -7966,7 +8331,7 @@ function setDefaultTeamPreset() {
 
     store.defaults[targetKey] = preset.id;
     try {
-        (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.saveTeamPresetStore)(store);
+        (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.saveTeamPresetStore)(store);
     } catch (error) {
         console.error("Unable to set the default team preset.", error);
         setTeamPresetStatus(
@@ -7990,8 +8355,8 @@ function deleteTeamPreset() {
         return;
     }
 
-    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.createTeamPresetTargetKey)(target);
-    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.loadTeamPresetStore)();
+    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.createTeamPresetTargetKey)(target);
+    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.loadTeamPresetStore)();
     const preset = store.presets.find((candidate) =>
         candidate.id === presetId && candidate.targetKey === targetKey
     );
@@ -8013,7 +8378,7 @@ function deleteTeamPreset() {
         delete store.defaults[targetKey];
     }
     try {
-        (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.saveTeamPresetStore)(store);
+        (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.saveTeamPresetStore)(store);
     } catch (error) {
         console.error("Unable to delete team preset.", error);
         setTeamPresetStatus(
@@ -8139,10 +8504,10 @@ function refreshTeamPresetComparisonControls({ preferredPresetId = null } = {}) 
         return;
     }
 
-    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.loadTeamPresetStore)();
-    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.createTeamPresetTargetKey)(target);
-    const presets = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.getTeamPresetsForTarget)(store, targetKey);
-    const defaultPreset = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.getDefaultTeamPreset)(store, targetKey);
+    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.loadTeamPresetStore)();
+    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.createTeamPresetTargetKey)(target);
+    const presets = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.getTeamPresetsForTarget)(store, targetKey);
+    const defaultPreset = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.getDefaultTeamPreset)(store, targetKey);
     comparisonSelect.add(new Option(
         getTeamComparisonText("selectBaseline", "Baseline: select a team preset"),
         "",
@@ -8188,8 +8553,8 @@ function syncTeamPresetSelectionFromComparison(presetId) {
     teamPresetSelect.value = presetId;
     teamPresetSelect.dataset.selectedPresetId = presetId;
     const target = getCurrentTeamPresetTarget();
-    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.loadTeamPresetStore)();
-    const targetKey = target ? (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.createTeamPresetTargetKey)(target) : "";
+    const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.loadTeamPresetStore)();
+    const targetKey = target ? (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.createTeamPresetTargetKey)(target) : "";
     const selectedPreset = store.presets.find((preset) =>
         preset.id === presetId && preset.targetKey === targetKey
     );
@@ -8203,8 +8568,8 @@ function getSelectedTeamPresetForComparison() {
     if (!presetId || !target) {
         return null;
     }
-    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.createTeamPresetTargetKey)(target);
-    return (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.loadTeamPresetStore)().presets.find((preset) =>
+    const targetKey = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.createTeamPresetTargetKey)(target);
+    return (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.loadTeamPresetStore)().presets.find((preset) =>
         preset.id === presetId && preset.targetKey === targetKey
     ) ?? null;
 }
@@ -8224,7 +8589,7 @@ function createPrivateLoadoutBaselineRequestId() {
 }
 
 function requestPrivateLoadoutBaselines(references, timeoutMs = 20000) {
-    if (document.documentElement.dataset[_privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_22__.PRIVATE_LOADOUT_BASELINE_BRIDGE_ATTRIBUTE] !== "1") {
+    if (document.documentElement.dataset[_privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_23__.PRIVATE_LOADOUT_BASELINE_BRIDGE_ATTRIBUTE] !== "1") {
         return Promise.resolve({ errorCode: "bridge-unavailable", results: [] });
     }
 
@@ -8233,7 +8598,7 @@ function requestPrivateLoadoutBaselines(references, timeoutMs = 20000) {
         let timeoutId;
         const cleanup = () => {
             clearTimeout(timeoutId);
-            document.removeEventListener(_privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_22__.PRIVATE_LOADOUT_BASELINE_RESPONSE_EVENT, handleResponse);
+            document.removeEventListener(_privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_23__.PRIVATE_LOADOUT_BASELINE_RESPONSE_EVENT, handleResponse);
         };
         const handleResponse = (event) => {
             let response;
@@ -8249,13 +8614,13 @@ function requestPrivateLoadoutBaselines(references, timeoutMs = 20000) {
             resolve(response);
         };
 
-        document.addEventListener(_privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_22__.PRIVATE_LOADOUT_BASELINE_RESPONSE_EVENT, handleResponse);
+        document.addEventListener(_privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_23__.PRIVATE_LOADOUT_BASELINE_RESPONSE_EVENT, handleResponse);
         timeoutId = setTimeout(() => {
             cleanup();
             resolve({ requestId, errorCode: "timeout", results: [] });
         }, timeoutMs);
 
-        document.dispatchEvent(new CustomEvent(_privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_22__.PRIVATE_LOADOUT_BASELINE_REQUEST_EVENT, {
+        document.dispatchEvent(new CustomEvent(_privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_23__.PRIVATE_LOADOUT_BASELINE_REQUEST_EVENT, {
             detail: JSON.stringify({ requestId, references }),
         }));
     });
@@ -8732,14 +9097,14 @@ async function compareCurrentTeamToSelectedPreset() {
 
     savePreviousPlayer(currentPlayerTabId);
     try {
-        const references = (0,_privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_22__.buildPrivateLoadoutReferences)(preset);
+        const references = (0,_privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_23__.buildPrivateLoadoutReferences)(preset);
         const response = await requestPrivateLoadoutBaselines(references);
-        const resolution = (0,_privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_22__.resolvePrivateLoadoutBaseline)(
+        const resolution = (0,_privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_23__.resolvePrivateLoadoutBaseline)(
             preset,
             response,
             response?.errorCode || "bridge-unavailable",
         );
-        const comparison = (0,_teamPresetComparison_js__WEBPACK_IMPORTED_MODULE_21__.compareTeamPresetWithCurrent)(
+        const comparison = (0,_teamPresetComparison_js__WEBPACK_IMPORTED_MODULE_22__.compareTeamPresetWithCurrent)(
             resolution.baselinePreset,
             playerDataMap,
             getCurrentComparisonPlayerSlots(preset),
@@ -8865,7 +9230,7 @@ function initTeamPresets() {
 
     document.getElementById("selectTeamPreset").addEventListener("change", (event) => {
         event.target.dataset.selectedPresetId = event.target.value;
-        const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.loadTeamPresetStore)();
+        const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.loadTeamPresetStore)();
         const selectedPreset = store.presets.find((preset) => preset.id === event.target.value);
         document.getElementById("inputTeamPresetName").value = selectedPreset?.name ?? "";
         updateTeamPresetActionButtons();
@@ -8886,10 +9251,10 @@ function initTeamPresets() {
     document.getElementById("buttonDefaultTeamPreset").addEventListener("click", setDefaultTeamPreset);
     document.getElementById("buttonDeleteTeamPreset").addEventListener("click", deleteTeamPreset);
     document.getElementById("autoLoadTeamPreset").addEventListener("change", (event) => {
-        const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.loadTeamPresetStore)();
+        const store = (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.loadTeamPresetStore)();
         store.autoLoad = event.target.checked;
         try {
-            (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__.saveTeamPresetStore)(store);
+            (0,_teamPresetStore_js__WEBPACK_IMPORTED_MODULE_21__.saveTeamPresetStore)(store);
         } catch (error) {
             console.error("Unable to update team preset auto-load.", error);
             event.target.checked = !event.target.checked;
@@ -9128,14 +9493,14 @@ function updateTable(tableId, item, price) {
 
 function initPatchNotes() {
     const patchNotesRows = document.getElementById("patchNotes");
-    for (const pn in _patchNote_json__WEBPACK_IMPORTED_MODULE_23__) {
+    for (const pn in _patchNote_json__WEBPACK_IMPORTED_MODULE_24__) {
         const patchNoteContainer = document.createElement("div");
         patchNotesRows.setAttribute('class', 'col-12 mb-4');
 
         const patchNoteElement = document.createElement("h6");
         patchNoteElement.innerHTML = pn;
         const patchNoteList = document.createElement("ul");
-        for (const note of _patchNote_json__WEBPACK_IMPORTED_MODULE_23__[pn]) {
+        for (const note of _patchNote_json__WEBPACK_IMPORTED_MODULE_24__[pn]) {
             const noteElement = document.createElement("li");
             noteElement.innerHTML = note;
             patchNoteList.appendChild(noteElement);
@@ -9256,6 +9621,7 @@ function updateState() {
     updateFoodState();
     updateDrinksState();
     updateAbilityState();
+    updateGuildCombatBuffLevels();
 }
 
 function updateUI() {
@@ -9313,6 +9679,7 @@ function updateContent() {
 
 initEquipmentSection();
 initHouseRoomsModal();
+initGuildCombatBuffLevels();
 initAchievementsModal();
 initLevelSection();
 initFoodSection();

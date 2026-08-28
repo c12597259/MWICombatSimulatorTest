@@ -19,6 +19,12 @@ import achievementTierMap from "./combatsimulator/data/achievementTierDetailMap.
 import achievementDetailMap from "./combatsimulator/data/achievementDetailMap.json"
 import { calculateFragmentTimeCosts } from "./fragmentTimeCost.js";
 import {
+    GUILD_COMBAT_SHRINE_DETAILS,
+    normalizeGuildCombatShrineLevel,
+    normalizeGuildCombatShrineLevels,
+    resolveGuildCombatShrineLevels,
+} from "./guildCombatShrines.js";
+import {
     createTeamPresetId,
     createTeamPresetTargetKey,
     getDefaultTeamPreset,
@@ -205,6 +211,78 @@ function createHouseInput(hrid) {
     levelInput.dataset.houseHrid = hrid;
 
     return levelInput;
+}
+
+function setGuildCombatBuffLevels(levels = {}) {
+    player.guildCombatBuffLevels = normalizeGuildCombatShrineLevels(levels);
+    for (const { key } of GUILD_COMBAT_SHRINE_DETAILS) {
+        const input = document.querySelector(`[data-guild-combat-buff="${key}"]`);
+        if (input) {
+            input.value = player.guildCombatBuffLevels[key];
+        }
+    }
+}
+
+function updateGuildCombatBuffLevels() {
+    player.guildCombatBuffLevels = normalizeGuildCombatShrineLevels(player.guildCombatBuffLevels);
+    for (const { key } of GUILD_COMBAT_SHRINE_DETAILS) {
+        const input = document.querySelector(`[data-guild-combat-buff="${key}"]`);
+        if (!input) {
+            continue;
+        }
+        const level = normalizeGuildCombatShrineLevel(input.value);
+        input.value = level;
+        player.guildCombatBuffLevels[key] = level;
+    }
+}
+
+function initGuildCombatBuffLevels() {
+    const list = document.getElementById("guildCombatBuffLevelsList");
+    const rows = [];
+
+    const header = createElement("div", "row mb-2 fw-semibold small text-secondary");
+    header.innerHTML = `
+        <div class="col-4" data-i18n="common:guildCombatBuffs.shrine">Shrine</div>
+        <div class="col-5" data-i18n="common:guildCombatBuffs.effect">Effect</div>
+        <div class="col-3" data-i18n="common:guildCombatBuffs.level">Level</div>`;
+    rows.push(header);
+
+    for (const { key } of GUILD_COMBAT_SHRINE_DETAILS) {
+        const row = createElement("div", "row mb-2 align-items-center");
+
+        const nameCol = createElement("div", "col-4");
+        const name = createElement("label", "form-label mb-0", key);
+        name.htmlFor = `inputGuildCombatBuff_${key}`;
+        name.setAttribute("data-i18n", `common:guildCombatBuffs.${key}`);
+        nameCol.appendChild(name);
+
+        const effectCol = createElement("div", "col-5 small text-secondary", key);
+        effectCol.setAttribute("data-i18n", `common:guildCombatBuffs.${key}Effect`);
+
+        const levelCol = createElement("div", "col-3");
+        const levelInput = createElement("input", "form-control");
+        levelInput.type = "number";
+        levelInput.id = `inputGuildCombatBuff_${key}`;
+        levelInput.min = 0;
+        levelInput.max = 20;
+        levelInput.step = 1;
+        levelInput.value = 0;
+        levelInput.dataset.guildCombatBuff = key;
+        levelInput.addEventListener("input", (event) => {
+            player.guildCombatBuffLevels[key] = normalizeGuildCombatShrineLevel(event.target.value);
+            updateUI();
+        });
+        levelInput.addEventListener("change", (event) => {
+            event.target.value = normalizeGuildCombatShrineLevel(event.target.value);
+        });
+        levelCol.appendChild(levelInput);
+
+        row.append(nameCol, effectCol, levelCol);
+        rows.push(row);
+    }
+
+    list.replaceChildren(...rows);
+    setGuildCombatBuffLevels();
 }
 
 function refreshAchievementStatics() {
@@ -1345,14 +1423,42 @@ function createDamageTakenAccordion(enemyIndex) {
 
 
 function initDamageDoneTaken() {
-    for (let i = 64; i > 0; i--) {
-        document.getElementById("simulationResultTotalDamageDone").insertAdjacentElement('afterend', createDamageDoneAccordion(i));
-        document.getElementById("simulationResultTotalDamageTaken").insertAdjacentElement('afterend', createDamageTakenAccordion(i));
+    const damageDoneDetails = document.getElementById("simulationResultDamageDoneDetails");
+    const damageTakenDetails = document.getElementById("simulationResultDamageTakenDetails");
+    for (let i = 1; i <= 64; i++) {
+        damageDoneDetails.appendChild(createDamageDoneAccordion(i));
+        damageTakenDetails.appendChild(createDamageTakenAccordion(i));
     }
+}
+
+function resetDamageDetails() {
+    const entry = document.getElementById("simulationResultDamageDetailsEntry");
+    const details = document.getElementById("simulationResultDamageDetails");
+    const button = document.getElementById("buttonSimulationResultDamageDetails");
+    entry.classList.add("d-none");
+    details.classList.remove("show");
+    button.classList.add("collapsed");
+    button.setAttribute("aria-expanded", "false");
+
+    for (let i = 1; i <= 64; i++) {
+        for (const kind of ["DamageDone", "DamageTaken"]) {
+            document.getElementById(`collapse${kind}${i}`)?.classList.remove("show");
+            const nestedButton = document.getElementById(
+                `buttonSimulationResult${kind}AccordionEnemy${i}`,
+            );
+            nestedButton?.classList.add("collapsed");
+            nestedButton?.setAttribute("aria-expanded", "false");
+        }
+    }
+}
+
+function showDamageDetailsEntry() {
+    document.getElementById("simulationResultDamageDetailsEntry").classList.remove("d-none");
 }
 
 function showSimulationResult(simResult) {
     currentSimResults = simResult;
+    resetDamageDetails();
     let expensesModalTable = document.querySelector("#expensesTable > tbody");
     expensesModalTable.innerHTML = '<th data-i18n=\"marketplacePanel.item\">Item</th><th data-i18n=\"marketplacePanel.price\">Price</th><th data-i18n=\"common:amount\">Amount</th><th data-i18n=\"common:total\">Total</th>';
     let revenueModalTable = document.querySelector("#revenueTable > tbody");
@@ -1988,6 +2094,24 @@ function formatFragmentTimeCost(value) {
     });
 }
 
+function createFragmentTimeMetric(minutesPerFragment, fragmentsPerDay) {
+    const column = createElement("div", "col-6 text-end");
+    const minutesLine = createElement("div");
+    minutesLine.append(`${formatFragmentTimeCost(minutesPerFragment)} `);
+    const minutesUnit = createElement("span", "small text-muted", "min/fragment");
+    minutesUnit.setAttribute("data-i18n", "common:fragmentTimeCost.minutesPerFragment");
+    minutesLine.appendChild(minutesUnit);
+
+    const dailyLine = createElement("div", "small text-success fw-semibold");
+    dailyLine.append(`${formatFragmentTimeCost(fragmentsPerDay)} `);
+    const dailyUnit = createElement("span", "", "fragments/day");
+    dailyUnit.setAttribute("data-i18n", "common:fragmentTimeCost.fragmentsPerDay");
+    dailyLine.appendChild(dailyUnit);
+
+    column.append(minutesLine, dailyLine);
+    return column;
+}
+
 function showFragmentTimeCosts(simResult, playerToDisplay, expectedDropMap, simulatedHours) {
     const section = document.getElementById("fragmentTimeCostSection");
     const resultDiv = document.getElementById("simulationResultFragmentTimeCost");
@@ -2028,12 +2152,16 @@ function showFragmentTimeCosts(simResult, playerToDisplay, expectedDropMap, simu
             itemDetailMap[fragment.itemHrid]?.name ?? fragment.itemHrid,
         );
         fragmentName.setAttribute("data-i18n", `itemNames.${fragment.itemHrid}`);
-        const values = createRow(
-            ["col-6 text-end", "col-6 text-end"],
-            [
-                formatFragmentTimeCost(fragment.combatMinutesPerFragment),
-                formatFragmentTimeCost(fragment.totalMinutesPerFragment),
-            ],
+        const values = createElement("div", "row");
+        values.append(
+            createFragmentTimeMetric(
+                fragment.combatMinutesPerFragment,
+                fragment.combatFragmentsPerDay,
+            ),
+            createFragmentTimeMetric(
+                fragment.totalMinutesPerFragment,
+                fragment.totalFragmentsPerDay,
+            ),
         );
         wrapper.append(fragmentName, values);
         return wrapper;
@@ -2627,7 +2755,7 @@ function showDamageDone(simResult, playerToDisplay) {
 
     let totalSecondsSimulated = simResult.simulatedTime / ONE_SECOND;
 
-    for (let i = 1; i < 64; i++) {
+    for (let i = 1; i <= 64; i++) {
         let accordion = document.getElementById("simulationResultDamageDoneAccordionEnemy" + i);
         hideElement(accordion);
     }
@@ -2677,6 +2805,7 @@ function showDamageDone(simResult, playerToDisplay) {
 
         let resultAccordion = document.getElementById("simulationResultDamageDoneAccordionEnemy" + enemyIndex);
         showElement(resultAccordion);
+        showDamageDetailsEntry();
 
         let resultAccordionButton = document.getElementById(
             "buttonSimulationResultDamageDoneAccordionEnemy" + enemyIndex
@@ -2729,7 +2858,7 @@ function showDamageTaken(simResult, playerToDisplay) {
 
     let totalSecondsSimulated = simResult.simulatedTime / ONE_SECOND;
 
-    for (let i = 1; i < 64; i++) {
+    for (let i = 1; i <= 64; i++) {
         let accordion = document.getElementById("simulationResultDamageTakenAccordionEnemy" + i);
         hideElement(accordion);
     }
@@ -2774,6 +2903,7 @@ function showDamageTaken(simResult, playerToDisplay) {
 
         let resultAccordion = document.getElementById("simulationResultDamageTakenAccordionEnemy" + enemyIndex);
         showElement(resultAccordion);
+        showDamageDetailsEntry();
 
         let resultAccordionButton = document.getElementById(
             "buttonSimulationResultDamageTakenAccordionEnemy" + enemyIndex
@@ -3240,6 +3370,9 @@ function startSimulation(selectedPlayers) {
 }
 
 function parsePlayerJson(playerJson, hrid) {
+    const guildCombatBuffs = Array.isArray(playerJson.guildCombatBuffs)
+        ? playerJson.guildCombatBuffs
+        : [];
     let playerData = {
         hrid: hrid,
         food: [],
@@ -3247,7 +3380,11 @@ function parsePlayerJson(playerJson, hrid) {
         abilities: [],
         ...playerJson.player,
         houseRooms: playerJson.houseRooms,
-        guildCombatBuffs: playerJson.guildCombatBuffs ?? [],
+        guildCombatBuffs,
+        guildCombatBuffLevels: resolveGuildCombatShrineLevels(
+            playerJson.guildCombatBuffLevels ?? playerJson.guildShrineLevels,
+            guildCombatBuffs,
+        ),
     };
     playerData.equipment = {};
     const triggerMap = playerJson.triggerMap;
@@ -3801,6 +3938,7 @@ function getEquipmentSetFromUI() {
         triggerMap: {},
         houseRooms: {},
         achievements: {},
+        guildCombatBuffLevels: {},
     };
 
     ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"].forEach((skill) => {
@@ -3841,6 +3979,7 @@ function getEquipmentSetFromUI() {
 
     equipmentSet.houseRooms = player.houseRooms;
     equipmentSet.achievements = player.achievements;
+    equipmentSet.guildCombatBuffLevels = player.guildCombatBuffLevels;
 
     return equipmentSet;
 }
@@ -3969,6 +4108,7 @@ function loadEquipmentSetIntoUI(equipmentSet) {
         }
     }
     refreshAchievementStatics();
+    setGuildCombatBuffLevels(equipmentSet.guildCombatBuffLevels ?? {});
 
     updateState();
     updateUI();
@@ -4082,7 +4222,8 @@ function doSoloExport() {
         zone: zoneSelect.value,
         simulationTime: simulationTimeInput.value,
         houseRooms: player.houseRooms,
-        achievements: player.achievements
+        achievements: player.achievements,
+        guildCombatBuffLevels: player.guildCombatBuffLevels,
     };
     try {
         navigator.clipboard.writeText(JSON.stringify(state)).then(() => alert("Current set has been copied to clipboard."));
@@ -4166,6 +4307,13 @@ function doGroupImport() {
 function doSoloImport() {
     let importSet = document.getElementById("inputSetSolo").value;
     importSet = JSON.parse(importSet);
+    player.guildCombatBuffs = Array.isArray(importSet.guildCombatBuffs)
+        ? structuredClone(importSet.guildCombatBuffs)
+        : [];
+    setGuildCombatBuffLevels(resolveGuildCombatShrineLevels(
+        importSet.guildCombatBuffLevels ?? importSet.guildShrineLevels,
+        player.guildCombatBuffs,
+    ));
     ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"].forEach((skill) => {
         let levelInput = document.getElementById("inputLevel_" + skill);
         if (skill == "melee" && !importSet.player["meleeLevel"] && importSet.player["powerLevel"]) {
@@ -4359,6 +4507,8 @@ function savePreviousPlayer(playerId) {
             "simulationTime",
             "houseRooms",
             "achievements",
+            "guildCombatBuffLevels",
+            "guildShrineLevels",
         ]);
         for (const [key, value] of Object.entries(previousImportData)) {
             if (!simulatorStateKeys.has(key)) {
@@ -4379,7 +4529,8 @@ function savePreviousPlayer(playerId) {
         zone: zoneSelect.value,
         simulationTime: simulationTimeInput.value,
         houseRooms: player.houseRooms,
-        achievements: player.achievements
+        achievements: player.achievements,
+        guildCombatBuffLevels: player.guildCombatBuffLevels,
     };
     try {
         playerDataMap[playerId] = JSON.stringify(state);
@@ -4394,6 +4545,10 @@ function updateNextPlayer(currentPlayerNumber) {
     player.guildCombatBuffs = Array.isArray(importSet.guildCombatBuffs)
         ? structuredClone(importSet.guildCombatBuffs)
         : [];
+    setGuildCombatBuffLevels(resolveGuildCombatShrineLevels(
+        importSet.guildCombatBuffLevels ?? importSet.guildShrineLevels,
+        player.guildCombatBuffs,
+    ));
     ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"].forEach((skill) => {
         let levelInput = document.getElementById("inputLevel_" + skill);
         if (skill == "melee" && !importSet.player["meleeLevel"] && importSet.player["powerLevel"]) {
@@ -6254,6 +6409,7 @@ function updateState() {
     updateFoodState();
     updateDrinksState();
     updateAbilityState();
+    updateGuildCombatBuffLevels();
 }
 
 function updateUI() {
@@ -6311,6 +6467,7 @@ function updateContent() {
 
 initEquipmentSection();
 initHouseRoomsModal();
+initGuildCombatBuffLevels();
 initAchievementsModal();
 initLevelSection();
 initFoodSection();

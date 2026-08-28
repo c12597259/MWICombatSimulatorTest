@@ -4,6 +4,12 @@ import Consumable from "./consumable";
 import Equipment from "./equipment";
 import HouseRoom from "./houseRoom";
 import Achievement from "./achievement";
+import {
+    GUILD_COMBAT_SHRINE_DEFAULTS,
+    getGuildCombatShrineBoosts,
+    isKnownGuildCombatShrineBuffType,
+    resolveGuildCombatShrineLevels,
+} from "../guildCombatShrines.js";
 
 class Player extends CombatUnit {
     equipment = {
@@ -18,6 +24,7 @@ class Player extends CombatUnit {
         "/equipment_types/pouch": null,
         "/equipment_types/back": null,
     };
+    guildCombatBuffLevels = { ...GUILD_COMBAT_SHRINE_DEFAULTS };
 
     constructor() {
         super();
@@ -53,8 +60,13 @@ class Player extends CombatUnit {
         });
 
         player.achievements = new Achievement(dto.achievements);
+        player.guildCombatBuffLevels = resolveGuildCombatShrineLevels(
+            dto.guildCombatBuffLevels ?? dto.guildShrineLevels,
+            dto.guildCombatBuffs,
+        );
         player.guildCombatBuffs = (Array.isArray(dto.guildCombatBuffs) ? dto.guildCombatBuffs : [])
             .filter((buff) => typeof buff?.typeHrid === "string" && buff.typeHrid.startsWith("/buff_types/"))
+            .filter((buff) => !isKnownGuildCombatShrineBuffType(buff.typeHrid))
             .map((buff, index) => ({
                 uniqueHrid: String(buff.uniqueHrid || `guild:${index}`),
                 typeHrid: buff.typeHrid,
@@ -66,6 +78,13 @@ class Player extends CombatUnit {
         player.debuffOnLevelGap = dto.debuffOnLevelGap;
 
         return player;
+    }
+
+    getBuffBoosts(type) {
+        return [
+            ...super.getBuffBoosts(type),
+            ...getGuildCombatShrineBoosts(type, this.guildCombatBuffLevels),
+        ];
     }
 
     updateCombatDetails() {

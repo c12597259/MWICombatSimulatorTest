@@ -2249,13 +2249,29 @@ class CombatUnit {
             });
         });
 
+        const maxHitpointsBoost = this.getBuffBoost("/buff_types/max_hitpoints");
         this.combatDetails.maxHitpoints = Math.floor(
-            (10 * (10 + this.combatDetails.staminaLevel) + this.combatDetails.combatStats.maxHitpoints)
-            * (1 + this.combatDetails.combatStats.maxHitpointsRatio)
+            (
+                10 * (10 + this.combatDetails.staminaLevel)
+                + this.combatDetails.combatStats.maxHitpoints
+                + maxHitpointsBoost.flatBoost
+            ) * (
+                1
+                + this.combatDetails.combatStats.maxHitpointsRatio
+                + maxHitpointsBoost.ratioBoost
+            )
         );
+        const maxManapointsBoost = this.getBuffBoost("/buff_types/max_manapoints");
         this.combatDetails.maxManapoints = Math.floor(
-            (10 * (10 + this.combatDetails.intelligenceLevel) + this.combatDetails.combatStats.maxManapoints)
-            * (1 + this.combatDetails.combatStats.maxManapointsRatio)
+            (
+                10 * (10 + this.combatDetails.intelligenceLevel)
+                + this.combatDetails.combatStats.maxManapoints
+                + maxManapointsBoost.flatBoost
+            ) * (
+                1
+                + this.combatDetails.combatStats.maxManapointsRatio
+                + maxManapointsBoost.ratioBoost
+            )
         );
 
         let accuracyRatioBoostFromFury = this.getBuffBoost("/buff_types/fury_accuracy").ratioBoost;
@@ -4128,6 +4144,8 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _equipment__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ./equipment */ "./src/combatsimulator/equipment.js");
 /* harmony import */ var _houseRoom__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(/*! ./houseRoom */ "./src/combatsimulator/houseRoom.js");
 /* harmony import */ var _achievement__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(/*! ./achievement */ "./src/combatsimulator/achievement.js");
+/* harmony import */ var _guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(/*! ../guildCombatShrines.js */ "./src/guildCombatShrines.js");
+
 
 
 
@@ -4148,6 +4166,7 @@ class Player extends _combatUnit__WEBPACK_IMPORTED_MODULE_1__["default"] {
         "/equipment_types/pouch": null,
         "/equipment_types/back": null,
     };
+    guildCombatBuffLevels = { ..._guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_6__.GUILD_COMBAT_SHRINE_DEFAULTS };
 
     constructor() {
         super();
@@ -4183,8 +4202,13 @@ class Player extends _combatUnit__WEBPACK_IMPORTED_MODULE_1__["default"] {
         });
 
         player.achievements = new _achievement__WEBPACK_IMPORTED_MODULE_5__["default"](dto.achievements);
+        player.guildCombatBuffLevels = (0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_6__.resolveGuildCombatShrineLevels)(
+            dto.guildCombatBuffLevels ?? dto.guildShrineLevels,
+            dto.guildCombatBuffs,
+        );
         player.guildCombatBuffs = (Array.isArray(dto.guildCombatBuffs) ? dto.guildCombatBuffs : [])
             .filter((buff) => typeof buff?.typeHrid === "string" && buff.typeHrid.startsWith("/buff_types/"))
+            .filter((buff) => !(0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_6__.isKnownGuildCombatShrineBuffType)(buff.typeHrid))
             .map((buff, index) => ({
                 uniqueHrid: String(buff.uniqueHrid || `guild:${index}`),
                 typeHrid: buff.typeHrid,
@@ -4196,6 +4220,13 @@ class Player extends _combatUnit__WEBPACK_IMPORTED_MODULE_1__["default"] {
         player.debuffOnLevelGap = dto.debuffOnLevelGap;
 
         return player;
+    }
+
+    getBuffBoosts(type) {
+        return [
+            ...super.getBuffBoosts(type),
+            ...(0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_6__.getGuildCombatShrineBoosts)(type, this.guildCombatBuffLevels),
+        ];
     }
 
     updateCombatDetails() {
@@ -4960,6 +4991,183 @@ class Zone {
 }
 
 /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = (Zone);
+
+
+/***/ }),
+
+/***/ "./src/guildCombatShrines.js":
+/*!***********************************!*\
+  !*** ./src/guildCombatShrines.js ***!
+  \***********************************/
+/***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
+
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   GUILD_COMBAT_SHRINE_DEFAULTS: () => (/* binding */ GUILD_COMBAT_SHRINE_DEFAULTS),
+/* harmony export */   GUILD_COMBAT_SHRINE_DETAILS: () => (/* binding */ GUILD_COMBAT_SHRINE_DETAILS),
+/* harmony export */   getGuildCombatShrineBoosts: () => (/* binding */ getGuildCombatShrineBoosts),
+/* harmony export */   hasExplicitGuildCombatShrineLevels: () => (/* binding */ hasExplicitGuildCombatShrineLevels),
+/* harmony export */   inferGuildCombatShrineLevels: () => (/* binding */ inferGuildCombatShrineLevels),
+/* harmony export */   isKnownGuildCombatShrineBuffType: () => (/* binding */ isKnownGuildCombatShrineBuffType),
+/* harmony export */   normalizeGuildCombatShrineLevel: () => (/* binding */ normalizeGuildCombatShrineLevel),
+/* harmony export */   normalizeGuildCombatShrineLevels: () => (/* binding */ normalizeGuildCombatShrineLevels),
+/* harmony export */   resolveGuildCombatShrineLevels: () => (/* binding */ resolveGuildCombatShrineLevels)
+/* harmony export */ });
+const GUILD_COMBAT_SHRINE_DETAILS = Object.freeze([
+    {
+        key: "force",
+        buffTypes: ["/buff_types/damage"],
+        ratioPerLevel: 0.003,
+    },
+    {
+        key: "tempo",
+        buffTypes: ["/buff_types/attack_speed", "/buff_types/cast_speed"],
+        ratioPerLevel: 0.004,
+    },
+    {
+        key: "spirit",
+        buffTypes: ["/buff_types/max_hitpoints", "/buff_types/max_manapoints"],
+        ratioPerLevel: 0.01,
+    },
+    {
+        key: "rarity",
+        buffTypes: ["/buff_types/rare_find"],
+        ratioPerLevel: 0.015,
+    },
+    {
+        key: "scholar",
+        buffTypes: ["/buff_types/wisdom"],
+        ratioPerLevel: 0.005,
+    },
+]);
+
+const GUILD_COMBAT_SHRINE_DEFAULTS = Object.freeze(
+    Object.fromEntries(GUILD_COMBAT_SHRINE_DETAILS.map(({ key }) => [key, 0])),
+);
+
+const SHRINE_KEYS = new Set(GUILD_COMBAT_SHRINE_DETAILS.map(({ key }) => key));
+const KNOWN_BUFF_TYPES = new Set(
+    GUILD_COMBAT_SHRINE_DETAILS.flatMap(({ buffTypes }) => buffTypes),
+);
+
+function normalizeGuildCombatShrineLevel(level) {
+    const numericLevel = Number(level);
+    if (!Number.isFinite(numericLevel)) {
+        return 0;
+    }
+    return Math.max(0, Math.min(20, Math.floor(numericLevel)));
+}
+
+function findShrineKey(key, entry) {
+    const candidate = `${String(key ?? "")} ${String(entry?.shrineHrid ?? "")}`.toLowerCase();
+    return GUILD_COMBAT_SHRINE_DETAILS.find(({ key: shrineKey }) => (
+        candidate === shrineKey
+        || candidate.includes(`/${shrineKey}_combat`)
+        || candidate.includes(`/combat_${shrineKey}`)
+        || candidate.includes(shrineKey)
+    ))?.key;
+}
+
+function readShrineLevel(entry) {
+    if (entry && typeof entry === "object") {
+        return entry.activeLevel ?? entry.effectiveLevel ?? entry.purchasedLevel ?? entry.level;
+    }
+    return entry;
+}
+
+function hasExplicitGuildCombatShrineLevels(levels) {
+    if (!levels || typeof levels !== "object") {
+        return false;
+    }
+    return Object.entries(levels).some(([key, entry]) => (
+        SHRINE_KEYS.has(key) || findShrineKey(key, entry)
+    ));
+}
+
+function normalizeGuildCombatShrineLevels(levels = {}) {
+    const normalized = { ...GUILD_COMBAT_SHRINE_DEFAULTS };
+    if (!levels || typeof levels !== "object") {
+        return normalized;
+    }
+
+    for (const [key, entry] of Object.entries(levels)) {
+        const shrineKey = SHRINE_KEYS.has(key) ? key : findShrineKey(key, entry);
+        if (!shrineKey) {
+            continue;
+        }
+        normalized[shrineKey] = normalizeGuildCombatShrineLevel(readShrineLevel(entry));
+    }
+    return normalized;
+}
+
+function inferLevelFromBuff(buff, detail) {
+    if (!buff || !detail.buffTypes.includes(buff.typeHrid)) {
+        return 0;
+    }
+    const boost = buff.typeHrid === "/buff_types/cast_speed"
+        || buff.typeHrid === "/buff_types/rare_find"
+        || buff.typeHrid === "/buff_types/wisdom"
+        ? Number(buff.flatBoost)
+        : Number(buff.ratioBoost);
+    if (!Number.isFinite(boost) || boost <= 0) {
+        return 0;
+    }
+    return normalizeGuildCombatShrineLevel(Math.round(boost / detail.ratioPerLevel));
+}
+
+function inferGuildCombatShrineLevels(guildCombatBuffs = []) {
+    const inferred = { ...GUILD_COMBAT_SHRINE_DEFAULTS };
+    if (!Array.isArray(guildCombatBuffs)) {
+        return inferred;
+    }
+
+    for (const detail of GUILD_COMBAT_SHRINE_DETAILS) {
+        inferred[detail.key] = guildCombatBuffs.reduce(
+            (highestLevel, buff) => Math.max(highestLevel, inferLevelFromBuff(buff, detail)),
+            0,
+        );
+    }
+    return inferred;
+}
+
+function resolveGuildCombatShrineLevels(levels, guildCombatBuffs = []) {
+    return hasExplicitGuildCombatShrineLevels(levels)
+        ? normalizeGuildCombatShrineLevels(levels)
+        : inferGuildCombatShrineLevels(guildCombatBuffs);
+}
+
+function isKnownGuildCombatShrineBuffType(typeHrid) {
+    return KNOWN_BUFF_TYPES.has(typeHrid);
+}
+
+function getGuildCombatShrineBoosts(typeHrid, levels = {}) {
+    const normalized = normalizeGuildCombatShrineLevels(levels);
+    const boosts = [];
+
+    if (typeHrid === "/buff_types/damage" && normalized.force > 0) {
+        boosts.push({ ratioBoost: 0.003 * normalized.force, flatBoost: 0 });
+    }
+    if (typeHrid === "/buff_types/attack_speed" && normalized.tempo > 0) {
+        boosts.push({ ratioBoost: 0.004 * normalized.tempo, flatBoost: 0 });
+    }
+    if (typeHrid === "/buff_types/cast_speed" && normalized.tempo > 0) {
+        boosts.push({ ratioBoost: 0, flatBoost: 0.004 * normalized.tempo });
+    }
+    if (typeHrid === "/buff_types/max_hitpoints" && normalized.spirit > 0) {
+        boosts.push({ ratioBoost: 0.01 * normalized.spirit, flatBoost: 0 });
+    }
+    if (typeHrid === "/buff_types/max_manapoints" && normalized.spirit > 0) {
+        boosts.push({ ratioBoost: 0.01 * normalized.spirit, flatBoost: 0 });
+    }
+    if (typeHrid === "/buff_types/rare_find" && normalized.rarity > 0) {
+        boosts.push({ ratioBoost: 0, flatBoost: 0.015 * normalized.rarity });
+    }
+    if (typeHrid === "/buff_types/wisdom" && normalized.scholar > 0) {
+        boosts.push({ ratioBoost: 0, flatBoost: 0.005 * normalized.scholar });
+    }
+
+    return boosts;
+}
 
 
 /***/ }),

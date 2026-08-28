@@ -35,6 +35,8 @@ test("calculates exact combat minutes per fragment when no consumables are used"
     assert.equal(result.fragments.length, 1);
     assert.equal(result.fragments[0].combatMinutesPerFragment, 30);
     assert.equal(result.fragments[0].totalMinutesPerFragment, 30);
+    assert.equal(result.fragments[0].combatFragmentsPerDay, 48);
+    assert.equal(result.fragments[0].totalFragmentsPerDay, 48);
 });
 
 test("adds direct consumable production time", () => {
@@ -60,6 +62,8 @@ test("adds direct consumable production time", () => {
     assert.equal(result.mode, "personalized");
     assert.ok(Math.abs(result.craftMinutesPerSimHour - 60) < 1e-9);
     assert.ok(Math.abs(result.fragments[0].totalMinutesPerFragment - 60) < 1e-9);
+    assert.ok(Math.abs(result.fragments[0].combatFragmentsPerDay - 48) < 1e-9);
+    assert.ok(Math.abs(result.fragments[0].totalFragmentsPerDay - 24) < 1e-9);
 });
 
 test("recursively includes raw material gathering time", () => {
