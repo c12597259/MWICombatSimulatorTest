@@ -29,11 +29,6 @@
             /* Add other relevant styles for form controls in dark mode */
         }
 
-        body.dark-mode #expensesTable,
-        body.dark-mode #revenueTable {
-            color: #f0f0f0;
-        }
-
         #allZonesData {
             width: 100%;
             table-layout: auto; 
@@ -268,28 +263,6 @@
                             </button>
                         </div>
                         <!-- #endregion -->
-                        <div class="row">
-                            <b data-i18n="common:priceSettings.title">Price Settings</b>
-                        </div>
-                        <div class="row">
-                            <label for="selectPrices_consumables" class="col-md-12 col-form-label" data-i18n="common:priceSettings.consumablePrices">Consumable
-                                Prices</label>
-                            <div class="col-md-12 mb-2">
-                                <select id="selectPrices_consumables" class="form-select">
-                                    <option default value="ask" data-i18n="marketplacePanel.bestAskPrice">Ask (SO)</option>
-                                    <option value="bid" data-i18n="marketplacePanel.bestBidPrice">Bid (BO)</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="row">
-                            <label for="selectPrices_drops" class="col-md-12 col-form-label" data-i18n="common:priceSettings.dropPrices">Drop Prices</label>
-                            <div class="col-md-12">
-                                <select id="selectPrices_drops" class="form-select">
-                                    <option default value="bid" data-i18n="marketplacePanel.bestBidPrice">Bid (BO)</option>
-                                    <option value="ask" data-i18n="marketplacePanel.bestAskPrice">Ask (SO)</option>
-                                </select>
-                            </div>
-                        </div>
                     </div>
                     <div class="col-md-8">
                         <!-- #region Equipment -->
@@ -580,19 +553,6 @@
                                     data-bs-toggle="modal" data-bs-target="#triggerModal" data-bs-triggertype="drink"
                                     data-bs-triggerindex="2">
                                     Trigger
-                                </button>
-                            </div>
-                        </div>
-                        <div class="row pt-3">
-                            <div class="col-md-auto">
-                                <button id="buttonGetPrices" class="btn btn-primary" type="button" data-i18n="common:getPrices">
-                                    Get Prices
-                                </button>
-                            </div>
-                            <div class="col-md-auto">
-                                <button id="buttonEditPrices" class="btn btn-primary" type="button"
-                                    data-bs-toggle="modal" data-bs-target="#editPricesModal" data-i18n="common:editPrices">
-                                    Edit Prices
                                 </button>
                             </div>
                         </div>
@@ -1177,9 +1137,6 @@
                                 <div id="simulationResultDamageTakenDetails"></div>
                             </div>
                         </div>
-                        <div class="row pt-2">
-                            <b><span data-i18n="common:expectedProfit">Expected Profit</span>: <span id="profitPreview"></span></b>
-                        </div>
                         <div class="pt-3 d-none" id="fragmentTimeCostSection">
                             <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
                                 <b data-i18n="common:fragmentTimeCost.title">Key Fragment Time Cost</b>
@@ -1737,9 +1694,6 @@
                                 <th data-i18n="skillNames./skills/ranged">Ranged</th>
                                 <th data-i18n="skillNames./skills/melee">Melee</th>
                                 <th data-i18n="skillNames./skills/defense">Defense</th>
-                                <th data-i18n="common:expectedRevenue">Expected Revenue</th>
-                                <th data-i18n="common:expense">expenses</th>
-                                <th data-i18n="common:expectedProfit">Expected Profit</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1961,59 +1915,9 @@
         </div>
         <!-- #endregion -->
     </div>
-    <div class="modal" id="editPricesModal" tabindex="-1">
-        <!-- #region Prices Modal -->
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" data-i18n="common:editPrices">Edit Prices</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="container-fluid">
-                        <div class="row">
-                            <div class="col-12 mb-4">
-                                <h3><span data-i18n="common:expectedProfit">Expected Profit</span>: <span id="profitSpan"></span></h3>
-                            </div>
-                            <div class="col-12 mb-4">
-                                <h3><span data-i18n="common:expense">Expenses</span>: <span id="expensesSpan"></span></h3>
-                                <table class="table table-bordered table-striped profit-table" id="expensesTable">
-                                    <tbody>
-                                        <tr>
-                                            <th data-i18n="marketplacePanel.item">Item</th>
-                                            <th data-i18n="marketplacePanel.price">Price</th>
-                                            <th data-i18n="common:amount">Amount</th>
-                                            <th data-i18n="common:total">Total</th>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                            <div class="col-12 mb-4">
-                                <h3><span data-i18n="common:expectedRevenue">Expected Revenue</span>: <span id="revenueSpan"></span></h3>
-                                <table class="table table-bordered table-striped profit-table" id="revenueTable">
-                                    <tbody>
-                                        <tr>
-                                            <th data-i18n="marketplacePanel.item">Item</th>
-                                            <th data-i18n="marketplacePanel.price">Price</th>
-                                            <th data-i18n="common:amount">Amount</th>
-                                            <th data-i18n="common:total">Total</th>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" data-i18n="common:controls.close">Close</button>
-                </div>
-            </div>
-        </div>
-        <!-- #endregion -->
-    </div>
     <div class="modal" id="houseRoomsModal" tabindex="-1">
         <!-- #region House Rooms Modal -->
-        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title" data-i18n="characterManagement.house">House Rooms</h5>
@@ -2021,13 +1925,19 @@
                 </div>
                 <div class="modal-body">
                     <div class="container-fluid">
-                        <div id="houseRoomsList"></div>
-                        <hr class="my-4">
-                        <h6 data-i18n="common:guildCombatBuffs.title">Guild Combat Shrines</h6>
-                        <p class="small text-secondary" data-i18n="common:guildCombatBuffs.description">
-                            Imported effective levels can be adjusted for the current character.
-                        </p>
-                        <div id="guildCombatBuffLevelsList"></div>
+                        <div class="row g-4">
+                            <section class="col-md-7 pe-md-4">
+                                <h6 class="mb-3" data-i18n="characterManagement.house">House Rooms</h6>
+                                <div id="houseRoomsList" class="row g-2"></div>
+                            </section>
+                            <section class="col-md-5 ps-md-4 border-start">
+                                <h6 data-i18n="common:guildCombatBuffs.title">Guild Combat Shrines</h6>
+                                <p class="small text-secondary" data-i18n="common:guildCombatBuffs.description">
+                                    Imported effective levels can be adjusted for the current character.
+                                </p>
+                                <div id="guildCombatBuffLevelsList"></div>
+                            </section>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">

@@ -14,7 +14,6 @@ import actionDetailMap from "./combatsimulator/data/actionDetailMap.json";
 import combatMonsterDetailMap from "./combatsimulator/data/combatMonsterDetailMap.json";
 import damageTypeDetailMap from "./combatsimulator/data/damageTypeDetailMap.json";
 import combatStyleDetailMap from "./combatsimulator/data/combatStyleDetailMap.json";
-import openableLootDropMap from "./combatsimulator/data/openableLootDropMap.json";
 import achievementTierMap from "./combatsimulator/data/achievementTierDetailMap.json"
 import achievementDetailMap from "./combatsimulator/data/achievementDetailMap.json"
 import { calculateFragmentTimeCosts } from "./fragmentTimeCost.js";
@@ -75,9 +74,6 @@ let playerDataMap = {
     "4": "{\"player\":{\"attackLevel\":1,\"magicLevel\":1,\"meleeLevel\":1,\"rangedLevel\":1,\"defenseLevel\":1,\"staminaLevel\":1,\"intelligenceLevel\":1,\"equipment\":[]},\"food\":{\"/action_types/combat\":[{\"itemHrid\":\"\"},{\"itemHrid\":\"\"},{\"itemHrid\":\"\"}]},\"drinks\":{\"/action_types/combat\":[{\"itemHrid\":\"\"},{\"itemHrid\":\"\"},{\"itemHrid\":\"\"}]},\"abilities\":[{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"}],\"triggerMap\":{},\"zone\":\"/actions/combat/fly\",\"simulationTime\":\"100\",\"houseRooms\":{\"/house_rooms/dairy_barn\":0,\"/house_rooms/garden\":0,\"/house_rooms/log_shed\":0,\"/house_rooms/forge\":0,\"/house_rooms/workshop\":0,\"/house_rooms/sewing_parlor\":0,\"/house_rooms/kitchen\":0,\"/house_rooms/brewery\":0,\"/house_rooms/laboratory\":0,\"/house_rooms/dining_room\":0,\"/house_rooms/library\":0,\"/house_rooms/dojo\":0,\"/house_rooms/gym\":0,\"/house_rooms/armory\":0,\"/house_rooms/archery_range\":0,\"/house_rooms/mystical_study\":0,\"/house_rooms/observatory\":0},\"achievements\":{}}",
     "5": "{\"player\":{\"attackLevel\":1,\"magicLevel\":1,\"meleeLevel\":1,\"rangedLevel\":1,\"defenseLevel\":1,\"staminaLevel\":1,\"intelligenceLevel\":1,\"equipment\":[]},\"food\":{\"/action_types/combat\":[{\"itemHrid\":\"\"},{\"itemHrid\":\"\"},{\"itemHrid\":\"\"}]},\"drinks\":{\"/action_types/combat\":[{\"itemHrid\":\"\"},{\"itemHrid\":\"\"},{\"itemHrid\":\"\"}]},\"abilities\":[{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"}],\"triggerMap\":{},\"zone\":\"/actions/combat/fly\",\"simulationTime\":\"100\",\"houseRooms\":{\"/house_rooms/dairy_barn\":0,\"/house_rooms/garden\":0,\"/house_rooms/log_shed\":0,\"/house_rooms/forge\":0,\"/house_rooms/workshop\":0,\"/house_rooms/sewing_parlor\":0,\"/house_rooms/kitchen\":0,\"/house_rooms/brewery\":0,\"/house_rooms/laboratory\":0,\"/house_rooms/dining_room\":0,\"/house_rooms/library\":0,\"/house_rooms/dojo\":0,\"/house_rooms/gym\":0,\"/house_rooms/armory\":0,\"/house_rooms/archery_range\":0,\"/house_rooms/mystical_study\":0,\"/house_rooms/observatory\":0},\"achievements\":{}}"
 };
-window.revenue = 0;
-window.expenses = 0;
-window.profit = 0;
 
 // #region Worker
 
@@ -176,13 +172,14 @@ function initHouseRoomsModal() {
     for (const room of Object.values(houseRooms)) {
         player.houseRooms[room.hrid] = 0;
 
-        let row = createElement("div", "row mb-2");
+        let column = createElement("div", "col-12 col-lg-6");
+        let row = createElement("div", "row g-2 mb-1 align-items-center");
 
-        let nameCol = createElement("div", "col-md-4 offset-md-3 align-self-center", room.name);
+        let nameCol = createElement("div", "col-8", room.name);
         nameCol.setAttribute("data-i18n", "houseRoomNames." + room.hrid);
         row.appendChild(nameCol);
 
-        let levelCol = createElement("div", "col-md-2");
+        let levelCol = createElement("div", "col-4");
         let levelInput = createHouseInput(room.hrid);
 
         levelInput.addEventListener("input", function (e) {
@@ -194,7 +191,8 @@ function initHouseRoomsModal() {
         levelCol.appendChild(levelInput);
         row.appendChild(levelCol);
 
-        newChildren.push(row);
+        column.appendChild(row);
+        newChildren.push(column);
     }
 
     houseRoomsList.replaceChildren(...newChildren);
@@ -202,7 +200,7 @@ function initHouseRoomsModal() {
 
 function createHouseInput(hrid) {
     let levelInput = document.createElement("input");
-    levelInput.className = "form-control";
+    levelInput.className = "form-control form-control-sm";
     levelInput.type = "number";
     levelInput.placeholder = 0;
     levelInput.min = 0;
@@ -1459,10 +1457,6 @@ function showDamageDetailsEntry() {
 function showSimulationResult(simResult) {
     currentSimResults = simResult;
     resetDamageDetails();
-    let expensesModalTable = document.querySelector("#expensesTable > tbody");
-    expensesModalTable.innerHTML = '<th data-i18n=\"marketplacePanel.item\">Item</th><th data-i18n=\"marketplacePanel.price\">Price</th><th data-i18n=\"common:amount\">Amount</th><th data-i18n=\"common:total\">Total</th>';
-    let revenueModalTable = document.querySelector("#revenueTable > tbody");
-    revenueModalTable.innerHTML = '<th data-i18n=\"marketplacePanel.item\">Item</th><th data-i18n=\"marketplacePanel.price\">Price</th><th data-i18n=\"common:amount\">Amount</th><th data-i18n=\"common:total\">Total</th>';
     let playerToDisplay = "player1";
     if (selectedPlayers.includes(parseInt(currentPlayerTabId))) {
         playerToDisplay = "player" + currentPlayerTabId;
@@ -1482,9 +1476,6 @@ function showSimulationResult(simResult) {
     showDamageDone(simResult, playerToDisplay);
     showDamageTaken(simResult, playerToDisplay);
     renderWipeEvents(simResult);
-    window.profit = window.revenue - window.expenses;
-    document.getElementById('profitSpan').innerText = window.profit.toLocaleString();
-    document.getElementById('profitPreview').innerText = window.profit.toLocaleString();
     
     // 显示战斗图表
     if (document.getElementById('hpMpVisualizationToggle').checked) {
@@ -1900,20 +1891,12 @@ function manipulateSimResultsDataForDisplay(simResults) {
                 }
                 experiencePerHour[skill] = experiencePerHourValue;
             });
-            getDropProfit(simResult, playerToDisplay);
-            let revenue = simResult["revenue"];
-            let profit = simResult["profit"];
-            let expenses = simResult["expenses"];
-
             let displaySimRow = {
                 "ZoneName": zoneName, "DifficultyTier": difficultyTier, "Player": playerToDisplay, "Encounters": encountersPerHour, "Deaths": deathsPerHour,
                 "TotalExperience": totalExperiencePerHour, "Stamina": experiencePerHour["Stamina"],
                 "Intelligence": experiencePerHour["Intelligence"], "Attack": experiencePerHour["Attack"],
                 "Magic": experiencePerHour["Magic"], "Ranged": experiencePerHour["Ranged"],
-                "Melee": experiencePerHour["Melee"], "Defense": experiencePerHour["Defense"],
-                "revenue": revenue,
-                "expenses": expenses,
-                "profit": profit
+                "Melee": experiencePerHour["Melee"], "Defense": experiencePerHour["Defense"]
             };
             displaySimResults.push(displaySimRow);
         }
@@ -1971,78 +1954,6 @@ function calcExpectedDropMap(simResult, playerToDisplay) {
     }
 
     return expectedDropMap;
-}
-
-function getDropProfit(simResult, playerToDisplay) {
-    const expectedDropMap = calcExpectedDropMap(simResult, playerToDisplay);
-
-    let expectedRevenue = 0;
-    for (let [name, dropAmount] of expectedDropMap.entries()) {
-        let price = -1;
-        let revenueSetting = document.getElementById('selectPrices_drops').value;
-        if (window.prices) {
-            let item = window.prices[name];
-            if (item) {
-                if (revenueSetting == 'bid') {
-                    if (item['bid'] !== -1) {
-                        price = item['bid'];
-                    } else if (item['ask'] !== -1) {
-                        price = item['ask'];
-                    }
-                } else if (revenueSetting == 'ask') {
-                    if (item['ask'] !== -1) {
-                        price = item['ask'];
-                    } else if (item['bid'] !== -1) {
-                        price = item['bid'];
-                    }
-                }
-                if (price == -1) {
-                    price = item['vendor'];
-                }
-            }
-        }
-        expectedRevenue += price * dropAmount;
-    }
-
-    let consumablesUsed = simResult.consumablesUsed?.[playerToDisplay];
-
-    if (consumablesUsed) {
-        consumablesUsed = Object.entries(consumablesUsed).sort((a, b) => b[1] - a[1]);
-    } else {
-        consumablesUsed = [];
-    }
-
-    let expenses = 0;
-    for (const [consumable, amount] of consumablesUsed) {
-        let price = -1;
-        let expensesSetting = document.getElementById('selectPrices_consumables').value;
-        if (window.prices) {
-            let item = window.prices[consumable];
-            if (item) {
-                if (expensesSetting == 'bid') {
-                    if (item['bid'] !== -1) {
-                        price = item['bid'];
-                    } else if (item['ask'] !== -1) {
-                        price = item['ask'];
-                    }
-                } else if (expensesSetting == 'ask') {
-                    if (item['ask'] !== -1) {
-                        price = item['ask'];
-                    } else if (item['bid'] !== -1) {
-                        price = item['bid'];
-                    }
-                }
-                if (price == -1) {
-                    price = item['vendor'];
-                }
-            }
-        }
-        expenses += price * amount;
-    }
-
-    simResult["revenue"] = expectedRevenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    simResult["expenses"] = (expenses).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    simResult["profit"] = (expectedRevenue - expenses).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function getPlayerFragmentProductionData(playerToDisplay) {
@@ -2386,8 +2297,6 @@ function showKills(simResult, playerToDisplay) {
         ? calcExpectedDropMap(simResult, playerToDisplay)
         : new Map();
 
-    let revenueModalTable = document.querySelector("#revenueTable > tbody");
-    let total = 0;
     for (let [name, dropAmount] of expectedDropMap.entries()) {
         let dropRow = createRow(
             ["col-md-6", "col-md-6 text-end"],
@@ -2395,47 +2304,7 @@ function showKills(simResult, playerToDisplay) {
         );
         dropRow.firstElementChild.setAttribute("data-i18n", "itemNames." + name);
         newDropChildren.push(dropRow);
-
-        let tableRow = '<tr class="' + name.replace(/\s+/g, '') + '"><td data-i18n="itemNames.';
-        tableRow += name;
-        tableRow += '"></td><td contenteditable="true">';
-        let price = -1;
-        let revenueSetting = document.getElementById('selectPrices_drops').value;
-        if (window.prices) {
-            let item = window.prices[name];
-            if (item) {
-                if (revenueSetting == 'bid') {
-                    if (item['bid'] !== -1) {
-                        price = item['bid'];
-                    } else if (item['ask'] !== -1) {
-                        price = item['ask'];
-                    }
-                } else if (revenueSetting == 'ask') {
-                    if (item['ask'] !== -1) {
-                        price = item['ask'];
-                    } else if (item['bid'] !== -1) {
-                        price = item['bid'];
-                    }
-                }
-                if (price == -1) {
-                    price = item['vendor'];
-                }
-            }
-        }
-        tableRow += price;
-        tableRow += '</td><td>';
-        tableRow += dropAmount;
-        tableRow += '</td><td>';
-        tableRow += price * dropAmount;
-        tableRow += '</td></tr>';
-        revenueModalTable.innerHTML += tableRow;
-        total += price * dropAmount;
     }
-
-
-
-    document.getElementById('revenueSpan').innerText = total.toLocaleString();
-    window.revenue = total;
 
     resultDiv.replaceChildren(...newChildren);
     dropsResultDiv.replaceChildren(...newDropChildren);
@@ -2512,14 +2381,11 @@ function showConsumablesUsed(simResult, playerToDisplay) {
 
     if (!simResult.consumablesUsed[playerToDisplay]) {
         resultDiv.replaceChildren(...newChildren);
-        window.expenses = 0;
         return;
     }
 
     let consumablesUsed = Object.entries(simResult.consumablesUsed[playerToDisplay]).sort((a, b) => b[1] - a[1]);
 
-    let expensesModalTable = document.querySelector("#expensesTable > tbody");
-    let total = 0;
     for (const [consumable, amount] of consumablesUsed) {
         let consumablesPerHour = (amount / hoursSimulated).toFixed(0);
         let consumableRow = createRow(
@@ -2528,45 +2394,7 @@ function showConsumablesUsed(simResult, playerToDisplay) {
         );
         consumableRow.firstElementChild.setAttribute("data-i18n", "itemNames." + consumable);
         newChildren.push(consumableRow);
-
-        let tableRow = '<tr class="' + consumable + '"><td data-i18n="itemNames.';
-        tableRow += consumable;
-        tableRow += '"></td><td contenteditable="true">';
-        let price = -1;
-        let expensesSetting = document.getElementById('selectPrices_consumables').value;
-        if (window.prices) {
-            let item = window.prices[consumable];
-            if (item) {
-                if (expensesSetting == 'bid') {
-                    if (item['bid'] !== -1) {
-                        price = item['bid'];
-                    } else if (item['ask'] !== -1) {
-                        price = item['ask'];
-                    }
-                } else if (expensesSetting == 'ask') {
-                    if (item['ask'] !== -1) {
-                        price = item['ask'];
-                    } else if (item['bid'] !== -1) {
-                        price = item['bid'];
-                    }
-                }
-                if (price == -1) {
-                    price = item['vendor'];
-                }
-            }
-        }
-        tableRow += price;
-        tableRow += '</td><td>';
-        tableRow += amount;
-        tableRow += '</td><td>';
-        tableRow += price * amount;
-        tableRow += '</td></tr>';
-        expensesModalTable.innerHTML += tableRow;
-        total += price * amount;
     }
-
-    document.getElementById('expensesSpan').innerText = total.toLocaleString();
-    window.expenses = total;
 
     resultDiv.replaceChildren(...newChildren);
 }
@@ -6100,183 +5928,6 @@ function showErrorModal(error) {
     errorModal.show();
 }
 
-window.prices;
-
-async function fetchPrices() {
-    let response = null;
-    try {
-        response = await fetch('https://www.milkywayidle.com/game_data/marketplace.json'
-            , {
-                mode: 'cors'
-            }
-        );
-        if (!response.ok) {
-            console.log('Error fetching prices');
-        }
-    } catch (error) {
-        console.error(error);
-    }
-
-    if (response == null) {
-        try {
-            response = await fetch('https://www.milkywayidlecn.com/game_data/marketplace.json'
-                , {
-                    mode: 'cors'
-                }
-            );
-            if (!response.ok) {
-                console.log('Error fetching prices');
-            }
-        } catch (error) {
-            console.error(error);
-        }
-    }
-
-    if (!response || !response.ok) {
-        return;
-    }
-
-    try {
-
-        let btn = document.querySelector('#buttonGetPrices');
-        btn.style.backgroundColor = 'green';
-
-        const pricesJson = await response.json();
-
-        const priceTmp = pricesJson['marketData'];
-        window.prices = {};
-        for (const item in itemDetailMap) {
-            const hrid = itemDetailMap[item].hrid;
-            if (hrid in priceTmp) {
-                window.prices[hrid] = { "ask": -1, "bid": -1, "vendor": itemDetailMap[item].sellPrice };
-                if (priceTmp[hrid]['0']) {
-                    window.prices[hrid].ask = priceTmp[hrid]['0'].a;
-                    window.prices[hrid].bid = priceTmp[hrid]['0'].b;
-                }
-            }
-        } 
-
-        window.prices["/items/coin"] = { "ask": 1, "bid": 1, "vendor": 1 };
-
-        window.prices["/items/small_treasure_chest"] = {
-            "ask": openableLootDropMap["/items/small_treasure_chest"].map((item) => {
-                return item.itemHrid in window.prices ? window.prices[item.itemHrid].ask * item.dropRate * (item.maxCount + item.minCount) / 2 : 0;
-            }).reduce((a, b) => a + b, 0),
-            "bid": openableLootDropMap["/items/small_treasure_chest"].map((item) => {
-                return item.itemHrid in window.prices ? window.prices[item.itemHrid].bid * item.dropRate * (item.maxCount + item.minCount) / 2 : 0;
-            }).reduce((a, b) => a + b, 0),
-            "vendor": openableLootDropMap["/items/small_treasure_chest"].map((item) => {
-                return item.itemHrid in window.prices ? window.prices[item.itemHrid].vendor : 0;
-            }).reduce((a, b) => a + b, 0),
-        };
-
-        window.prices["/items/medium_treasure_chest"] = {
-            "ask": openableLootDropMap["/items/medium_treasure_chest"].map((item) => {
-                return item.itemHrid in window.prices ? window.prices[item.itemHrid].ask * item.dropRate * (item.maxCount + item.minCount) / 2 : 0;
-            }).reduce((a, b) => a + b, 0),
-            "bid": openableLootDropMap["/items/medium_treasure_chest"].map((item) => {
-                return item.itemHrid in window.prices ? window.prices[item.itemHrid].bid * item.dropRate * (item.maxCount + item.minCount) / 2 : 0;
-            }).reduce((a, b) => a + b, 0),
-            "vendor": openableLootDropMap["/items/medium_treasure_chest"].map((item) => {
-                return item.itemHrid in window.prices ? window.prices[item.itemHrid].vendor : 0;
-            }).reduce((a, b) => a + b, 0),
-        };
-
-        window.prices["/items/large_treasure_chest"] = {
-            "ask": openableLootDropMap["/items/large_treasure_chest"].map((item) => {
-                return item.itemHrid in window.prices ? window.prices[item.itemHrid].ask * item.dropRate * (item.maxCount + item.minCount) / 2 : 0;
-            }).reduce((a, b) => a + b, 0),
-            "bid": openableLootDropMap["/items/large_treasure_chest"].map((item) => {
-                return item.itemHrid in window.prices ? window.prices[item.itemHrid].bid * item.dropRate * (item.maxCount + item.minCount) / 2 : 0;
-            }).reduce((a, b) => a + b, 0),
-            "vendor": openableLootDropMap["/items/large_treasure_chest"].map((item) => {
-                return item.itemHrid in window.prices ? window.prices[item.itemHrid].vendor : 0;
-            }).reduce((a, b) => a + b, 0),
-        };
-
-    } catch (error) {
-        console.error(error);
-    }
-}
-
-document.getElementById("buttonGetPrices").onclick = async () => {
-    await fetchPrices();
-};
-
-document.addEventListener("input", (e) => {
-    let element = e.target;
-    if (element.tagName == "TD" && element.parentNode.parentNode.parentNode.classList.value.includes('profit-table')) {
-        let tableId = element.parentNode.parentNode.parentNode.id;
-        let row = element.parentNode.querySelectorAll('td');
-        let item = row[0].getAttribute('data-i18n').split('.')[1];
-        let newPrice = element.innerText;
-
-        let revenueSetting = document.getElementById('selectPrices_drops').value;
-        let expensesSetting = document.getElementById('selectPrices_consumables').value;
-
-        let expensesDifference = 0;
-        let revenueDifference = 0;
-
-        if (tableId == 'expensesTable') {
-            expensesDifference = updateTable('expensesTable', item, newPrice);
-            if (revenueSetting == expensesSetting) {
-                revenueDifference = updateTable('revenueTable', item, newPrice);
-            }
-            if (window.prices) {
-                if (!window.prices[item]) window.prices[item] = { "ask": -1, "bid": -1, "vendor": itemDetailMap[item].sellPrice };
-                if (expensesSetting == 'bid') {
-                    window.prices[item]['bid'] = newPrice;
-                } else {
-                    window.prices[item]['ask'] = newPrice;
-                }
-            }
-        } else {
-            revenueDifference = updateTable('revenueTable', item, newPrice);
-            if (revenueSetting == expensesSetting) {
-                expensesDifference = updateTable('expensesTable', item, newPrice);
-            }
-            if (window.prices) {
-                if (!window.prices[item]) window.prices[item] = { "ask": -1, "bid": -1, "vendor": itemDetailMap[item].sellPrice };
-                if (revenueSetting == 'bid') {
-                    window.prices[item]['bid'] = newPrice;
-                } else {
-                    window.prices[item]['ask'] = newPrice;
-                }
-            }
-        }
-
-        window.expenses += expensesDifference;
-        document.getElementById('expensesSpan').innerText = window.expenses.toLocaleString();
-        window.revenue += revenueDifference;
-        document.getElementById('revenueSpan').innerText = window.revenue.toLocaleString();
-
-        window.profit = window.revenue - window.expenses;
-        document.getElementById('profitPreview').innerText = window.profit.toLocaleString();
-        document.getElementById('profitSpan').innerText = window.profit.toLocaleString();
-    }
-});
-
-function updateTable(tableId, item, price) {
-    let row = document.querySelector('#' + tableId + ' .' + CSS.escape(item));
-    if (row == null) {
-        return 0;
-    }
-
-    row = row.querySelectorAll('td');
-    let priceTd = row[1];
-    let amountTd = row[2];
-    let totalTd = row[3];
-    let oldTotal = totalTd.innerText;
-    let newTotal = price * amountTd.innerText;
-
-    if (priceTd.innerText != price) {
-        priceTd.innerText = price;
-    }
-    totalTd.innerText = newTotal;
-
-    return newTotal - oldTotal;
-}
-
 // #endregion
 
 function initPatchNotes() {
@@ -6426,19 +6077,11 @@ const body = document.body;
 
 if (localStorage.getItem('darkModeEnabled') === 'true') {
     body.classList.add('dark-mode');
-    const tables = document.getElementsByClassName('profit-table');
-    for (const table of tables) {
-        table.classList.toggle('table-striped');
-    }
     darkModeToggle.checked = true;
 }
 
 darkModeToggle.addEventListener('change', () => {
     body.classList.toggle('dark-mode');
-    const tables = document.getElementsByClassName('profit-table');
-    for (const table of tables) {
-        table.classList.toggle('table-striped');
-    }
     localStorage.setItem('darkModeEnabled', darkModeToggle.checked);
 });
 
