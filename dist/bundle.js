@@ -2442,6 +2442,536 @@ function resolvePrivateLoadoutBaseline(preset, response, unavailableReason = "br
 
 /***/ }),
 
+/***/ "./src/simulationHistory.js":
+/*!**********************************!*\
+  !*** ./src/simulationHistory.js ***!
+  \**********************************/
+/***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
+
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   SIMULATION_HISTORY_DATABASE_NAME: () => (/* binding */ SIMULATION_HISTORY_DATABASE_NAME),
+/* harmony export */   SIMULATION_HISTORY_SCHEMA_VERSION: () => (/* binding */ SIMULATION_HISTORY_SCHEMA_VERSION),
+/* harmony export */   SIMULATION_HISTORY_STORE_NAME: () => (/* binding */ SIMULATION_HISTORY_STORE_NAME),
+/* harmony export */   buildSimulationHistoryRecord: () => (/* binding */ buildSimulationHistoryRecord),
+/* harmony export */   clearSimulationHistory: () => (/* binding */ clearSimulationHistory),
+/* harmony export */   compareSimulationHistoryMaps: () => (/* binding */ compareSimulationHistoryMaps),
+/* harmony export */   compareSimulationHistoryNumber: () => (/* binding */ compareSimulationHistoryNumber),
+/* harmony export */   compareSimulationHistoryRecords: () => (/* binding */ compareSimulationHistoryRecords),
+/* harmony export */   createSimulationHistoryId: () => (/* binding */ createSimulationHistoryId),
+/* harmony export */   deleteSimulationHistoryMap: () => (/* binding */ deleteSimulationHistoryMap),
+/* harmony export */   deleteSimulationHistoryRecord: () => (/* binding */ deleteSimulationHistoryRecord),
+/* harmony export */   getSimulationHistoryMapDescriptor: () => (/* binding */ getSimulationHistoryMapDescriptor),
+/* harmony export */   getSimulationHistoryStorageSummary: () => (/* binding */ getSimulationHistoryStorageSummary),
+/* harmony export */   loadSimulationHistoryRecords: () => (/* binding */ loadSimulationHistoryRecords),
+/* harmony export */   matchSimulationHistoryPlayers: () => (/* binding */ matchSimulationHistoryPlayers),
+/* harmony export */   saveSimulationHistoryRecord: () => (/* binding */ saveSimulationHistoryRecord)
+/* harmony export */ });
+const SIMULATION_HISTORY_DATABASE_NAME = "mwiCombatSimulatorHistory";
+const SIMULATION_HISTORY_STORE_NAME = "records";
+const SIMULATION_HISTORY_SCHEMA_VERSION = 1;
+
+const PLAYER_KEYS = new Set(["player1", "player2", "player3", "player4", "player5"]);
+const SKILL_KEYS = ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"];
+
+function toFiniteNumber(value, fallback = 0) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+}
+
+function roundNumber(value, digits = 4) {
+    const number = toFiniteNumber(value);
+    const factor = 10 ** digits;
+    return Math.round(number * factor) / factor;
+}
+
+function sumValues(value) {
+    if (!value || typeof value !== "object") {
+        return 0;
+    }
+    return Object.values(value).reduce((total, current) => total + toFiniteNumber(current), 0);
+}
+
+function createRateMap(value, divisor) {
+    if (!value || typeof value !== "object" || divisor <= 0) {
+        return {};
+    }
+
+    const result = {};
+    for (const [key, amount] of Object.entries(value)) {
+        const rate = toFiniteNumber(amount) / divisor;
+        if (rate !== 0) {
+            result[key] = roundNumber(rate, 8);
+        }
+    }
+    return result;
+}
+
+function calculateAttackDamage(abilityMap) {
+    if (!abilityMap || typeof abilityMap !== "object") {
+        return 0;
+    }
+
+    let damage = 0;
+    for (const hitMap of Object.values(abilityMap)) {
+        if (!hitMap || typeof hitMap !== "object") {
+            continue;
+        }
+        for (const [hit, count] of Object.entries(hitMap)) {
+            if (hit === "miss") {
+                continue;
+            }
+            damage += toFiniteNumber(hit) * toFiniteNumber(count);
+        }
+    }
+    return damage;
+}
+
+function calculateDamageDone(attacks, playerKey) {
+    const targets = attacks?.[playerKey];
+    if (!targets || typeof targets !== "object") {
+        return 0;
+    }
+    return Object.values(targets).reduce(
+        (total, abilities) => total + calculateAttackDamage(abilities),
+        0,
+    );
+}
+
+function calculateDamageTaken(attacks, playerKey) {
+    if (!attacks || typeof attacks !== "object") {
+        return 0;
+    }
+
+    let damage = 0;
+    for (const [source, targets] of Object.entries(attacks)) {
+        if (PLAYER_KEYS.has(source)) {
+            continue;
+        }
+        damage += calculateAttackDamage(targets?.[playerKey]);
+    }
+    return damage;
+}
+
+function calculateRanOutOfManaPercent(simResult, playerKey) {
+    const state = simResult.playerRanOutOfManaTime?.[playerKey];
+    const simulatedTime = toFiniteNumber(simResult.simulatedTime);
+    if (!state || simulatedTime <= 0) {
+        return 0;
+    }
+
+    const trailingTime = state.isOutOfMana
+        ? Math.max(0, simulatedTime - toFiniteNumber(state.startTimeForOutOfMana))
+        : 0;
+    const totalTime = toFiniteNumber(state.totalTimeForOutOfMana) + trailingTime;
+    return roundNumber(100 * totalTime / simulatedTime);
+}
+
+function createSimulationHistoryId(completedAt = new Date().toISOString()) {
+    if (globalThis.crypto?.randomUUID) {
+        return globalThis.crypto.randomUUID();
+    }
+    return `${Date.parse(completedAt).toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function getSimulationHistoryMapDescriptor(simResult) {
+    if (simResult?.isLabyrinth) {
+        const mapHrid = simResult.labyrinthName ?? "unknown";
+        return {
+            mapKey: `labyrinth:${mapHrid}`,
+            mapType: "labyrinth",
+            mapHrid,
+            difficulty: toFiniteNumber(simResult.roomLevel),
+        };
+    }
+
+    const mapHrid = simResult?.zoneName ?? "unknown";
+    const mapType = simResult?.isDungeon ? "dungeon" : "zone";
+    return {
+        mapKey: `${mapType}:${mapHrid}`,
+        mapType,
+        mapHrid,
+        difficulty: toFiniteNumber(simResult?.difficultyTier),
+    };
+}
+
+function buildSimulationHistoryRecord({
+    simResult,
+    players = [],
+    expectedDropsByPlayer = {},
+    teamPresetName = "",
+    startedAt = "",
+    completedAt = new Date().toISOString(),
+    id = createSimulationHistoryId(completedAt),
+    nanosecondsPerHour = 60 * 60 * 1e9,
+    nanosecondsPerSecond = 1e9,
+}) {
+    const map = getSimulationHistoryMapDescriptor(simResult);
+    const simulatedHours = Math.max(
+        toFiniteNumber(simResult?.simulatedTime) / nanosecondsPerHour,
+        0,
+    );
+    const simulatedSeconds = Math.max(
+        toFiniteNumber(simResult?.simulatedTime) / nanosecondsPerSecond,
+        0,
+    );
+
+    let completedHours = simulatedHours;
+    if (simResult?.isDungeon && toFiniteNumber(simResult.lastDungeonFinishTime) > 0) {
+        completedHours = toFiniteNumber(simResult.lastDungeonFinishTime) / nanosecondsPerHour;
+    } else if (toFiniteNumber(simResult?.lastEncounterFinishTime) > 0) {
+        completedHours = toFiniteNumber(simResult.lastEncounterFinishTime) / nanosecondsPerHour;
+    }
+    if (completedHours <= 0) {
+        completedHours = simulatedHours || 1;
+    }
+
+    const completed = toFiniteNumber(simResult?.dungeonsCompleted);
+    const failed = toFiniteNumber(simResult?.dungeonsFailed);
+    const attempts = toFiniteNumber(simResult?.labyAttemptCount);
+    const encounters = toFiniteNumber(simResult?.encounters);
+    const encounterCount = simResult?.isDungeon ? completed : encounters;
+    let successRate = null;
+    if (simResult?.isLabyrinth && attempts > 0) {
+        successRate = roundNumber(100 * encounters / attempts);
+    } else if (simResult?.isDungeon && completed + failed > 0) {
+        successRate = roundNumber(100 * completed / (completed + failed));
+    }
+
+    const monsterDeaths = Object.fromEntries(
+        Object.entries(simResult?.deaths ?? {}).filter(([key]) => !PLAYER_KEYS.has(key)),
+    );
+
+    const historyPlayers = players.map((playerContext) => {
+        const slot = String(playerContext.slot);
+        const playerKey = playerContext.playerKey ?? `player${slot}`;
+        const experience = simResult?.experienceGained?.[playerKey] ?? {};
+        const experiencePerHour = {};
+        for (const skill of SKILL_KEYS) {
+            const rate = simulatedHours > 0
+                ? toFiniteNumber(experience[skill]) / simulatedHours
+                : 0;
+            if (rate !== 0) {
+                experiencePerHour[skill] = roundNumber(rate);
+            }
+        }
+
+        return {
+            slot,
+            playerKey,
+            name: String(playerContext.name ?? playerKey).trim() || playerKey,
+            deathsPerHour: roundNumber(
+                simulatedHours > 0
+                    ? toFiniteNumber(simResult?.deaths?.[playerKey]) / simulatedHours
+                    : 0,
+            ),
+            dps: roundNumber(
+                simulatedSeconds > 0
+                    ? calculateDamageDone(simResult?.attacks, playerKey) / simulatedSeconds
+                    : 0,
+            ),
+            damageTakenPerSecond: roundNumber(
+                simulatedSeconds > 0
+                    ? calculateDamageTaken(simResult?.attacks, playerKey) / simulatedSeconds
+                    : 0,
+            ),
+            totalExperiencePerHour: roundNumber(
+                simulatedHours > 0 ? sumValues(experience) / simulatedHours : 0,
+            ),
+            experiencePerHour,
+            consumablesPerHour: createRateMap(
+                simResult?.consumablesUsed?.[playerKey],
+                simulatedHours,
+            ),
+            expectedDropsPerHour: createRateMap(
+                expectedDropsByPlayer[playerKey],
+                simulatedHours,
+            ),
+            hitpointsSpentPerHour: roundNumber(
+                simulatedHours > 0
+                    ? sumValues(simResult?.hitpointsSpent?.[playerKey]) / simulatedHours
+                    : 0,
+            ),
+            manaUsedPerHour: roundNumber(
+                simulatedHours > 0
+                    ? sumValues(simResult?.manaUsed?.[playerKey]) / simulatedHours
+                    : 0,
+            ),
+            hitpointsRestoredPerSecond: roundNumber(
+                simulatedSeconds > 0
+                    ? sumValues(simResult?.hitpointsGained?.[playerKey]) / simulatedSeconds
+                    : 0,
+            ),
+            manapointsRestoredPerSecond: roundNumber(
+                simulatedSeconds > 0
+                    ? sumValues(simResult?.manapointsGained?.[playerKey]) / simulatedSeconds
+                    : 0,
+            ),
+            ranOutOfManaPercent: calculateRanOutOfManaPercent(simResult ?? {}, playerKey),
+        };
+    });
+
+    return {
+        schemaVersion: SIMULATION_HISTORY_SCHEMA_VERSION,
+        id,
+        createdAt: completedAt,
+        startedAt,
+        ...map,
+        simulationHours: roundNumber(simulatedHours),
+        teamPresetName: String(teamPresetName ?? "").trim(),
+        playerNames: historyPlayers.map((playerEntry) => playerEntry.name),
+        encountersPerHour: roundNumber(encounterCount / completedHours),
+        labyrinthAttemptsPerHour: simResult?.isLabyrinth
+            ? roundNumber(attempts / completedHours)
+            : null,
+        completedDungeons: completed,
+        failedDungeons: failed,
+        successRate,
+        averageMinutes: simResult?.isDungeon && completed > 0
+            ? roundNumber(completedHours * 60 / completed)
+            : null,
+        maxWaveReached: toFiniteNumber(simResult?.maxWaveReached),
+        maxEnrageStack: toFiniteNumber(simResult?.maxEnrageStack),
+        monsterKillsPerHour: createRateMap(monsterDeaths, completedHours),
+        players: historyPlayers,
+    };
+}
+
+function normalizePlayerName(value) {
+    return String(value ?? "").trim().toLocaleLowerCase();
+}
+
+function matchSimulationHistoryPlayers(baselinePlayers = [], comparisonPlayers = []) {
+    const unusedComparisonPlayers = new Set(comparisonPlayers);
+    const pairs = [];
+
+    for (const baseline of baselinePlayers) {
+        const normalizedName = normalizePlayerName(baseline.name);
+        let comparison = [...unusedComparisonPlayers].find(
+            (candidate) => normalizedName && normalizePlayerName(candidate.name) === normalizedName,
+        );
+        if (!comparison) {
+            comparison = [...unusedComparisonPlayers].find(
+                (candidate) => String(candidate.slot) === String(baseline.slot),
+            );
+        }
+        if (comparison) {
+            unusedComparisonPlayers.delete(comparison);
+        }
+        pairs.push({ baseline, comparison: comparison ?? null });
+    }
+
+    for (const comparison of unusedComparisonPlayers) {
+        pairs.push({ baseline: null, comparison });
+    }
+
+    return pairs;
+}
+
+function compareSimulationHistoryNumber(baseline, comparison) {
+    const before = toFiniteNumber(baseline);
+    const after = toFiniteNumber(comparison);
+    const delta = roundNumber(after - before, 8);
+    return {
+        baseline: roundNumber(before, 8),
+        comparison: roundNumber(after, 8),
+        delta,
+        percent: before === 0 ? null : roundNumber(100 * delta / Math.abs(before), 4),
+    };
+}
+
+function compareSimulationHistoryMaps(baseline = {}, comparison = {}) {
+    const keys = [...new Set([...Object.keys(baseline), ...Object.keys(comparison)])].sort();
+    return keys.map((key) => ({
+        key,
+        ...compareSimulationHistoryNumber(baseline[key], comparison[key]),
+    }));
+}
+
+function compareSimulationHistoryRecords(baseline, comparison) {
+    return {
+        sameMap: baseline?.mapKey === comparison?.mapKey,
+        summary: {
+            encountersPerHour: compareSimulationHistoryNumber(
+                baseline?.encountersPerHour,
+                comparison?.encountersPerHour,
+            ),
+            successRate: compareSimulationHistoryNumber(
+                baseline?.successRate,
+                comparison?.successRate,
+            ),
+            averageMinutes: compareSimulationHistoryNumber(
+                baseline?.averageMinutes,
+                comparison?.averageMinutes,
+            ),
+        },
+        players: matchSimulationHistoryPlayers(
+            baseline?.players ?? [],
+            comparison?.players ?? [],
+        ).map(({ baseline: baselinePlayer, comparison: comparisonPlayer }) => ({
+            baseline: baselinePlayer,
+            comparison: comparisonPlayer,
+            metrics: {
+                dps: compareSimulationHistoryNumber(baselinePlayer?.dps, comparisonPlayer?.dps),
+                damageTakenPerSecond: compareSimulationHistoryNumber(
+                    baselinePlayer?.damageTakenPerSecond,
+                    comparisonPlayer?.damageTakenPerSecond,
+                ),
+                deathsPerHour: compareSimulationHistoryNumber(
+                    baselinePlayer?.deathsPerHour,
+                    comparisonPlayer?.deathsPerHour,
+                ),
+                totalExperiencePerHour: compareSimulationHistoryNumber(
+                    baselinePlayer?.totalExperiencePerHour,
+                    comparisonPlayer?.totalExperiencePerHour,
+                ),
+                hitpointsSpentPerHour: compareSimulationHistoryNumber(
+                    baselinePlayer?.hitpointsSpentPerHour,
+                    comparisonPlayer?.hitpointsSpentPerHour,
+                ),
+                manaUsedPerHour: compareSimulationHistoryNumber(
+                    baselinePlayer?.manaUsedPerHour,
+                    comparisonPlayer?.manaUsedPerHour,
+                ),
+                hitpointsRestoredPerSecond: compareSimulationHistoryNumber(
+                    baselinePlayer?.hitpointsRestoredPerSecond,
+                    comparisonPlayer?.hitpointsRestoredPerSecond,
+                ),
+                manapointsRestoredPerSecond: compareSimulationHistoryNumber(
+                    baselinePlayer?.manapointsRestoredPerSecond,
+                    comparisonPlayer?.manapointsRestoredPerSecond,
+                ),
+                ranOutOfManaPercent: compareSimulationHistoryNumber(
+                    baselinePlayer?.ranOutOfManaPercent,
+                    comparisonPlayer?.ranOutOfManaPercent,
+                ),
+            },
+            experience: compareSimulationHistoryMaps(
+                baselinePlayer?.experiencePerHour,
+                comparisonPlayer?.experiencePerHour,
+            ),
+            consumables: compareSimulationHistoryMaps(
+                baselinePlayer?.consumablesPerHour,
+                comparisonPlayer?.consumablesPerHour,
+            ),
+            drops: compareSimulationHistoryMaps(
+                baselinePlayer?.expectedDropsPerHour,
+                comparisonPlayer?.expectedDropsPerHour,
+            ),
+        })),
+    };
+}
+
+function openSimulationHistoryDatabase(indexedDb) {
+    return new Promise((resolve, reject) => {
+        if (!indexedDb) {
+            reject(new Error("IndexedDB is unavailable."));
+            return;
+        }
+
+        const request = indexedDb.open(SIMULATION_HISTORY_DATABASE_NAME, 1);
+        request.onupgradeneeded = () => {
+            const database = request.result;
+            if (!database.objectStoreNames.contains(SIMULATION_HISTORY_STORE_NAME)) {
+                const store = database.createObjectStore(
+                    SIMULATION_HISTORY_STORE_NAME,
+                    { keyPath: "id" },
+                );
+                store.createIndex("mapKey", "mapKey", { unique: false });
+                store.createIndex("createdAt", "createdAt", { unique: false });
+            }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error ?? new Error("Unable to open history database."));
+    });
+}
+
+function runHistoryTransaction(indexedDb, mode, operation) {
+    return openSimulationHistoryDatabase(indexedDb).then((database) => new Promise((resolve, reject) => {
+        const transaction = database.transaction(SIMULATION_HISTORY_STORE_NAME, mode);
+        const store = transaction.objectStore(SIMULATION_HISTORY_STORE_NAME);
+        let result;
+
+        try {
+            result = operation(store);
+        } catch (error) {
+            database.close();
+            reject(error);
+            return;
+        }
+
+        transaction.oncomplete = () => {
+            database.close();
+            resolve(result?.result ?? result);
+        };
+        transaction.onerror = () => {
+            const error = transaction.error ?? new Error("History database transaction failed.");
+            database.close();
+            reject(error);
+        };
+        transaction.onabort = () => {
+            const error = transaction.error ?? new Error("History database transaction was aborted.");
+            database.close();
+            reject(error);
+        };
+    }));
+}
+
+function saveSimulationHistoryRecord(record, indexedDb = window.indexedDB) {
+    return runHistoryTransaction(indexedDb, "readwrite", (store) => store.put(record));
+}
+
+async function loadSimulationHistoryRecords(indexedDb = window.indexedDB) {
+    const records = await runHistoryTransaction(indexedDb, "readonly", (store) => store.getAll());
+    return (records ?? []).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
+function deleteSimulationHistoryRecord(id, indexedDb = window.indexedDB) {
+    return runHistoryTransaction(indexedDb, "readwrite", (store) => store.delete(id));
+}
+
+async function deleteSimulationHistoryMap(mapKey, indexedDb = window.indexedDB) {
+    const database = await openSimulationHistoryDatabase(indexedDb);
+    return new Promise((resolve, reject) => {
+        const transaction = database.transaction(SIMULATION_HISTORY_STORE_NAME, "readwrite");
+        const store = transaction.objectStore(SIMULATION_HISTORY_STORE_NAME);
+        const request = store.index("mapKey").getAllKeys(mapKey);
+        let deletedCount = 0;
+
+        request.onsuccess = () => {
+            const keys = request.result ?? [];
+            deletedCount = keys.length;
+            keys.forEach((key) => store.delete(key));
+        };
+        request.onerror = () => transaction.abort();
+        transaction.oncomplete = () => {
+            database.close();
+            resolve(deletedCount);
+        };
+        transaction.onerror = () => {
+            const error = transaction.error ?? request.error ?? new Error("Unable to delete map history.");
+            database.close();
+            reject(error);
+        };
+        transaction.onabort = transaction.onerror;
+    });
+}
+
+function clearSimulationHistory(indexedDb = window.indexedDB) {
+    return runHistoryTransaction(indexedDb, "readwrite", (store) => store.clear());
+}
+
+function getSimulationHistoryStorageSummary(records = []) {
+    const serialized = JSON.stringify(records);
+    const bytes = typeof TextEncoder === "function"
+        ? new TextEncoder().encode(serialized).length
+        : serialized.length * 2;
+    return { count: records.length, bytes };
+}
+
+
+/***/ }),
+
 /***/ "./src/teamPresetComparison.js":
 /*!*************************************!*\
   !*** ./src/teamPresetComparison.js ***!
@@ -2915,7 +3445,7 @@ function createTeamPresetId() {
   \************************/
 /***/ ((module) => {
 
-module.exports = /*#__PURE__*/JSON.parse('{"2026年8月28日":["支持从私有配装数据导入每名角色实际生效的公会神龛战斗增益","房屋面板新增五种公会战斗神龛等级显示与模拟调整","逐怪物伤害与承伤明细改为默认折叠显示","钥匙碎片时间成本移至期望掉落上方，并新增每日碎片产量","钥匙碎片总耗时支持使用角色专业等级及游戏当前生效的专业增益精确计算","房屋面板改为房屋与公会神龛左右分栏显示","移除价格设置、市场价格获取与期望利润相关功能"],"2026年5月5日":["更新装备数据和本地化名称"],"2026年4月7日":["增加字段显示迷宫尝试次数和迷宫成功率"],"2026年3月5日":["优化狂怒相关的模拟性能"],"2026年3月3日":["支持迷宫封印对应的个人增益"],"2026年2月24日":["更新迷宫补丁的数据","新增支持迷宫单体/批量模拟"],"2026年2月1日":["修正战斗等级计算的精度","修正地下城完成或失败后重新进入战斗的时间间隔 by wangchyan","修正诅咒和削弱的持续时间 by wangchyan","修正诅咒和狂怒的触发逻辑 by wangchyan","修正地下城团灭重置机制的部分逻辑 by wangchyan","修复守护光环和速度光环部分增益未正确受对应等级加强的异常 by wangchyan","修复无敌技能未正确影响韧性数值的缺陷 by wangchyan","修复初次进入战斗时未能优先吃喝的异常 by wangchyan","战斗时长相关的统计现在仅计算已完成的战斗，不再包含当前未结束的战斗 by wangchyan"],"2026年1月11日":["修复trigger错误计算已阵亡单位的问题 by wangchyan"],"2025年12月31日":["实验性功能新增HP/MP可视化图表 by wangchyan","修复防御伤害未正确受damge加成的异常 by wangchyan","修复守护光环的治疗加成效果未生效的异常 by wangchyan","修复快速治疗等技能未正确选择最低%生命为目标的错误 by wangchyan"],"2025年12月30日":["地下城增加最短完成时间记录"],"2025年12月24日":["修复技能释放选择的缺陷，之前可能存在异常缺蓝等情况"],"2025年12月18日":["支持成就系统及对应buff效果","地下城怪物的掉落不再生效"],"2025年12月6日":["修复游戏更新后技能在无trigger情况下由[]变为null时造成的异常"],"2025年11月7日":["兼容支持从CN镜像站调用API获取价格"],"2025年10月14日":["修复怪物攻击间隔数值未能适配攻击等级的问题"],"2025年9月17日":["修复暴击光环的trigger缺陷"],"2025年9月9日":["复活时不再错误的清空所有buff","团灭日志增加反伤、荆棘和DOT伤害记录"],"2025年8月21日":["增加单挑战斗批量模拟和对应怪物选项","增加MooPass和社区buff的选项及对应功能","精炼装备数值加强","秘法主教属性削弱","init_client_info_v1.20250819.0.json游戏数据更新"],"2025年8月20日":["修复经验和掉落计算在极端情况下的可能异常"],"2025年8月19日":["合并Test和Temp分支的rework内容","init_client_info_v1.20250818.0.json游戏数据更新"],"2025年8月18日":["修复贯穿技能可能对相同目标造成重复伤害的问题","修复团灭日志在黑夜模式下的显示异常","战斗等级公式更新","钟乳石魔像的荆棘数值调整","init_client_info_v1.20250626.0_0817.json游戏数据更新"],"2025年8月16日":["增加停止模拟按钮 by BKN46","增加技能顺序调整按钮 by BKN46","增加团灭日志 by TruthLight","怪物属性更新","奥术反射更名为报应","init_client_info_v1.20250626.0_0815.json游戏数据更新"],"2025年8月14日":["怪物属性更新","远程和法师装备属性调整","反伤计算上限调整","修复战斗间隔释放技能的异常","修复技能释放判断逻辑的异常","法力值耗尽比例更加准确","调整远程经验的15%和魔法经验的12%映射到攻击经验","init_client_info_v1.20250626.0_0813.json游戏数据更新"],"2025年8月11日":["怪物属性更新","近战和物理技能施法时间更新","盾击和重锤数值调整","双手盾防御经验加成调整","init_client_info_v1.20250626.0_0811.json游戏数据更新"],"2025年8月8日":["实现组队等级差过大时对掉落和经验的惩罚","实现怪物经验随狂暴进度百分比增加","暴击光环数值调整","增加战斗等级数值显示","增加等级差距惩罚数值显示","init_client_info_v1.20250626.0_0807.json游戏数据更新"],"2025年8月7日":["修复组队战斗时一些重复物品掉落数量异常的缺陷 by contr4l","init_client_info_v1.20250626.0_0806.json游戏数据更新"],"2025年8月3日":["怪物狂暴机制及对应trigger生效","精炼装备更新，护符数值调整，守护光环增加闪避率","init_client_info_v1.20250626.0_0802.json游戏数据更新","狂怒层数修正为5层","招架结算机制调整"],"2025年7月31日":["物品数据和怪物属性更新","尖刺外壳和奥术反射重做","强化数值更新","删除异常trigger","狮鹫盾的虚弱重做","君王剑招架对队友生效","狂怒特效最大层数修正为6层","涟漪特效增加10MP恢复","反伤正确显示其命中率","反伤机制调整","同步双手盾属性和反伤荆棘技能数值的调整"],"2025年7月22日":["暴击光环受远程等级加成","光环基础数值和等级加成调整"],"2025年7月17日":["批量模拟支持勾选星球","经验分配比例调整至30%+70%","光环及对应trigger，并按对应技能等级百分比加成","水火自然默认调整为元素光环","init_client_info_v1.20250626.0_0717.json游戏数据更新"],"2025年7月11日":["怪物经验和技能等级公式更新","闪避和抗性计算公式更新","力量更替为近战以及对应的兼容","init_client_info_v1.20250626.0_0711.json游戏数据更新"],"2025年7月10日":["修复贯穿技能由敌人释放时可能多次击中相同目标的缺陷"],"2025年7月9日":["掉落和掉率调整","经验调整","疫病射击和破甲之刺调整","怪物自动恢复移除","疫病射击trigger调整","获取价格使用官方API"],"2025年7月7日":["怪物属性缩放和地图多难度","法师技能调整和装备上\'技能伤害\'词缀生效","攻击等级和房屋等级对施法速度的影响生效","物品调整","精准重做以攻击等级计算","TEST 远程魔法经验的10%映射到攻击经验！","经验重做和护符装备"]}');
+module.exports = /*#__PURE__*/JSON.parse('{"2026年8月29日":["新增按地图自动保存的模拟历史，不同难度记录会归入同一地图","模拟历史支持查看全队每名角色的主要指标、消耗品与期望掉落","支持选择同地图两条历史记录，按角色比较战斗表现与资源变化"],"2026年8月28日":["支持从私有配装数据导入每名角色实际生效的公会神龛战斗增益","房屋面板新增五种公会战斗神龛等级显示与模拟调整","逐怪物伤害与承伤明细改为默认折叠显示","钥匙碎片时间成本移至期望掉落上方，并新增每日碎片产量","钥匙碎片总耗时支持使用角色专业等级及游戏当前生效的专业增益精确计算","房屋面板改为房屋与公会神龛左右分栏显示","移除价格设置、市场价格获取与期望利润相关功能"],"2026年5月5日":["更新装备数据和本地化名称"],"2026年4月7日":["增加字段显示迷宫尝试次数和迷宫成功率"],"2026年3月5日":["优化狂怒相关的模拟性能"],"2026年3月3日":["支持迷宫封印对应的个人增益"],"2026年2月24日":["更新迷宫补丁的数据","新增支持迷宫单体/批量模拟"],"2026年2月1日":["修正战斗等级计算的精度","修正地下城完成或失败后重新进入战斗的时间间隔 by wangchyan","修正诅咒和削弱的持续时间 by wangchyan","修正诅咒和狂怒的触发逻辑 by wangchyan","修正地下城团灭重置机制的部分逻辑 by wangchyan","修复守护光环和速度光环部分增益未正确受对应等级加强的异常 by wangchyan","修复无敌技能未正确影响韧性数值的缺陷 by wangchyan","修复初次进入战斗时未能优先吃喝的异常 by wangchyan","战斗时长相关的统计现在仅计算已完成的战斗，不再包含当前未结束的战斗 by wangchyan"],"2026年1月11日":["修复trigger错误计算已阵亡单位的问题 by wangchyan"],"2025年12月31日":["实验性功能新增HP/MP可视化图表 by wangchyan","修复防御伤害未正确受damge加成的异常 by wangchyan","修复守护光环的治疗加成效果未生效的异常 by wangchyan","修复快速治疗等技能未正确选择最低%生命为目标的错误 by wangchyan"],"2025年12月30日":["地下城增加最短完成时间记录"],"2025年12月24日":["修复技能释放选择的缺陷，之前可能存在异常缺蓝等情况"],"2025年12月18日":["支持成就系统及对应buff效果","地下城怪物的掉落不再生效"],"2025年12月6日":["修复游戏更新后技能在无trigger情况下由[]变为null时造成的异常"],"2025年11月7日":["兼容支持从CN镜像站调用API获取价格"],"2025年10月14日":["修复怪物攻击间隔数值未能适配攻击等级的问题"],"2025年9月17日":["修复暴击光环的trigger缺陷"],"2025年9月9日":["复活时不再错误的清空所有buff","团灭日志增加反伤、荆棘和DOT伤害记录"],"2025年8月21日":["增加单挑战斗批量模拟和对应怪物选项","增加MooPass和社区buff的选项及对应功能","精炼装备数值加强","秘法主教属性削弱","init_client_info_v1.20250819.0.json游戏数据更新"],"2025年8月20日":["修复经验和掉落计算在极端情况下的可能异常"],"2025年8月19日":["合并Test和Temp分支的rework内容","init_client_info_v1.20250818.0.json游戏数据更新"],"2025年8月18日":["修复贯穿技能可能对相同目标造成重复伤害的问题","修复团灭日志在黑夜模式下的显示异常","战斗等级公式更新","钟乳石魔像的荆棘数值调整","init_client_info_v1.20250626.0_0817.json游戏数据更新"],"2025年8月16日":["增加停止模拟按钮 by BKN46","增加技能顺序调整按钮 by BKN46","增加团灭日志 by TruthLight","怪物属性更新","奥术反射更名为报应","init_client_info_v1.20250626.0_0815.json游戏数据更新"],"2025年8月14日":["怪物属性更新","远程和法师装备属性调整","反伤计算上限调整","修复战斗间隔释放技能的异常","修复技能释放判断逻辑的异常","法力值耗尽比例更加准确","调整远程经验的15%和魔法经验的12%映射到攻击经验","init_client_info_v1.20250626.0_0813.json游戏数据更新"],"2025年8月11日":["怪物属性更新","近战和物理技能施法时间更新","盾击和重锤数值调整","双手盾防御经验加成调整","init_client_info_v1.20250626.0_0811.json游戏数据更新"],"2025年8月8日":["实现组队等级差过大时对掉落和经验的惩罚","实现怪物经验随狂暴进度百分比增加","暴击光环数值调整","增加战斗等级数值显示","增加等级差距惩罚数值显示","init_client_info_v1.20250626.0_0807.json游戏数据更新"],"2025年8月7日":["修复组队战斗时一些重复物品掉落数量异常的缺陷 by contr4l","init_client_info_v1.20250626.0_0806.json游戏数据更新"],"2025年8月3日":["怪物狂暴机制及对应trigger生效","精炼装备更新，护符数值调整，守护光环增加闪避率","init_client_info_v1.20250626.0_0802.json游戏数据更新","狂怒层数修正为5层","招架结算机制调整"],"2025年7月31日":["物品数据和怪物属性更新","尖刺外壳和奥术反射重做","强化数值更新","删除异常trigger","狮鹫盾的虚弱重做","君王剑招架对队友生效","狂怒特效最大层数修正为6层","涟漪特效增加10MP恢复","反伤正确显示其命中率","反伤机制调整","同步双手盾属性和反伤荆棘技能数值的调整"],"2025年7月22日":["暴击光环受远程等级加成","光环基础数值和等级加成调整"],"2025年7月17日":["批量模拟支持勾选星球","经验分配比例调整至30%+70%","光环及对应trigger，并按对应技能等级百分比加成","水火自然默认调整为元素光环","init_client_info_v1.20250626.0_0717.json游戏数据更新"],"2025年7月11日":["怪物经验和技能等级公式更新","闪避和抗性计算公式更新","力量更替为近战以及对应的兼容","init_client_info_v1.20250626.0_0711.json游戏数据更新"],"2025年7月10日":["修复贯穿技能由敌人释放时可能多次击中相同目标的缺陷"],"2025年7月9日":["掉落和掉率调整","经验调整","疫病射击和破甲之刺调整","怪物自动恢复移除","疫病射击trigger调整","获取价格使用官方API"],"2025年7月7日":["怪物属性缩放和地图多难度","法师技能调整和装备上\'技能伤害\'词缀生效","攻击等级和房屋等级对施法速度的影响生效","物品调整","精准重做以攻击等级计算","TEST 远程魔法经验的10%映射到攻击经验！","经验重做和护符装备"]}');
 
 /***/ }),
 
@@ -3216,7 +3746,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _teamPresetStore_js__WEBPACK_IMPORTED_MODULE_20__ = __webpack_require__(/*! ./teamPresetStore.js */ "./src/teamPresetStore.js");
 /* harmony import */ var _teamPresetComparison_js__WEBPACK_IMPORTED_MODULE_21__ = __webpack_require__(/*! ./teamPresetComparison.js */ "./src/teamPresetComparison.js");
 /* harmony import */ var _privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_22__ = __webpack_require__(/*! ./privateLoadoutBaseline.js */ "./src/privateLoadoutBaseline.js");
-/* harmony import */ var _patchNote_json__WEBPACK_IMPORTED_MODULE_23__ = __webpack_require__(/*! ../patchNote.json */ "./patchNote.json");
+/* harmony import */ var _simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__ = __webpack_require__(/*! ./simulationHistory.js */ "./src/simulationHistory.js");
+/* harmony import */ var _patchNote_json__WEBPACK_IMPORTED_MODULE_24__ = __webpack_require__(/*! ../patchNote.json */ "./patchNote.json");
+
 
 
 
@@ -3264,6 +3796,8 @@ let main_abilities = [null, null, null, null];
 let triggerMap = {};
 let modalTriggers = [];
 let currentSimResults = {};
+let pendingSimulationHistoryContext = null;
+let simulationHistoryRecords = [];
 
 let currentPlayerTabId = '1';
 let lastAutoLoadedTeamPresetTargetKey = null;
@@ -3285,6 +3819,7 @@ function onWorkerMessage(event) {
             progressbar.innerHTML = "100% (" + ((Date.now() - simStartTime) / 1000).toFixed(2) + "s)";
             //console.log("SIM RESULTS: ", event.data.simResult);
             showSimulationResult(event.data.simResult);
+            void saveCompletedSimulationHistory(event.data.simResult);
             updateContent();
             buttonStartSimulation.disabled = false;
             buttonStopSimulation.style.display = 'none';
@@ -3300,6 +3835,7 @@ function onWorkerMessage(event) {
             }
             break;
         case "simulation_error":
+            pendingSimulationHistoryContext = null;
             showErrorModal(event.data.error.toString());
             break;
     }
@@ -5157,6 +5693,938 @@ function calcExpectedDropMap(simResult, playerToDisplay) {
     return expectedDropMap;
 }
 
+// #region Simulation History
+
+function interpolateSimulationHistoryFallback(fallback, values = {}) {
+    return Object.entries(values).reduce(
+        (text, [key, value]) => text.replaceAll(`{{${key}}}`, String(value)),
+        fallback,
+    );
+}
+
+function getSimulationHistoryText(key, fallback, values = {}) {
+    const translationKey = `common:simulationHistory.${key}`;
+    try {
+        const translated = i18next.t(translationKey, values);
+        if (translated && translated !== translationKey) {
+            return translated;
+        }
+    } catch {
+        // i18next may still be initializing during the first render.
+    }
+    return interpolateSimulationHistoryFallback(fallback, values);
+}
+
+function getLocalizedHistoryValue(translationKey, fallback) {
+    try {
+        const translated = i18next.t(translationKey);
+        if (translated && translated !== translationKey) {
+            return translated;
+        }
+    } catch {
+        // Use the supplied fallback while translations are unavailable.
+    }
+    return fallback;
+}
+
+function formatSimulationHistoryNumber(value, maximumFractionDigits = 2) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) {
+        return "0";
+    }
+    return number.toLocaleString(undefined, {
+        minimumFractionDigits: 0,
+        maximumFractionDigits,
+    });
+}
+
+function formatSimulationHistoryDate(value) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? String(value ?? "") : date.toLocaleString();
+}
+
+function formatSimulationHistorySize(bytes) {
+    if (bytes < 1024) {
+        return `${bytes} B`;
+    }
+    if (bytes < 1024 * 1024) {
+        return `${(bytes / 1024).toFixed(1)} KB`;
+    }
+    return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+}
+
+function getSimulationHistoryMapName(record) {
+    const translationKey = record.mapType === "labyrinth"
+        ? `monsterNames.${record.mapHrid}`
+        : `actionNames.${record.mapHrid}`;
+    const fallback = record.mapHrid?.split("/").pop()?.replaceAll("_", " ") || record.mapHrid;
+    return getLocalizedHistoryValue(translationKey, fallback);
+}
+
+function getSimulationHistoryDifficulty(record) {
+    return record.mapType === "labyrinth"
+        ? `Lv. ${formatSimulationHistoryNumber(record.difficulty, 0)}`
+        : `T${formatSimulationHistoryNumber(record.difficulty, 0)}`;
+}
+
+function getCurrentSimulationHistoryMapKey() {
+    if (document.getElementById("simLabyrinthToggle")?.checked) {
+        const hrid = document.getElementById("selectLabyrinth")?.value;
+        return hrid ? `labyrinth:${hrid}` : "";
+    }
+    if (document.getElementById("simDungeonToggle")?.checked) {
+        const hrid = document.getElementById("selectDungeon")?.value;
+        return hrid ? `dungeon:${hrid}` : "";
+    }
+    const hrid = document.getElementById("selectZone")?.value;
+    return hrid ? `zone:${hrid}` : "";
+}
+
+function captureSimulationHistoryContext(selectedPlayerNumbers) {
+    const players = selectedPlayerNumbers.map((playerNumber) => {
+        const playerKey = `player${playerNumber}`;
+        const tabName = document.getElementById(`${playerKey}-tab`)?.textContent?.trim();
+        return {
+            slot: String(playerNumber),
+            playerKey,
+            name: tabName || `Player ${playerNumber}`,
+        };
+    });
+
+    return {
+        startedAt: new Date().toISOString(),
+        teamPresetName: document.getElementById("inputTeamPresetName")?.value?.trim() ?? "",
+        players,
+    };
+}
+
+function setSimulationHistoryStatus(message = "", style = "muted") {
+    const status = document.getElementById("simulationHistoryStatus");
+    if (!status) {
+        return;
+    }
+    status.textContent = message;
+    status.className = `small mt-2 text-${style}`;
+}
+
+function updateSimulationHistoryCount() {
+    const count = document.getElementById("simulationHistoryCount");
+    if (count) {
+        count.textContent = simulationHistoryRecords.length.toLocaleString();
+    }
+}
+
+async function saveCompletedSimulationHistory(simResult) {
+    const context = pendingSimulationHistoryContext;
+    pendingSimulationHistoryContext = null;
+    if (!context) {
+        return;
+    }
+
+    const expectedDropsByPlayer = {};
+    if (!simResult.isDungeon) {
+        for (const playerContext of context.players) {
+            if (!simResult.dropRateMultiplier?.[playerContext.playerKey]) {
+                continue;
+            }
+            expectedDropsByPlayer[playerContext.playerKey] = Object.fromEntries(
+                calcExpectedDropMap(simResult, playerContext.playerKey),
+            );
+        }
+    }
+
+    const record = (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.buildSimulationHistoryRecord)({
+        simResult,
+        players: context.players,
+        expectedDropsByPlayer,
+        teamPresetName: context.teamPresetName,
+        startedAt: context.startedAt,
+    });
+
+    try {
+        await (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.saveSimulationHistoryRecord)(record);
+        simulationHistoryRecords = await (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.loadSimulationHistoryRecords)();
+        updateSimulationHistoryCount();
+        if (document.getElementById("simulationHistoryModal")?.classList.contains("show")) {
+            renderSimulationHistory({ preferredMapKey: record.mapKey });
+        }
+        const message = getSimulationHistoryText(
+            "saved",
+            "Simulation history saved: {{map}} {{difficulty}}",
+            {
+                map: getSimulationHistoryMapName(record),
+                difficulty: getSimulationHistoryDifficulty(record),
+            },
+        );
+        setSimulationHistoryStatus(message, "success");
+        document.getElementById("buttonSimulationHistory")?.setAttribute("title", message);
+    } catch (error) {
+        console.warn("Unable to save simulation history.", error);
+        setSimulationHistoryStatus(
+            getSimulationHistoryText(
+                "saveError",
+                "The simulation completed, but its history could not be saved.",
+            ),
+            "danger",
+        );
+    }
+}
+
+function createSimulationHistoryCell(text, className = "") {
+    const cell = document.createElement("td");
+    cell.textContent = text;
+    if (className) {
+        cell.className = className;
+    }
+    return cell;
+}
+
+function getSimulationHistoryRecordOptionText(record) {
+    const preset = record.teamPresetName || getSimulationHistoryText("unknownPreset", "Unnamed team");
+    return `${formatSimulationHistoryDate(record.createdAt)} · ${getSimulationHistoryDifficulty(record)} · ${preset}`;
+}
+
+function fillSimulationHistoryRecordSelect(select, records, preferredValue, fallbackIndex) {
+    select.replaceChildren();
+    select.add(new Option(getSimulationHistoryText("selectRecord", "Select a record"), ""));
+    records.forEach((record) => select.add(new Option(getSimulationHistoryRecordOptionText(record), record.id)));
+
+    if (records.some((record) => record.id === preferredValue)) {
+        select.value = preferredValue;
+    } else if (records[fallbackIndex]) {
+        select.value = records[fallbackIndex].id;
+    }
+}
+
+function renderSimulationHistoryRecordRows(records) {
+    const rows = document.getElementById("simulationHistoryRecordRows");
+    rows.replaceChildren();
+
+    if (records.length === 0) {
+        const row = document.createElement("tr");
+        const cell = createSimulationHistoryCell(
+            getSimulationHistoryText("emptyMap", "There are no records for this map."),
+            "text-center text-muted py-4",
+        );
+        cell.colSpan = 7;
+        row.appendChild(cell);
+        rows.appendChild(row);
+        return;
+    }
+
+    for (const record of records) {
+        const row = document.createElement("tr");
+        row.appendChild(createSimulationHistoryCell(formatSimulationHistoryDate(record.createdAt)));
+        row.appendChild(createSimulationHistoryCell(getSimulationHistoryDifficulty(record)));
+        row.appendChild(createSimulationHistoryCell(
+            record.teamPresetName || getSimulationHistoryText("unknownPreset", "Unnamed team"),
+        ));
+        row.appendChild(createSimulationHistoryCell(record.playerNames.join(", ")));
+        row.appendChild(createSimulationHistoryCell(
+            getSimulationHistoryText("hours", "{{hours}} hours", {
+                hours: formatSimulationHistoryNumber(record.simulationHours),
+            }),
+            "text-end",
+        ));
+        row.appendChild(createSimulationHistoryCell(
+            formatSimulationHistoryNumber(record.encountersPerHour),
+            "text-end",
+        ));
+
+        const actionCell = document.createElement("td");
+        actionCell.className = "text-nowrap";
+        const detailButton = document.createElement("button");
+        detailButton.type = "button";
+        detailButton.className = "btn btn-outline-primary btn-sm me-2";
+        detailButton.dataset.historyAction = "details";
+        detailButton.dataset.recordId = record.id;
+        detailButton.textContent = getSimulationHistoryText("details", "Details");
+        actionCell.appendChild(detailButton);
+
+        const deleteButton = document.createElement("button");
+        deleteButton.type = "button";
+        deleteButton.className = "btn btn-outline-danger btn-sm";
+        deleteButton.dataset.historyAction = "delete";
+        deleteButton.dataset.recordId = record.id;
+        deleteButton.textContent = getSimulationHistoryText("delete", "Delete");
+        actionCell.appendChild(deleteButton);
+        row.appendChild(actionCell);
+        rows.appendChild(row);
+    }
+}
+
+function renderSimulationHistory({ preferredMapKey = null, clearResults = true } = {}) {
+    const mapSelect = document.getElementById("selectSimulationHistoryMap");
+    const previousMapKey = mapSelect.value;
+    const baselineSelect = document.getElementById("selectSimulationHistoryBaseline");
+    const comparisonSelect = document.getElementById("selectSimulationHistoryComparison");
+    const previousBaseline = baselineSelect.value;
+    const previousComparison = comparisonSelect.value;
+
+    const groups = new Map();
+    for (const record of simulationHistoryRecords) {
+        if (!groups.has(record.mapKey)) {
+            groups.set(record.mapKey, []);
+        }
+        groups.get(record.mapKey).push(record);
+    }
+
+    const groupEntries = [...groups.entries()].sort(
+        (left, right) => right[1][0].createdAt.localeCompare(left[1][0].createdAt),
+    );
+    mapSelect.replaceChildren();
+    if (groupEntries.length === 0) {
+        mapSelect.add(new Option(getSimulationHistoryText("selectMap", "Select a map"), ""));
+    } else {
+        for (const [mapKey, records] of groupEntries) {
+            mapSelect.add(new Option(
+                `${getSimulationHistoryMapName(records[0])} (${records.length})`,
+                mapKey,
+            ));
+        }
+    }
+
+    const requestedMapKey = preferredMapKey
+        ?? previousMapKey
+        ?? getCurrentSimulationHistoryMapKey();
+    const selectedMapKey = groups.has(requestedMapKey)
+        ? requestedMapKey
+        : (groups.has(getCurrentSimulationHistoryMapKey())
+            ? getCurrentSimulationHistoryMapKey()
+            : (groupEntries[0]?.[0] ?? ""));
+    mapSelect.value = selectedMapKey;
+
+    const records = groups.get(selectedMapKey) ?? [];
+    renderSimulationHistoryRecordRows(records);
+    fillSimulationHistoryRecordSelect(baselineSelect, records, previousBaseline, records.length > 1 ? 1 : 0);
+    fillSimulationHistoryRecordSelect(comparisonSelect, records, previousComparison, 0);
+
+    const storage = (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.getSimulationHistoryStorageSummary)(simulationHistoryRecords);
+    document.getElementById("simulationHistoryStorageSummary").textContent = getSimulationHistoryText(
+        "recordCount",
+        "{{count}} records, about {{size}}",
+        {
+            count: storage.count.toLocaleString(),
+            size: formatSimulationHistorySize(storage.bytes),
+        },
+    );
+    document.getElementById("buttonCompareSimulationHistory").disabled = records.length < 2;
+    document.getElementById("buttonDeleteSimulationHistoryMap").disabled = records.length === 0;
+    document.getElementById("buttonClearSimulationHistory").disabled = simulationHistoryRecords.length === 0;
+    updateSimulationHistoryCount();
+
+    if (clearResults) {
+        document.getElementById("simulationHistoryRecordDetails").replaceChildren();
+        document.getElementById("simulationHistoryComparisonResults").replaceChildren();
+        if (simulationHistoryRecords.length === 0) {
+            setSimulationHistoryStatus(
+                getSimulationHistoryText(
+                    "empty",
+                    "There is no simulation history yet. Complete a single-map simulation to save one automatically.",
+                ),
+                "muted",
+            );
+        } else {
+            setSimulationHistoryStatus();
+        }
+    }
+}
+
+async function reloadSimulationHistory({ preferredMapKey = null, clearResults = true } = {}) {
+    try {
+        simulationHistoryRecords = await (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.loadSimulationHistoryRecords)();
+        renderSimulationHistory({ preferredMapKey, clearResults });
+    } catch (error) {
+        console.warn("Unable to load simulation history.", error);
+        simulationHistoryRecords = [];
+        renderSimulationHistory({ preferredMapKey, clearResults });
+        setSimulationHistoryStatus(
+            getSimulationHistoryText("loadError", "Simulation history could not be read from this browser."),
+            "danger",
+        );
+    }
+}
+
+function getSimulationHistoryMetricDefinitions() {
+    return [
+        { key: "dps", fallback: "DPS", digits: 2 },
+        { key: "damageTakenPerSecond", fallback: "Damage Taken per Second", digits: 2, lowerIsBetter: true },
+        { key: "deathsPerHour", fallback: "Deaths per Hour", digits: 2, lowerIsBetter: true },
+        { key: "totalExperiencePerHour", fallback: "Total Experience per Hour", digits: 0 },
+        { key: "hitpointsSpentPerHour", fallback: "HP Spent per Hour", digits: 2, lowerIsBetter: true },
+        { key: "manaUsedPerHour", fallback: "Mana Used per Hour", digits: 2, lowerIsBetter: true },
+        { key: "hitpointsRestoredPerSecond", fallback: "HP Restored per Second", digits: 2 },
+        { key: "manapointsRestoredPerSecond", fallback: "MP Restored per Second", digits: 2 },
+        { key: "ranOutOfManaPercent", fallback: "Out-of-Mana Time", digits: 2, suffix: "%", lowerIsBetter: true },
+    ];
+}
+
+function createSimulationHistoryTable(headers = []) {
+    const table = document.createElement("table");
+    table.className = "table table-sm table-bordered align-middle";
+    if (headers.length > 0) {
+        const head = document.createElement("thead");
+        head.className = "table-light";
+        const row = document.createElement("tr");
+        headers.forEach((header, index) => {
+            const cell = document.createElement("th");
+            cell.textContent = header;
+            if (index > 0) {
+                cell.className = "text-end history-value-column";
+            }
+            row.appendChild(cell);
+        });
+        head.appendChild(row);
+        table.appendChild(head);
+    }
+    table.appendChild(document.createElement("tbody"));
+    return table;
+}
+
+function appendSimulationHistoryValueRow(table, label, value) {
+    const row = document.createElement("tr");
+    const labelCell = document.createElement("td");
+    labelCell.textContent = label;
+    row.appendChild(labelCell);
+    row.appendChild(createSimulationHistoryCell(value, "text-end history-value-column"));
+    table.tBodies[0].appendChild(row);
+}
+
+function getSimulationHistorySkillName(skill) {
+    return getLocalizedHistoryValue(
+        `leaderboardCategoryNames.${skill}`,
+        skill.charAt(0).toUpperCase() + skill.slice(1),
+    );
+}
+
+function getSimulationHistoryItemName(itemHrid) {
+    const fallback = itemHrid?.split("/").pop()?.replaceAll("_", " ") || itemHrid;
+    return getLocalizedHistoryValue(`itemNames.${itemHrid}`, fallback);
+}
+
+function createSimulationHistoryRateSection(title, values, labelResolver, maximumFractionDigits = 2) {
+    const section = document.createElement("section");
+    const heading = document.createElement("h6");
+    heading.textContent = title;
+    section.appendChild(heading);
+
+    const entries = Object.entries(values ?? {}).sort((left, right) => right[1] - left[1]);
+    if (entries.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "small text-muted";
+        empty.textContent = getSimulationHistoryText("noItems", "None");
+        section.appendChild(empty);
+        return section;
+    }
+
+    const table = createSimulationHistoryTable([
+        getSimulationHistoryText("entry", "Metric / Item"),
+        getSimulationHistoryText("value", "Value"),
+    ]);
+    for (const [key, value] of entries) {
+        const row = document.createElement("tr");
+        row.appendChild(createSimulationHistoryCell(labelResolver(key), "history-item-name"));
+        row.appendChild(createSimulationHistoryCell(
+            formatSimulationHistoryNumber(value, maximumFractionDigits),
+            "text-end history-value-column",
+        ));
+        table.tBodies[0].appendChild(row);
+    }
+    section.appendChild(table);
+    return section;
+}
+
+function createSimulationHistoryPlayerDetail(playerEntry) {
+    const card = document.createElement("section");
+    card.className = "card history-player-card mb-3";
+
+    const header = document.createElement("div");
+    header.className = "card-header fw-bold";
+    const slotLabel = getLocalizedHistoryValue(
+        "common:teamComparison.slot",
+        "Slot {{slot}}",
+    ).replaceAll("{{slot}}", playerEntry.slot);
+    header.textContent = `${playerEntry.name} · ${slotLabel}`;
+    card.appendChild(header);
+
+    const body = document.createElement("div");
+    body.className = "card-body";
+    const grid = document.createElement("div");
+    grid.className = "row g-4";
+
+    const overviewColumn = document.createElement("div");
+    overviewColumn.className = "col-lg-6";
+    const overviewHeading = document.createElement("h6");
+    overviewHeading.textContent = getSimulationHistoryText("sections.overview", "Main Metrics");
+    overviewColumn.appendChild(overviewHeading);
+    const overviewTable = createSimulationHistoryTable();
+    for (const metric of getSimulationHistoryMetricDefinitions()) {
+        appendSimulationHistoryValueRow(
+            overviewTable,
+            getSimulationHistoryText(`metrics.${metric.key}`, metric.fallback),
+            `${formatSimulationHistoryNumber(playerEntry[metric.key], metric.digits)}${metric.suffix ?? ""}`,
+        );
+    }
+    overviewColumn.appendChild(overviewTable);
+    grid.appendChild(overviewColumn);
+
+    const experienceColumn = document.createElement("div");
+    experienceColumn.className = "col-lg-6";
+    experienceColumn.appendChild(createSimulationHistoryRateSection(
+        getSimulationHistoryText("sections.experience", "Experience per Hour"),
+        playerEntry.experiencePerHour,
+        getSimulationHistorySkillName,
+    ));
+    grid.appendChild(experienceColumn);
+
+    const consumablesColumn = document.createElement("div");
+    consumablesColumn.className = "col-lg-6";
+    consumablesColumn.appendChild(createSimulationHistoryRateSection(
+        getSimulationHistoryText("sections.consumables", "Consumables per Hour"),
+        playerEntry.consumablesPerHour,
+        getSimulationHistoryItemName,
+    ));
+    grid.appendChild(consumablesColumn);
+
+    const dropsColumn = document.createElement("div");
+    dropsColumn.className = "col-lg-6";
+    dropsColumn.appendChild(createSimulationHistoryRateSection(
+        getSimulationHistoryText("sections.drops", "Expected Drops per Hour"),
+        playerEntry.expectedDropsPerHour,
+        getSimulationHistoryItemName,
+        6,
+    ));
+    grid.appendChild(dropsColumn);
+
+    body.appendChild(grid);
+    card.appendChild(body);
+    return card;
+}
+
+function renderSimulationHistoryRecordDetails(record) {
+    const container = document.getElementById("simulationHistoryRecordDetails");
+    document.getElementById("simulationHistoryComparisonResults").replaceChildren();
+    container.replaceChildren();
+
+    const title = document.createElement("h5");
+    title.textContent = `${getSimulationHistoryText("recordDetails", "Record Details")} · ${getSimulationHistoryMapName(record)} · ${getSimulationHistoryDifficulty(record)}`;
+    container.appendChild(title);
+
+    const subtitle = document.createElement("p");
+    subtitle.className = "text-muted";
+    subtitle.textContent = formatSimulationHistoryDate(record.createdAt);
+    container.appendChild(subtitle);
+
+    const overview = createSimulationHistoryTable();
+    appendSimulationHistoryValueRow(
+        overview,
+        getSimulationHistoryText("teamPreset", "Team Preset"),
+        record.teamPresetName || getSimulationHistoryText("unknownPreset", "Unnamed team"),
+    );
+    appendSimulationHistoryValueRow(
+        overview,
+        getSimulationHistoryText("duration", "Duration"),
+        getSimulationHistoryText("hours", "{{hours}} hours", {
+            hours: formatSimulationHistoryNumber(record.simulationHours),
+        }),
+    );
+    appendSimulationHistoryValueRow(
+        overview,
+        getSimulationHistoryText("encountersPerHour", "Encounters per Hour"),
+        formatSimulationHistoryNumber(record.encountersPerHour),
+    );
+    if (record.successRate !== null) {
+        appendSimulationHistoryValueRow(
+            overview,
+            getSimulationHistoryText("metrics.successRate", "Success Rate"),
+            `${formatSimulationHistoryNumber(record.successRate)}%`,
+        );
+    }
+    if (record.averageMinutes !== null) {
+        appendSimulationHistoryValueRow(
+            overview,
+            getSimulationHistoryText("metrics.averageMinutes", "Average Completion Minutes"),
+            formatSimulationHistoryNumber(record.averageMinutes),
+        );
+    }
+    const overviewWrapper = document.createElement("div");
+    overviewWrapper.className = "mb-4";
+    overviewWrapper.appendChild(overview);
+    container.appendChild(overviewWrapper);
+
+    record.players.forEach((playerEntry) => {
+        container.appendChild(createSimulationHistoryPlayerDetail(playerEntry));
+    });
+    container.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function formatSimulationHistoryComparisonDelta(metric, digits = 2, suffix = "") {
+    const sign = metric.delta > 0 ? "+" : "";
+    const percent = metric.percent === null
+        ? ""
+        : ` (${metric.percent > 0 ? "+" : ""}${formatSimulationHistoryNumber(metric.percent, 1)}%)`;
+    return `${sign}${formatSimulationHistoryNumber(metric.delta, digits)}${suffix}${percent}`;
+}
+
+function appendSimulationHistoryComparisonRow(
+    table,
+    label,
+    metric,
+    digits = 2,
+    suffix = "",
+    lowerIsBetter = false,
+) {
+    const row = document.createElement("tr");
+    row.appendChild(createSimulationHistoryCell(label, "history-item-name"));
+    row.appendChild(createSimulationHistoryCell(
+        `${formatSimulationHistoryNumber(metric.baseline, digits)}${suffix}`,
+        "text-end history-value-column",
+    ));
+    row.appendChild(createSimulationHistoryCell(
+        `${formatSimulationHistoryNumber(metric.comparison, digits)}${suffix}`,
+        "text-end history-value-column",
+    ));
+    const improvementDelta = lowerIsBetter ? -metric.delta : metric.delta;
+    const deltaClass = improvementDelta > 0
+        ? "text-success"
+        : (improvementDelta < 0 ? "text-danger" : "text-muted");
+    row.appendChild(createSimulationHistoryCell(
+        formatSimulationHistoryComparisonDelta(metric, digits, suffix),
+        `text-end history-value-column ${deltaClass}`,
+    ));
+    table.tBodies[0].appendChild(row);
+}
+
+function createSimulationHistoryComparisonTable() {
+    return createSimulationHistoryTable([
+        getSimulationHistoryText("entry", "Metric / Item"),
+        getSimulationHistoryText("baselineShort", "Baseline A"),
+        getSimulationHistoryText("comparisonShort", "Comparison B"),
+        getSimulationHistoryText("delta", "Change B-A"),
+    ]);
+}
+
+function createSimulationHistoryRateComparisonSection(
+    title,
+    rows,
+    labelResolver,
+    maximumFractionDigits = 2,
+    lowerIsBetter = false,
+) {
+    const section = document.createElement("section");
+    const heading = document.createElement("h6");
+    heading.textContent = title;
+    section.appendChild(heading);
+    if (rows.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "small text-muted";
+        empty.textContent = getSimulationHistoryText("noItems", "None");
+        section.appendChild(empty);
+        return section;
+    }
+    const table = createSimulationHistoryComparisonTable();
+    rows.forEach((row) => appendSimulationHistoryComparisonRow(
+        table,
+        labelResolver(row.key),
+        row,
+        maximumFractionDigits,
+        "",
+        lowerIsBetter,
+    ));
+    section.appendChild(table);
+    return section;
+}
+
+function createSimulationHistoryPlayerComparison(playerComparison) {
+    const baselinePlayer = playerComparison.baseline;
+    const comparisonPlayer = playerComparison.comparison;
+    const playerName = comparisonPlayer?.name ?? baselinePlayer?.name ?? "Player";
+    const card = document.createElement("section");
+    card.className = "card history-player-card mb-3";
+
+    const header = document.createElement("div");
+    header.className = "card-header d-flex justify-content-between align-items-center";
+    const name = document.createElement("strong");
+    name.textContent = playerName;
+    header.appendChild(name);
+    if (!baselinePlayer || !comparisonPlayer) {
+        const badge = document.createElement("span");
+        badge.className = "badge bg-secondary";
+        badge.textContent = !baselinePlayer
+            ? getSimulationHistoryText("missingBaseline", "Only in comparison")
+            : getSimulationHistoryText("missingComparison", "Only in baseline");
+        header.appendChild(badge);
+    }
+    card.appendChild(header);
+
+    const body = document.createElement("div");
+    body.className = "card-body";
+    const grid = document.createElement("div");
+    grid.className = "row g-4";
+
+    const overviewColumn = document.createElement("div");
+    overviewColumn.className = "col-12";
+    const overviewHeading = document.createElement("h6");
+    overviewHeading.textContent = getSimulationHistoryText("sections.overview", "Main Metrics");
+    overviewColumn.appendChild(overviewHeading);
+    const overviewTable = createSimulationHistoryComparisonTable();
+    for (const definition of getSimulationHistoryMetricDefinitions()) {
+        appendSimulationHistoryComparisonRow(
+            overviewTable,
+            getSimulationHistoryText(`metrics.${definition.key}`, definition.fallback),
+            playerComparison.metrics[definition.key],
+            definition.digits,
+            definition.suffix ?? "",
+            definition.lowerIsBetter === true,
+        );
+    }
+    overviewColumn.appendChild(overviewTable);
+    grid.appendChild(overviewColumn);
+
+    const sections = [
+        {
+            className: "col-lg-6",
+            title: getSimulationHistoryText("sections.experience", "Experience per Hour"),
+            rows: playerComparison.experience,
+            resolver: getSimulationHistorySkillName,
+        },
+        {
+            className: "col-lg-6",
+            title: getSimulationHistoryText("sections.consumables", "Consumables per Hour"),
+            rows: playerComparison.consumables,
+            resolver: getSimulationHistoryItemName,
+            lowerIsBetter: true,
+        },
+        {
+            className: "col-12",
+            title: getSimulationHistoryText("sections.drops", "Expected Drops per Hour"),
+            rows: playerComparison.drops,
+            resolver: getSimulationHistoryItemName,
+            maximumFractionDigits: 6,
+        },
+    ];
+    for (const sectionData of sections) {
+        const column = document.createElement("div");
+        column.className = sectionData.className;
+        column.appendChild(createSimulationHistoryRateComparisonSection(
+            sectionData.title,
+            sectionData.rows,
+            sectionData.resolver,
+            sectionData.maximumFractionDigits ?? 2,
+            sectionData.lowerIsBetter === true,
+        ));
+        grid.appendChild(column);
+    }
+
+    body.appendChild(grid);
+    card.appendChild(body);
+    return card;
+}
+
+function renderSimulationHistoryComparison(baseline, comparison) {
+    const result = (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.compareSimulationHistoryRecords)(baseline, comparison);
+    const container = document.getElementById("simulationHistoryComparisonResults");
+    document.getElementById("simulationHistoryRecordDetails").replaceChildren();
+    container.replaceChildren();
+
+    const title = document.createElement("h5");
+    title.textContent = `${getSimulationHistoryText("comparisonResults", "Comparison Results")} · ${getSimulationHistoryMapName(comparison)}`;
+    container.appendChild(title);
+
+    const direction = document.createElement("p");
+    direction.className = "text-muted";
+    direction.textContent = `A: ${formatSimulationHistoryDate(baseline.createdAt)} ${getSimulationHistoryDifficulty(baseline)} → B: ${formatSimulationHistoryDate(comparison.createdAt)} ${getSimulationHistoryDifficulty(comparison)}`;
+    container.appendChild(direction);
+
+    const summaryTable = createSimulationHistoryComparisonTable();
+    appendSimulationHistoryComparisonRow(
+        summaryTable,
+        getSimulationHistoryText("encountersPerHour", "Encounters per Hour"),
+        result.summary.encountersPerHour,
+    );
+    if (baseline.successRate !== null || comparison.successRate !== null) {
+        appendSimulationHistoryComparisonRow(
+            summaryTable,
+            getSimulationHistoryText("metrics.successRate", "Success Rate"),
+            result.summary.successRate,
+            2,
+            "%",
+        );
+    }
+    if (baseline.averageMinutes !== null || comparison.averageMinutes !== null) {
+        appendSimulationHistoryComparisonRow(
+            summaryTable,
+            getSimulationHistoryText("metrics.averageMinutes", "Average Completion Minutes"),
+            result.summary.averageMinutes,
+            2,
+            "",
+            true,
+        );
+    }
+    const summaryWrapper = document.createElement("div");
+    summaryWrapper.className = "mb-4";
+    summaryWrapper.appendChild(summaryTable);
+    container.appendChild(summaryWrapper);
+
+    result.players.forEach((playerComparison) => {
+        container.appendChild(createSimulationHistoryPlayerComparison(playerComparison));
+    });
+    container.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function handleSimulationHistoryRecordAction(event) {
+    const button = event.target.closest("button[data-history-action]");
+    if (!button) {
+        return;
+    }
+    const record = simulationHistoryRecords.find((entry) => entry.id === button.dataset.recordId);
+    if (!record) {
+        return;
+    }
+
+    if (button.dataset.historyAction === "details") {
+        renderSimulationHistoryRecordDetails(record);
+        return;
+    }
+
+    if (button.dataset.historyAction === "delete") {
+        if (!confirm(getSimulationHistoryText("deleteRecordConfirm", "Delete this simulation history record?"))) {
+            return;
+        }
+        button.disabled = true;
+        try {
+            await (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.deleteSimulationHistoryRecord)(record.id);
+            await reloadSimulationHistory({ preferredMapKey: record.mapKey });
+        } catch (error) {
+            console.warn("Unable to delete simulation history record.", error);
+            setSimulationHistoryStatus(
+                getSimulationHistoryText("loadError", "Simulation history could not be updated."),
+                "danger",
+            );
+            button.disabled = false;
+        }
+    }
+}
+
+async function deleteCurrentSimulationHistoryMap() {
+    const mapKey = document.getElementById("selectSimulationHistoryMap").value;
+    const records = simulationHistoryRecords.filter((record) => record.mapKey === mapKey);
+    if (records.length === 0) {
+        return;
+    }
+    const message = getSimulationHistoryText(
+        "deleteMapConfirm",
+        "Delete all {{count}} records for the current map?",
+        { count: records.length },
+    );
+    if (!confirm(message)) {
+        return;
+    }
+    try {
+        await (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.deleteSimulationHistoryMap)(mapKey);
+        await reloadSimulationHistory();
+    } catch (error) {
+        console.warn("Unable to delete simulation history map.", error);
+        setSimulationHistoryStatus(
+            getSimulationHistoryText("loadError", "Simulation history could not be updated."),
+            "danger",
+        );
+    }
+}
+
+async function clearAllSimulationHistoryRecords() {
+    if (simulationHistoryRecords.length === 0) {
+        return;
+    }
+    if (!confirm(getSimulationHistoryText(
+        "clearAllConfirm",
+        "Clear all simulation history? This cannot be undone.",
+    ))) {
+        return;
+    }
+    try {
+        await (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.clearSimulationHistory)();
+        await reloadSimulationHistory();
+    } catch (error) {
+        console.warn("Unable to clear simulation history.", error);
+        setSimulationHistoryStatus(
+            getSimulationHistoryText("loadError", "Simulation history could not be updated."),
+            "danger",
+        );
+    }
+}
+
+function compareSelectedSimulationHistoryRecords() {
+    const baselineId = document.getElementById("selectSimulationHistoryBaseline").value;
+    const comparisonId = document.getElementById("selectSimulationHistoryComparison").value;
+    if (!baselineId || !comparisonId) {
+        setSimulationHistoryStatus(
+            getSimulationHistoryText("selectTwo", "Select two records to compare."),
+            "warning",
+        );
+        return;
+    }
+    if (baselineId === comparisonId) {
+        setSimulationHistoryStatus(
+            getSimulationHistoryText("sameRecord", "The baseline and comparison records must be different."),
+            "warning",
+        );
+        return;
+    }
+
+    const baseline = simulationHistoryRecords.find((record) => record.id === baselineId);
+    const comparison = simulationHistoryRecords.find((record) => record.id === comparisonId);
+    if (!baseline || !comparison) {
+        setSimulationHistoryStatus(
+            getSimulationHistoryText("selectTwo", "Select two records to compare."),
+            "warning",
+        );
+        return;
+    }
+
+    setSimulationHistoryStatus();
+    renderSimulationHistoryComparison(baseline, comparison);
+}
+
+function initSimulationHistory() {
+    document.getElementById("simulationHistoryModal").addEventListener("show.bs.modal", () => {
+        document.getElementById("selectSimulationHistoryBaseline").value = "";
+        document.getElementById("selectSimulationHistoryComparison").value = "";
+        void reloadSimulationHistory({ preferredMapKey: getCurrentSimulationHistoryMapKey() });
+    });
+    document.getElementById("selectSimulationHistoryMap").addEventListener("change", (event) => {
+        renderSimulationHistory({ preferredMapKey: event.target.value });
+    });
+    document.getElementById("simulationHistoryRecordRows").addEventListener(
+        "click",
+        (event) => void handleSimulationHistoryRecordAction(event),
+    );
+    document.getElementById("buttonCompareSimulationHistory").addEventListener(
+        "click",
+        compareSelectedSimulationHistoryRecords,
+    );
+    document.getElementById("buttonDeleteSimulationHistoryMap").addEventListener(
+        "click",
+        () => void deleteCurrentSimulationHistoryMap(),
+    );
+    document.getElementById("buttonClearSimulationHistory").addEventListener(
+        "click",
+        () => void clearAllSimulationHistoryRecords(),
+    );
+
+    if (typeof i18next?.on === "function") {
+        i18next.on("languageChanged", () => {
+            renderSimulationHistory({
+                preferredMapKey: document.getElementById("selectSimulationHistoryMap").value,
+                clearResults: true,
+            });
+        });
+    }
+    void reloadSimulationHistory();
+}
+
+// #endregion
+
 function getPlayerFragmentProductionData(playerToDisplay) {
     const playerNumber = playerToDisplay.replace("player", "");
     try {
@@ -6156,6 +7624,7 @@ function initSimulationControls() {
 
     buttonStopSimulation.style.display = 'none';
     buttonStopSimulation.addEventListener("click", (event) => {
+        pendingSimulationHistoryContext = null;
         progressbar.style.width = "0%";
         progressbar.innerHTML = "0%";
         if (worker) {
@@ -6178,6 +7647,7 @@ function initSimulationControls() {
 }
 
 function startSimulation(selectedPlayers) {
+    pendingSimulationHistoryContext = null;
     let simLabyrinthToggle = document.getElementById("simLabyrinthToggle");
     let simAllLabyrinthsToggle = document.getElementById("simAllLabyrinthsToggle");
 
@@ -6309,6 +7779,7 @@ function startSimulation(selectedPlayers) {
             simulationTimeLimit: simulationTimeLimit,
             extra : extra
         };
+        pendingSimulationHistoryContext = captureSimulationHistoryContext(selectedPlayers);
         simStartTime = Date.now();
         if (!worker) {
             worker = new Worker(new URL(/* worker import */ __webpack_require__.p + __webpack_require__.u("src_multiWorker_js-_004d3"), __webpack_require__.b));
@@ -9133,14 +10604,14 @@ function showErrorModal(error) {
 
 function initPatchNotes() {
     const patchNotesRows = document.getElementById("patchNotes");
-    for (const pn in _patchNote_json__WEBPACK_IMPORTED_MODULE_23__) {
+    for (const pn in _patchNote_json__WEBPACK_IMPORTED_MODULE_24__) {
         const patchNoteContainer = document.createElement("div");
         patchNotesRows.setAttribute('class', 'col-12 mb-4');
 
         const patchNoteElement = document.createElement("h6");
         patchNoteElement.innerHTML = pn;
         const patchNoteList = document.createElement("ul");
-        for (const note of _patchNote_json__WEBPACK_IMPORTED_MODULE_23__[pn]) {
+        for (const note of _patchNote_json__WEBPACK_IMPORTED_MODULE_24__[pn]) {
             const noteElement = document.createElement("li");
             noteElement.innerHTML = note;
             patchNoteList.appendChild(noteElement);
@@ -9322,6 +10793,7 @@ initDungeons();
 initLabyrinth();
 initTriggerModal();
 initSimulationControls();
+initSimulationHistory();
 initEquipmentSetsModal();
 initErrorHandling();
 initImportExportModal();

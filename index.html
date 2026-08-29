@@ -144,6 +144,53 @@
             color: #f0f0f0;
             border-color: #aaa;
         }
+
+        #simulationHistoryModal .history-record-scroll {
+            max-height: 18rem;
+            overflow: auto;
+        }
+
+        #simulationHistoryModal .history-record-table th {
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            white-space: nowrap;
+        }
+
+        #simulationHistoryModal .history-player-card .table {
+            margin-bottom: 0;
+        }
+
+        #simulationHistoryModal .history-value-column {
+            min-width: 7rem;
+        }
+
+        #simulationHistoryModal .history-item-name {
+            min-width: 12rem;
+            overflow-wrap: anywhere;
+        }
+
+        body.dark-mode #simulationHistoryModal .table {
+            --bs-table-color: #f0f0f0;
+            --bs-table-bg: #444;
+            --bs-table-striped-color: #f0f0f0;
+            --bs-table-striped-bg: #4d4d4d;
+            --bs-table-hover-color: #f0f0f0;
+            --bs-table-hover-bg: #525252;
+            --bs-table-border-color: #666;
+        }
+
+        body.dark-mode #simulationHistoryModal .table-light {
+            --bs-table-color: #fff;
+            --bs-table-bg: #555;
+            color: #fff;
+            background-color: #555;
+        }
+
+        body.dark-mode #simulationHistoryModal .text-muted,
+        body.dark-mode #simulationHistoryModal .text-secondary {
+            color: #c8c8c8 !important;
+        }
     </style>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -738,6 +785,13 @@
                                 <button id="buttonImportExport" class="btn btn-primary" type="button"
                                     data-bs-toggle="modal" data-bs-target="#importExportModal" data-i18n="common:controls.importExport">
                                     Import/Export
+                                </button>
+                            </div>
+                            <div class="col-md-auto">
+                                <button id="buttonSimulationHistory" class="btn btn-primary" type="button"
+                                    data-bs-toggle="modal" data-bs-target="#simulationHistoryModal">
+                                    <span data-i18n="common:simulationHistory.button">Simulation History</span>
+                                    <span id="simulationHistoryCount" class="badge bg-light text-dark ms-1">0</span>
                                 </button>
                             </div>
                             <div class="col-md-auto">
@@ -1708,6 +1762,83 @@
             </div>
         </div>
         <!-- #endregion -->
+    </div>
+    <div class="modal" id="simulationHistoryModal" tabindex="-1">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" data-i18n="common:simulationHistory.title">Simulation History</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small text-secondary mb-3" data-i18n="common:simulationHistory.description">
+                        Compact single-map simulation results are saved automatically.
+                    </p>
+                    <div class="row g-3 align-items-end mb-3">
+                        <div class="col-lg-5">
+                            <label for="selectSimulationHistoryMap" class="form-label" data-i18n="common:simulationHistory.map">Map</label>
+                            <select id="selectSimulationHistoryMap" class="form-select"></select>
+                        </div>
+                        <div class="col-lg">
+                            <div id="simulationHistoryStorageSummary" class="small text-muted"></div>
+                        </div>
+                        <div class="col-lg-auto d-flex flex-wrap gap-2">
+                            <button id="buttonDeleteSimulationHistoryMap" type="button" class="btn btn-outline-danger btn-sm"
+                                data-i18n="common:simulationHistory.deleteMap">Delete Current Map</button>
+                            <button id="buttonClearSimulationHistory" type="button" class="btn btn-danger btn-sm"
+                                data-i18n="common:simulationHistory.clearAll">Clear All History</button>
+                        </div>
+                    </div>
+
+                    <div class="card mb-3">
+                        <div class="card-body">
+                            <div class="row g-3 align-items-end">
+                                <div class="col-lg-5">
+                                    <label for="selectSimulationHistoryBaseline" class="form-label"
+                                        data-i18n="common:simulationHistory.baseline">Baseline record A</label>
+                                    <select id="selectSimulationHistoryBaseline" class="form-select"></select>
+                                </div>
+                                <div class="col-lg-5">
+                                    <label for="selectSimulationHistoryComparison" class="form-label"
+                                        data-i18n="common:simulationHistory.comparison">Comparison record B</label>
+                                    <select id="selectSimulationHistoryComparison" class="form-select"></select>
+                                </div>
+                                <div class="col-lg-2 d-grid">
+                                    <button id="buttonCompareSimulationHistory" type="button" class="btn btn-primary"
+                                        data-i18n="common:simulationHistory.compare">Compare A → B</button>
+                                </div>
+                            </div>
+                            <div id="simulationHistoryStatus" class="small mt-2"></div>
+                        </div>
+                    </div>
+
+                    <h6 data-i18n="common:simulationHistory.recordList">History Records</h6>
+                    <div class="table-responsive history-record-scroll border rounded mb-4">
+                        <table class="table table-striped table-hover align-middle history-record-table mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th data-i18n="common:simulationHistory.date">Date</th>
+                                    <th data-i18n="common:simulationHistory.difficulty">Difficulty</th>
+                                    <th data-i18n="common:simulationHistory.teamPreset">Team Preset</th>
+                                    <th data-i18n="common:simulationHistory.players">Players</th>
+                                    <th class="text-end" data-i18n="common:simulationHistory.duration">Duration</th>
+                                    <th class="text-end" data-i18n="common:simulationHistory.encountersPerHour">Encounters per Hour</th>
+                                    <th data-i18n="common:simulationHistory.actions">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="simulationHistoryRecordRows"></tbody>
+                        </table>
+                    </div>
+
+                    <div id="simulationHistoryRecordDetails"></div>
+                    <div id="simulationHistoryComparisonResults"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"
+                        data-i18n="common:controls.close">Close</button>
+                </div>
+            </div>
+        </div>
     </div>
     <div class="modal" id="errorModal" tabindex="-1">
         <!-- #region Error Modal -->
