@@ -49,11 +49,17 @@ import {
     loadSimulationHistoryRecords,
     saveSimulationHistoryRecord,
 } from "./simulationHistory.js";
+import {
+    mergeSelectedPlayerFormation,
+    normalizePlayerFormation,
+    orderSelectedPlayerSlots,
+} from "./playerFormation.js";
 
 import patchNote from "../patchNote.json";
 
 const ONE_SECOND = 1e9;
 const ONE_HOUR = 60 * 60 * ONE_SECOND;
+const PLAYER_FORMATION_STORAGE_KEY = "mwiCombatSimulatorPlayerFormation_v1";
 
 let buttonStartSimulation = document.getElementById("buttonStartSimulation");
 let buttonStopSimulation = document.getElementById("buttonStopSimulation");
@@ -1471,7 +1477,9 @@ function showDamageDetailsEntry() {
 function showSimulationResult(simResult) {
     currentSimResults = simResult;
     resetDamageDetails();
-    let playerToDisplay = "player1";
+    let playerToDisplay = selectedPlayers.length > 0
+        ? "player" + selectedPlayers[0]
+        : "player1";
     if (selectedPlayers.includes(parseInt(currentPlayerTabId))) {
         playerToDisplay = "player" + currentPlayerTabId;
     }
@@ -3786,6 +3794,202 @@ function createElement(tagName, className, innerHTML = "", id = "") {
 
 // #region Simulation Controls
 
+function getPlayerSlotFromTab(tab) {
+    const match = tab?.id?.match(/^player([1-5])-tab$/);
+    return match?.[1] ?? null;
+}
+
+function getPlayerFormationOrder() {
+    const visibleOrder = [...document.querySelectorAll("#playerTab .nav-link")]
+        .map(getPlayerSlotFromTab)
+        .filter(Boolean);
+    return normalizePlayerFormation(visibleOrder);
+}
+
+function loadPlayerFormationOrder() {
+    try {
+        const storedFormation = JSON.parse(
+            window.localStorage.getItem(PLAYER_FORMATION_STORAGE_KEY) || "null",
+        );
+        return normalizePlayerFormation(storedFormation);
+    } catch (error) {
+        console.warn("Unable to load the saved player formation.", error);
+        return normalizePlayerFormation([]);
+    }
+}
+
+function savePlayerFormationOrder(formation) {
+    try {
+        window.localStorage.setItem(
+            PLAYER_FORMATION_STORAGE_KEY,
+            JSON.stringify(normalizePlayerFormation(formation)),
+        );
+    } catch (error) {
+        console.warn("Unable to save the player formation.", error);
+    }
+}
+
+function syncPlayerCheckboxOrder(formation) {
+    const playerContainer = document.getElementById("playerCheckBox");
+    if (!playerContainer) {
+        return;
+    }
+
+    for (const slot of normalizePlayerFormation(formation)) {
+        const checkboxRow = document.getElementById(`player${slot}`)?.closest(".form-check");
+        if (checkboxRow) {
+            playerContainer.appendChild(checkboxRow);
+        }
+    }
+}
+
+function applyPlayerFormationOrder(formation, { persist = true } = {}) {
+    const normalizedFormation = normalizePlayerFormation(formation);
+    const playerTab = document.getElementById("playerTab");
+    if (!playerTab) {
+        return normalizedFormation;
+    }
+
+    for (const slot of normalizedFormation) {
+        const tabItem = document.getElementById(`player${slot}-tab`)?.closest(".nav-item");
+        if (tabItem) {
+            playerTab.appendChild(tabItem);
+        }
+    }
+
+    playerTab.dataset.playerFormation = normalizedFormation.join(",");
+    syncPlayerCheckboxOrder(normalizedFormation);
+    updateTeamPresetPlayerLabels();
+    if (persist) {
+        savePlayerFormationOrder(normalizedFormation);
+    }
+    return normalizedFormation;
+}
+
+function initPlayerTabReordering() {
+    const playerTab = document.getElementById("playerTab");
+    if (!playerTab) {
+        return;
+    }
+
+    applyPlayerFormationOrder(loadPlayerFormationOrder(), { persist: false });
+    let draggedTabItem = null;
+
+    const commitFormation = () => {
+        applyPlayerFormationOrder(getPlayerFormationOrder());
+    };
+    const finishDragging = () => {
+        if (!draggedTabItem) {
+            return;
+        }
+        draggedTabItem.classList.remove("player-tab-dragging");
+        draggedTabItem = null;
+        commitFormation();
+    };
+    const moveDraggedTab = (clientX, clientY) => {
+        if (!draggedTabItem) {
+            return;
+        }
+        const targetTabItem = document.elementFromPoint(clientX, clientY)
+            ?.closest("#playerTab .player-tab-item");
+        if (!targetTabItem || targetTabItem === draggedTabItem) {
+            return;
+        }
+
+        const bounds = targetTabItem.getBoundingClientRect();
+        if (clientX < bounds.left + bounds.width / 2) {
+            targetTabItem.before(draggedTabItem);
+        } else {
+            targetTabItem.after(draggedTabItem);
+        }
+    };
+
+    document.addEventListener("mousemove", (event) => {
+        if (!draggedTabItem) {
+            return;
+        }
+        event.preventDefault();
+        moveDraggedTab(event.clientX, event.clientY);
+    });
+    document.addEventListener("mouseup", finishDragging);
+    document.addEventListener("touchmove", (event) => {
+        if (!draggedTabItem || event.touches.length === 0) {
+            return;
+        }
+        event.preventDefault();
+        moveDraggedTab(event.touches[0].clientX, event.touches[0].clientY);
+    }, { passive: false });
+    document.addEventListener("touchend", finishDragging);
+    document.addEventListener("touchcancel", finishDragging);
+
+    for (const tabLink of playerTab.querySelectorAll(".nav-link")) {
+        const tabItem = tabLink.closest(".nav-item");
+        const slot = getPlayerSlotFromTab(tabLink);
+        if (!tabItem || !slot) {
+            continue;
+        }
+
+        tabItem.classList.add("player-tab-item");
+        if (tabItem.querySelector(".player-tab-drag-handle")) {
+            continue;
+        }
+
+        const dragHandle = document.createElement("button");
+        dragHandle.type = "button";
+        dragHandle.className = "player-tab-drag-handle";
+        dragHandle.textContent = "↔";
+        dragHandle.title = "Drag to change formation / 拖动调整站位";
+        dragHandle.setAttribute("aria-label", dragHandle.title);
+        dragHandle.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+        });
+        dragHandle.addEventListener("mousedown", (event) => {
+            if (event.button !== 0) {
+                return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            draggedTabItem = tabItem;
+            tabItem.classList.add("player-tab-dragging");
+            dragHandle.focus({ preventScroll: true });
+        });
+        dragHandle.addEventListener("touchstart", (event) => {
+            if (event.touches.length === 0) {
+                return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            draggedTabItem = tabItem;
+            tabItem.classList.add("player-tab-dragging");
+            dragHandle.focus({ preventScroll: true });
+        });
+        dragHandle.addEventListener("keydown", (event) => {
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+                return;
+            }
+
+            const tabItems = [...playerTab.querySelectorAll(".player-tab-item")];
+            const currentIndex = tabItems.indexOf(tabItem);
+            const targetIndex = event.key === "ArrowLeft" ? currentIndex - 1 : currentIndex + 1;
+            if (targetIndex < 0 || targetIndex >= tabItems.length) {
+                return;
+            }
+
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.key === "ArrowLeft") {
+                tabItems[targetIndex].before(tabItem);
+            } else {
+                tabItems[targetIndex].after(tabItem);
+            }
+            commitFormation();
+            dragHandle.focus();
+        });
+        tabItem.appendChild(dragHandle);
+    }
+}
+
 document.addEventListener('DOMContentLoaded', function () {
     const simDungeonToggle = document.getElementById('simDungeonToggle');
     const playerContainer = document.getElementById('playerCheckBox');
@@ -3804,15 +4008,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function updatePlayerNames() {
-        const tabLinks = document.querySelectorAll('#playerTab .nav-link');
-        tabLinks.forEach((tabLink, index) => {
-            const label = document.querySelectorAll(`label[for="player${index + 1}"]`);
-            if (label) {
-                label.forEach((l) => {
-                    l.textContent = tabLink.textContent.trim();
-                });
-            }
-        });
+        updateTeamPresetPlayerLabels();
     }
 
     function updatePlayersCheckbox(isCheck) {
@@ -3867,6 +4063,8 @@ document.querySelectorAll('#playerTab .nav-link').forEach(tab => {
     tab.addEventListener('shown.bs.tab', onTabChange);
 });
 
+initPlayerTabReordering();
+
 function initSimulationControls() {
     let simulationTimeInput = document.getElementById("inputSimulationTime");
     simulationTimeInput.value = 24;
@@ -3880,14 +4078,12 @@ function initSimulationControls() {
         savePreviousPlayer(currentPlayerTabId);
 
         const simDungeonToggle = document.getElementById("simDungeonToggle");
-        const checkboxes = document.querySelectorAll('.player-checkbox');
-        selectedPlayers = [];
-        checkboxes.forEach(checkbox => {
-            if (checkbox.checked) {
-                const playerNumber = parseInt(checkbox.id.replace('player', ''));
-                selectedPlayers.push(playerNumber);
-            }
-        });
+        const checkedPlayerSlots = [...document.querySelectorAll('.player-checkbox:checked')]
+            .map((checkbox) => checkbox.id.replace('player', ''));
+        selectedPlayers = orderSelectedPlayerSlots(
+            getPlayerFormationOrder(),
+            checkedPlayerSlots,
+        ).map(Number);
 
         if (selectedPlayers.length === 0) {
             alert("You need to select at least one player to sim.");
@@ -3929,8 +4125,9 @@ function startSimulation(selectedPlayers) {
     let simAllLabyrinthsToggle = document.getElementById("simAllLabyrinthsToggle");
 
     let playersToSim = [];
-    for (let j = 1; j < 6; j++) {
-        if (selectedPlayers.includes(j)) {
+    for (const selectedPlayer of selectedPlayers) {
+        const j = Number(selectedPlayer);
+        if (Number.isInteger(j) && j >= 1 && j <= 5) {
             updateNextPlayer(j);
             updateState();
             updateUI();
@@ -5845,6 +6042,11 @@ function loadTeamPreset(presetId) {
             tab.textContent = preset.playerNames[playerNumber] || `Player ${playerNumber}`;
         }
     }
+
+    applyPlayerFormationOrder(mergeSelectedPlayerFormation(
+        preset.selectedPlayers,
+        getPlayerFormationOrder(),
+    ));
 
     document.querySelectorAll(".player-checkbox").forEach((checkbox) => {
         checkbox.checked = preset.selectedPlayers.includes(checkbox.id.replace("player", ""));
