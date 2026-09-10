@@ -157,12 +157,14 @@
         "delta": "Change B-A",
         "missingBaseline": "Only in comparison",
         "missingComparison": "Only in baseline",
+        "sharedDrops": "Identical drops for all players",
         "noItems": "None",
         "sections": {
             "overview": "Main Metrics",
             "experience": "Experience per Hour",
             "consumables": "Consumables per Hour",
-            "drops": "Expected Drops per Hour"
+            "drops": "Expected Drops per Hour",
+            "drops24": "Expected Drops per 24 Hours"
         },
         "metrics": {
             "dps": "DPS",

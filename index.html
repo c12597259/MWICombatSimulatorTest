@@ -150,6 +150,12 @@
             overflow: auto;
         }
 
+        @media (min-width: 1200px) {
+            #simulationHistoryModal .history-modal-dialog {
+                max-width: min(96vw, 1720px);
+            }
+        }
+
         #simulationHistoryModal .history-record-table th {
             position: sticky;
             top: 0;
@@ -168,6 +174,14 @@
         #simulationHistoryModal .history-item-name {
             min-width: 12rem;
             overflow-wrap: anywhere;
+        }
+
+        #simulationHistoryModal .history-comparison-column {
+            min-width: 0;
+        }
+
+        #simulationHistoryModal .history-comparison-column > .history-player-card:last-child {
+            margin-bottom: 0 !important;
         }
 
         body.dark-mode #simulationHistoryModal .table {
@@ -1806,7 +1820,7 @@
         <!-- #endregion -->
     </div>
     <div class="modal" id="simulationHistoryModal" tabindex="-1">
-        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable history-modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title" data-i18n="common:simulationHistory.title">Simulation History</h5>

@@ -1,6 +1,7 @@
 export const SIMULATION_HISTORY_DATABASE_NAME = "mwiCombatSimulatorHistory";
 export const SIMULATION_HISTORY_STORE_NAME = "records";
 export const SIMULATION_HISTORY_SCHEMA_VERSION = 1;
+export const SIMULATION_HISTORY_DROP_COMPARISON_HOURS = 24;
 
 const PLAYER_KEYS = new Set(["player1", "player2", "player3", "player4", "player5"]);
 const SKILL_KEYS = ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"];
@@ -317,6 +318,77 @@ export function compareSimulationHistoryMaps(baseline = {}, comparison = {}) {
         key,
         ...compareSimulationHistoryNumber(baseline[key], comparison[key]),
     }));
+}
+
+function getSimulationHistoryDropPriority(itemHrid) {
+    const normalizedHrid = String(itemHrid ?? "").toLocaleLowerCase();
+    if (normalizedHrid === "/items/coin") {
+        return 0;
+    }
+    if (normalizedHrid.endsWith("_key_fragment")) {
+        return 1;
+    }
+    if (normalizedHrid.endsWith("_charm")) {
+        return 2;
+    }
+    if (normalizedHrid.endsWith("_essence")) {
+        return 3;
+    }
+    return 4;
+}
+
+export function sortSimulationHistoryDropRows(rows = []) {
+    return [...rows].sort((left, right) => {
+        const priorityDifference = getSimulationHistoryDropPriority(left?.key)
+            - getSimulationHistoryDropPriority(right?.key);
+        if (priorityDifference !== 0) {
+            return priorityDifference;
+        }
+        return String(left?.key ?? "").localeCompare(String(right?.key ?? ""));
+    });
+}
+
+export function scaleSimulationHistoryComparisonRows(
+    rows = [],
+    multiplier = SIMULATION_HISTORY_DROP_COMPARISON_HOURS,
+) {
+    const normalizedMultiplier = Math.max(toFiniteNumber(multiplier, 1), 0);
+    return rows.map((row) => ({
+        key: row.key,
+        ...compareSimulationHistoryNumber(
+            toFiniteNumber(row.baseline) * normalizedMultiplier,
+            toFiniteNumber(row.comparison) * normalizedMultiplier,
+        ),
+    }));
+}
+
+function serializeSimulationHistoryDropComparison(rows = []) {
+    return JSON.stringify(
+        [...rows]
+            .map((row) => [
+                String(row?.key ?? ""),
+                roundNumber(row?.baseline, 8),
+                roundNumber(row?.comparison, 8),
+            ])
+            .sort((left, right) => left[0].localeCompare(right[0])),
+    );
+}
+
+export function haveIdenticalSimulationHistoryDropComparisons(playerComparisons = []) {
+    if (playerComparisons.length < 2 || playerComparisons.some(
+        (playerComparison) => !playerComparison?.baseline || !playerComparison?.comparison,
+    )) {
+        return false;
+    }
+
+    const firstComparison = serializeSimulationHistoryDropComparison(
+        playerComparisons[0]?.drops,
+    );
+    return playerComparisons.slice(1).every(
+        (playerComparison) => serializeSimulationHistoryDropComparison(
+            playerComparison?.drops,
+        ) === firstComparison,
+    );
 }
 
 export function compareSimulationHistoryRecords(baseline, comparison) {

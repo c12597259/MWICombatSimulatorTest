@@ -46,8 +46,12 @@ import {
     deleteSimulationHistoryMap,
     deleteSimulationHistoryRecord,
     getSimulationHistoryStorageSummary,
+    haveIdenticalSimulationHistoryDropComparisons,
     loadSimulationHistoryRecords,
     saveSimulationHistoryRecord,
+    scaleSimulationHistoryComparisonRows,
+    SIMULATION_HISTORY_DROP_COMPARISON_HOURS,
+    sortSimulationHistoryDropRows,
 } from "./simulationHistory.js";
 import {
     mergeSelectedPlayerFormation,
@@ -2593,14 +2597,24 @@ function createSimulationHistoryRateComparisonSection(
     title,
     rows,
     labelResolver,
-    maximumFractionDigits = 2,
-    lowerIsBetter = false,
+    {
+        maximumFractionDigits = 2,
+        lowerIsBetter = false,
+        valueMultiplier = 1,
+        rowSorter = null,
+    } = {},
 ) {
     const section = document.createElement("section");
     const heading = document.createElement("h6");
     heading.textContent = title;
     section.appendChild(heading);
-    if (rows.length === 0) {
+    let displayRows = valueMultiplier === 1
+        ? [...rows]
+        : scaleSimulationHistoryComparisonRows(rows, valueMultiplier);
+    if (typeof rowSorter === "function") {
+        displayRows = rowSorter(displayRows);
+    }
+    if (displayRows.length === 0) {
         const empty = document.createElement("p");
         empty.className = "small text-muted";
         empty.textContent = getSimulationHistoryText("noItems", "None");
@@ -2608,7 +2622,7 @@ function createSimulationHistoryRateComparisonSection(
         return section;
     }
     const table = createSimulationHistoryComparisonTable();
-    rows.forEach((row) => appendSimulationHistoryComparisonRow(
+    displayRows.forEach((row) => appendSimulationHistoryComparisonRow(
         table,
         labelResolver(row.key),
         row,
@@ -2616,30 +2630,42 @@ function createSimulationHistoryRateComparisonSection(
         "",
         lowerIsBetter,
     ));
-    section.appendChild(table);
+    const tableWrapper = document.createElement("div");
+    tableWrapper.className = "table-responsive";
+    tableWrapper.appendChild(table);
+    section.appendChild(tableWrapper);
     return section;
 }
 
+function getSimulationHistoryComparisonPlayerName(playerComparison) {
+    return playerComparison.comparison?.name
+        ?? playerComparison.baseline?.name
+        ?? "Player";
+}
+
+function appendSimulationHistoryMissingPlayerBadge(header, playerComparison) {
+    if (playerComparison.baseline && playerComparison.comparison) {
+        return;
+    }
+    const badge = document.createElement("span");
+    badge.className = "badge bg-secondary";
+    badge.textContent = !playerComparison.baseline
+        ? getSimulationHistoryText("missingBaseline", "Only in comparison")
+        : getSimulationHistoryText("missingComparison", "Only in baseline");
+    header.appendChild(badge);
+}
+
 function createSimulationHistoryPlayerComparison(playerComparison) {
-    const baselinePlayer = playerComparison.baseline;
-    const comparisonPlayer = playerComparison.comparison;
-    const playerName = comparisonPlayer?.name ?? baselinePlayer?.name ?? "Player";
+    const playerName = getSimulationHistoryComparisonPlayerName(playerComparison);
     const card = document.createElement("section");
-    card.className = "card history-player-card mb-3";
+    card.className = "card history-player-card history-stats-card mb-3";
 
     const header = document.createElement("div");
     header.className = "card-header d-flex justify-content-between align-items-center";
     const name = document.createElement("strong");
     name.textContent = playerName;
     header.appendChild(name);
-    if (!baselinePlayer || !comparisonPlayer) {
-        const badge = document.createElement("span");
-        badge.className = "badge bg-secondary";
-        badge.textContent = !baselinePlayer
-            ? getSimulationHistoryText("missingBaseline", "Only in comparison")
-            : getSimulationHistoryText("missingComparison", "Only in baseline");
-        header.appendChild(badge);
-    }
+    appendSimulationHistoryMissingPlayerBadge(header, playerComparison);
     card.appendChild(header);
 
     const body = document.createElement("div");
@@ -2663,29 +2689,25 @@ function createSimulationHistoryPlayerComparison(playerComparison) {
             definition.lowerIsBetter === true,
         );
     }
-    overviewColumn.appendChild(overviewTable);
+    const overviewTableWrapper = document.createElement("div");
+    overviewTableWrapper.className = "table-responsive";
+    overviewTableWrapper.appendChild(overviewTable);
+    overviewColumn.appendChild(overviewTableWrapper);
     grid.appendChild(overviewColumn);
 
     const sections = [
         {
-            className: "col-lg-6",
+            className: "col-12",
             title: getSimulationHistoryText("sections.experience", "Experience per Hour"),
             rows: playerComparison.experience,
             resolver: getSimulationHistorySkillName,
         },
         {
-            className: "col-lg-6",
+            className: "col-12",
             title: getSimulationHistoryText("sections.consumables", "Consumables per Hour"),
             rows: playerComparison.consumables,
             resolver: getSimulationHistoryItemName,
             lowerIsBetter: true,
-        },
-        {
-            className: "col-12",
-            title: getSimulationHistoryText("sections.drops", "Expected Drops per Hour"),
-            rows: playerComparison.drops,
-            resolver: getSimulationHistoryItemName,
-            maximumFractionDigits: 6,
         },
     ];
     for (const sectionData of sections) {
@@ -2695,13 +2717,56 @@ function createSimulationHistoryPlayerComparison(playerComparison) {
             sectionData.title,
             sectionData.rows,
             sectionData.resolver,
-            sectionData.maximumFractionDigits ?? 2,
-            sectionData.lowerIsBetter === true,
+            {
+                maximumFractionDigits: sectionData.maximumFractionDigits ?? 2,
+                lowerIsBetter: sectionData.lowerIsBetter === true,
+            },
         ));
         grid.appendChild(column);
     }
 
     body.appendChild(grid);
+    card.appendChild(body);
+    return card;
+}
+
+function createSimulationHistoryDropComparison(
+    playerComparison,
+    sharedPlayerNames = [],
+) {
+    const card = document.createElement("section");
+    card.className = "card history-player-card history-drops-card mb-3";
+
+    const header = document.createElement("div");
+    header.className = "card-header d-flex justify-content-between align-items-center gap-2";
+    const name = document.createElement("strong");
+    if (sharedPlayerNames.length > 0) {
+        name.textContent = `${getSimulationHistoryText(
+            "sharedDrops",
+            "Identical drops for all players",
+        )} · ${sharedPlayerNames.join("、")}`;
+    } else {
+        name.textContent = getSimulationHistoryComparisonPlayerName(playerComparison);
+        appendSimulationHistoryMissingPlayerBadge(header, playerComparison);
+    }
+    header.prepend(name);
+    card.appendChild(header);
+
+    const body = document.createElement("div");
+    body.className = "card-body";
+    body.appendChild(createSimulationHistoryRateComparisonSection(
+        getSimulationHistoryText(
+            "sections.drops24",
+            "Expected Drops per 24 Hours",
+        ),
+        playerComparison.drops,
+        getSimulationHistoryItemName,
+        {
+            maximumFractionDigits: 6,
+            valueMultiplier: SIMULATION_HISTORY_DROP_COMPARISON_HOURS,
+            rowSorter: sortSimulationHistoryDropRows,
+        },
+    ));
     card.appendChild(body);
     return card;
 }
@@ -2751,9 +2816,30 @@ function renderSimulationHistoryComparison(baseline, comparison) {
     summaryWrapper.appendChild(summaryTable);
     container.appendChild(summaryWrapper);
 
+    const comparisonLayout = document.createElement("div");
+    comparisonLayout.className = "row g-4 align-items-start history-comparison-layout";
+    const statsColumn = document.createElement("div");
+    statsColumn.className = "col-12 col-xl-6 history-comparison-column";
+    const dropsColumn = document.createElement("div");
+    dropsColumn.className = "col-12 col-xl-6 history-comparison-column";
+
     result.players.forEach((playerComparison) => {
-        container.appendChild(createSimulationHistoryPlayerComparison(playerComparison));
+        statsColumn.appendChild(createSimulationHistoryPlayerComparison(playerComparison));
     });
+
+    if (haveIdenticalSimulationHistoryDropComparisons(result.players)) {
+        dropsColumn.appendChild(createSimulationHistoryDropComparison(
+            result.players[0],
+            result.players.map(getSimulationHistoryComparisonPlayerName),
+        ));
+    } else {
+        result.players.forEach((playerComparison) => {
+            dropsColumn.appendChild(createSimulationHistoryDropComparison(playerComparison));
+        });
+    }
+
+    comparisonLayout.append(statsColumn, dropsColumn);
+    container.appendChild(comparisonLayout);
     container.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 

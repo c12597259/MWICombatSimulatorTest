@@ -2503,6 +2503,7 @@ function resolvePrivateLoadoutBaseline(preset, response, unavailableReason = "br
 __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   SIMULATION_HISTORY_DATABASE_NAME: () => (/* binding */ SIMULATION_HISTORY_DATABASE_NAME),
+/* harmony export */   SIMULATION_HISTORY_DROP_COMPARISON_HOURS: () => (/* binding */ SIMULATION_HISTORY_DROP_COMPARISON_HOURS),
 /* harmony export */   SIMULATION_HISTORY_SCHEMA_VERSION: () => (/* binding */ SIMULATION_HISTORY_SCHEMA_VERSION),
 /* harmony export */   SIMULATION_HISTORY_STORE_NAME: () => (/* binding */ SIMULATION_HISTORY_STORE_NAME),
 /* harmony export */   buildSimulationHistoryRecord: () => (/* binding */ buildSimulationHistoryRecord),
@@ -2515,13 +2516,17 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */   deleteSimulationHistoryRecord: () => (/* binding */ deleteSimulationHistoryRecord),
 /* harmony export */   getSimulationHistoryMapDescriptor: () => (/* binding */ getSimulationHistoryMapDescriptor),
 /* harmony export */   getSimulationHistoryStorageSummary: () => (/* binding */ getSimulationHistoryStorageSummary),
+/* harmony export */   haveIdenticalSimulationHistoryDropComparisons: () => (/* binding */ haveIdenticalSimulationHistoryDropComparisons),
 /* harmony export */   loadSimulationHistoryRecords: () => (/* binding */ loadSimulationHistoryRecords),
 /* harmony export */   matchSimulationHistoryPlayers: () => (/* binding */ matchSimulationHistoryPlayers),
-/* harmony export */   saveSimulationHistoryRecord: () => (/* binding */ saveSimulationHistoryRecord)
+/* harmony export */   saveSimulationHistoryRecord: () => (/* binding */ saveSimulationHistoryRecord),
+/* harmony export */   scaleSimulationHistoryComparisonRows: () => (/* binding */ scaleSimulationHistoryComparisonRows),
+/* harmony export */   sortSimulationHistoryDropRows: () => (/* binding */ sortSimulationHistoryDropRows)
 /* harmony export */ });
 const SIMULATION_HISTORY_DATABASE_NAME = "mwiCombatSimulatorHistory";
 const SIMULATION_HISTORY_STORE_NAME = "records";
 const SIMULATION_HISTORY_SCHEMA_VERSION = 1;
+const SIMULATION_HISTORY_DROP_COMPARISON_HOURS = 24;
 
 const PLAYER_KEYS = new Set(["player1", "player2", "player3", "player4", "player5"]);
 const SKILL_KEYS = ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"];
@@ -2838,6 +2843,77 @@ function compareSimulationHistoryMaps(baseline = {}, comparison = {}) {
         key,
         ...compareSimulationHistoryNumber(baseline[key], comparison[key]),
     }));
+}
+
+function getSimulationHistoryDropPriority(itemHrid) {
+    const normalizedHrid = String(itemHrid ?? "").toLocaleLowerCase();
+    if (normalizedHrid === "/items/coin") {
+        return 0;
+    }
+    if (normalizedHrid.endsWith("_key_fragment")) {
+        return 1;
+    }
+    if (normalizedHrid.endsWith("_charm")) {
+        return 2;
+    }
+    if (normalizedHrid.endsWith("_essence")) {
+        return 3;
+    }
+    return 4;
+}
+
+function sortSimulationHistoryDropRows(rows = []) {
+    return [...rows].sort((left, right) => {
+        const priorityDifference = getSimulationHistoryDropPriority(left?.key)
+            - getSimulationHistoryDropPriority(right?.key);
+        if (priorityDifference !== 0) {
+            return priorityDifference;
+        }
+        return String(left?.key ?? "").localeCompare(String(right?.key ?? ""));
+    });
+}
+
+function scaleSimulationHistoryComparisonRows(
+    rows = [],
+    multiplier = SIMULATION_HISTORY_DROP_COMPARISON_HOURS,
+) {
+    const normalizedMultiplier = Math.max(toFiniteNumber(multiplier, 1), 0);
+    return rows.map((row) => ({
+        key: row.key,
+        ...compareSimulationHistoryNumber(
+            toFiniteNumber(row.baseline) * normalizedMultiplier,
+            toFiniteNumber(row.comparison) * normalizedMultiplier,
+        ),
+    }));
+}
+
+function serializeSimulationHistoryDropComparison(rows = []) {
+    return JSON.stringify(
+        [...rows]
+            .map((row) => [
+                String(row?.key ?? ""),
+                roundNumber(row?.baseline, 8),
+                roundNumber(row?.comparison, 8),
+            ])
+            .sort((left, right) => left[0].localeCompare(right[0])),
+    );
+}
+
+function haveIdenticalSimulationHistoryDropComparisons(playerComparisons = []) {
+    if (playerComparisons.length < 2 || playerComparisons.some(
+        (playerComparison) => !playerComparison?.baseline || !playerComparison?.comparison,
+    )) {
+        return false;
+    }
+
+    const firstComparison = serializeSimulationHistoryDropComparison(
+        playerComparisons[0]?.drops,
+    );
+    return playerComparisons.slice(1).every(
+        (playerComparison) => serializeSimulationHistoryDropComparison(
+            playerComparison?.drops,
+        ) === firstComparison,
+    );
 }
 
 function compareSimulationHistoryRecords(baseline, comparison) {
@@ -3497,7 +3573,7 @@ function createTeamPresetId() {
   \************************/
 /***/ ((module) => {
 
-module.exports = /*#__PURE__*/JSON.parse('{"2026年8月29日":["玩家标签支持拖动调整队伍站位，贯穿攻击会按标签从左到右的顺序处理","玩家站位会保存在当前浏览器中，并在加载队伍预设时恢复","新增按地图自动保存的模拟历史，不同难度记录会归入同一地图","模拟历史支持查看全队每名角色的主要指标、消耗品与期望掉落","支持选择同地图两条历史记录，按角色比较战斗表现与资源变化"],"2026年8月28日":["支持从私有配装数据导入每名角色实际生效的公会神龛战斗增益","房屋面板新增五种公会战斗神龛等级显示与模拟调整","逐怪物伤害与承伤明细改为默认折叠显示","钥匙碎片时间成本移至期望掉落上方，并新增每日碎片产量","钥匙碎片总耗时支持使用角色专业等级及游戏当前生效的专业增益精确计算","房屋面板改为房屋与公会神龛左右分栏显示","移除价格设置、市场价格获取与期望利润相关功能"],"2026年5月5日":["更新装备数据和本地化名称"],"2026年4月7日":["增加字段显示迷宫尝试次数和迷宫成功率"],"2026年3月5日":["优化狂怒相关的模拟性能"],"2026年3月3日":["支持迷宫封印对应的个人增益"],"2026年2月24日":["更新迷宫补丁的数据","新增支持迷宫单体/批量模拟"],"2026年2月1日":["修正战斗等级计算的精度","修正地下城完成或失败后重新进入战斗的时间间隔 by wangchyan","修正诅咒和削弱的持续时间 by wangchyan","修正诅咒和狂怒的触发逻辑 by wangchyan","修正地下城团灭重置机制的部分逻辑 by wangchyan","修复守护光环和速度光环部分增益未正确受对应等级加强的异常 by wangchyan","修复无敌技能未正确影响韧性数值的缺陷 by wangchyan","修复初次进入战斗时未能优先吃喝的异常 by wangchyan","战斗时长相关的统计现在仅计算已完成的战斗，不再包含当前未结束的战斗 by wangchyan"],"2026年1月11日":["修复trigger错误计算已阵亡单位的问题 by wangchyan"],"2025年12月31日":["实验性功能新增HP/MP可视化图表 by wangchyan","修复防御伤害未正确受damge加成的异常 by wangchyan","修复守护光环的治疗加成效果未生效的异常 by wangchyan","修复快速治疗等技能未正确选择最低%生命为目标的错误 by wangchyan"],"2025年12月30日":["地下城增加最短完成时间记录"],"2025年12月24日":["修复技能释放选择的缺陷，之前可能存在异常缺蓝等情况"],"2025年12月18日":["支持成就系统及对应buff效果","地下城怪物的掉落不再生效"],"2025年12月6日":["修复游戏更新后技能在无trigger情况下由[]变为null时造成的异常"],"2025年11月7日":["兼容支持从CN镜像站调用API获取价格"],"2025年10月14日":["修复怪物攻击间隔数值未能适配攻击等级的问题"],"2025年9月17日":["修复暴击光环的trigger缺陷"],"2025年9月9日":["复活时不再错误的清空所有buff","团灭日志增加反伤、荆棘和DOT伤害记录"],"2025年8月21日":["增加单挑战斗批量模拟和对应怪物选项","增加MooPass和社区buff的选项及对应功能","精炼装备数值加强","秘法主教属性削弱","init_client_info_v1.20250819.0.json游戏数据更新"],"2025年8月20日":["修复经验和掉落计算在极端情况下的可能异常"],"2025年8月19日":["合并Test和Temp分支的rework内容","init_client_info_v1.20250818.0.json游戏数据更新"],"2025年8月18日":["修复贯穿技能可能对相同目标造成重复伤害的问题","修复团灭日志在黑夜模式下的显示异常","战斗等级公式更新","钟乳石魔像的荆棘数值调整","init_client_info_v1.20250626.0_0817.json游戏数据更新"],"2025年8月16日":["增加停止模拟按钮 by BKN46","增加技能顺序调整按钮 by BKN46","增加团灭日志 by TruthLight","怪物属性更新","奥术反射更名为报应","init_client_info_v1.20250626.0_0815.json游戏数据更新"],"2025年8月14日":["怪物属性更新","远程和法师装备属性调整","反伤计算上限调整","修复战斗间隔释放技能的异常","修复技能释放判断逻辑的异常","法力值耗尽比例更加准确","调整远程经验的15%和魔法经验的12%映射到攻击经验","init_client_info_v1.20250626.0_0813.json游戏数据更新"],"2025年8月11日":["怪物属性更新","近战和物理技能施法时间更新","盾击和重锤数值调整","双手盾防御经验加成调整","init_client_info_v1.20250626.0_0811.json游戏数据更新"],"2025年8月8日":["实现组队等级差过大时对掉落和经验的惩罚","实现怪物经验随狂暴进度百分比增加","暴击光环数值调整","增加战斗等级数值显示","增加等级差距惩罚数值显示","init_client_info_v1.20250626.0_0807.json游戏数据更新"],"2025年8月7日":["修复组队战斗时一些重复物品掉落数量异常的缺陷 by contr4l","init_client_info_v1.20250626.0_0806.json游戏数据更新"],"2025年8月3日":["怪物狂暴机制及对应trigger生效","精炼装备更新，护符数值调整，守护光环增加闪避率","init_client_info_v1.20250626.0_0802.json游戏数据更新","狂怒层数修正为5层","招架结算机制调整"],"2025年7月31日":["物品数据和怪物属性更新","尖刺外壳和奥术反射重做","强化数值更新","删除异常trigger","狮鹫盾的虚弱重做","君王剑招架对队友生效","狂怒特效最大层数修正为6层","涟漪特效增加10MP恢复","反伤正确显示其命中率","反伤机制调整","同步双手盾属性和反伤荆棘技能数值的调整"],"2025年7月22日":["暴击光环受远程等级加成","光环基础数值和等级加成调整"],"2025年7月17日":["批量模拟支持勾选星球","经验分配比例调整至30%+70%","光环及对应trigger，并按对应技能等级百分比加成","水火自然默认调整为元素光环","init_client_info_v1.20250626.0_0717.json游戏数据更新"],"2025年7月11日":["怪物经验和技能等级公式更新","闪避和抗性计算公式更新","力量更替为近战以及对应的兼容","init_client_info_v1.20250626.0_0711.json游戏数据更新"],"2025年7月10日":["修复贯穿技能由敌人释放时可能多次击中相同目标的缺陷"],"2025年7月9日":["掉落和掉率调整","经验调整","疫病射击和破甲之刺调整","怪物自动恢复移除","疫病射击trigger调整","获取价格使用官方API"],"2025年7月7日":["怪物属性缩放和地图多难度","法师技能调整和装备上\'技能伤害\'词缀生效","攻击等级和房屋等级对施法速度的影响生效","物品调整","精准重做以攻击等级计算","TEST 远程魔法经验的10%映射到攻击经验！","经验重做和护符装备"]}');
+module.exports = /*#__PURE__*/JSON.parse('{"2026年9月10日":["模拟历史比较改为左右分栏，战斗指标与资源消耗在左、期望掉落在右","历史比较中的期望掉落改为24小时产量，并优先显示金币、钥匙碎片、护符和精华","全队角色掉落完全一致时只显示一份掉落比较"],"2026年8月29日":["玩家标签支持拖动调整队伍站位，贯穿攻击会按标签从左到右的顺序处理","玩家站位会保存在当前浏览器中，并在加载队伍预设时恢复","新增按地图自动保存的模拟历史，不同难度记录会归入同一地图","模拟历史支持查看全队每名角色的主要指标、消耗品与期望掉落","支持选择同地图两条历史记录，按角色比较战斗表现与资源变化"],"2026年8月28日":["支持从私有配装数据导入每名角色实际生效的公会神龛战斗增益","房屋面板新增五种公会战斗神龛等级显示与模拟调整","逐怪物伤害与承伤明细改为默认折叠显示","钥匙碎片时间成本移至期望掉落上方，并新增每日碎片产量","钥匙碎片总耗时支持使用角色专业等级及游戏当前生效的专业增益精确计算","房屋面板改为房屋与公会神龛左右分栏显示","移除价格设置、市场价格获取与期望利润相关功能"],"2026年5月5日":["更新装备数据和本地化名称"],"2026年4月7日":["增加字段显示迷宫尝试次数和迷宫成功率"],"2026年3月5日":["优化狂怒相关的模拟性能"],"2026年3月3日":["支持迷宫封印对应的个人增益"],"2026年2月24日":["更新迷宫补丁的数据","新增支持迷宫单体/批量模拟"],"2026年2月1日":["修正战斗等级计算的精度","修正地下城完成或失败后重新进入战斗的时间间隔 by wangchyan","修正诅咒和削弱的持续时间 by wangchyan","修正诅咒和狂怒的触发逻辑 by wangchyan","修正地下城团灭重置机制的部分逻辑 by wangchyan","修复守护光环和速度光环部分增益未正确受对应等级加强的异常 by wangchyan","修复无敌技能未正确影响韧性数值的缺陷 by wangchyan","修复初次进入战斗时未能优先吃喝的异常 by wangchyan","战斗时长相关的统计现在仅计算已完成的战斗，不再包含当前未结束的战斗 by wangchyan"],"2026年1月11日":["修复trigger错误计算已阵亡单位的问题 by wangchyan"],"2025年12月31日":["实验性功能新增HP/MP可视化图表 by wangchyan","修复防御伤害未正确受damge加成的异常 by wangchyan","修复守护光环的治疗加成效果未生效的异常 by wangchyan","修复快速治疗等技能未正确选择最低%生命为目标的错误 by wangchyan"],"2025年12月30日":["地下城增加最短完成时间记录"],"2025年12月24日":["修复技能释放选择的缺陷，之前可能存在异常缺蓝等情况"],"2025年12月18日":["支持成就系统及对应buff效果","地下城怪物的掉落不再生效"],"2025年12月6日":["修复游戏更新后技能在无trigger情况下由[]变为null时造成的异常"],"2025年11月7日":["兼容支持从CN镜像站调用API获取价格"],"2025年10月14日":["修复怪物攻击间隔数值未能适配攻击等级的问题"],"2025年9月17日":["修复暴击光环的trigger缺陷"],"2025年9月9日":["复活时不再错误的清空所有buff","团灭日志增加反伤、荆棘和DOT伤害记录"],"2025年8月21日":["增加单挑战斗批量模拟和对应怪物选项","增加MooPass和社区buff的选项及对应功能","精炼装备数值加强","秘法主教属性削弱","init_client_info_v1.20250819.0.json游戏数据更新"],"2025年8月20日":["修复经验和掉落计算在极端情况下的可能异常"],"2025年8月19日":["合并Test和Temp分支的rework内容","init_client_info_v1.20250818.0.json游戏数据更新"],"2025年8月18日":["修复贯穿技能可能对相同目标造成重复伤害的问题","修复团灭日志在黑夜模式下的显示异常","战斗等级公式更新","钟乳石魔像的荆棘数值调整","init_client_info_v1.20250626.0_0817.json游戏数据更新"],"2025年8月16日":["增加停止模拟按钮 by BKN46","增加技能顺序调整按钮 by BKN46","增加团灭日志 by TruthLight","怪物属性更新","奥术反射更名为报应","init_client_info_v1.20250626.0_0815.json游戏数据更新"],"2025年8月14日":["怪物属性更新","远程和法师装备属性调整","反伤计算上限调整","修复战斗间隔释放技能的异常","修复技能释放判断逻辑的异常","法力值耗尽比例更加准确","调整远程经验的15%和魔法经验的12%映射到攻击经验","init_client_info_v1.20250626.0_0813.json游戏数据更新"],"2025年8月11日":["怪物属性更新","近战和物理技能施法时间更新","盾击和重锤数值调整","双手盾防御经验加成调整","init_client_info_v1.20250626.0_0811.json游戏数据更新"],"2025年8月8日":["实现组队等级差过大时对掉落和经验的惩罚","实现怪物经验随狂暴进度百分比增加","暴击光环数值调整","增加战斗等级数值显示","增加等级差距惩罚数值显示","init_client_info_v1.20250626.0_0807.json游戏数据更新"],"2025年8月7日":["修复组队战斗时一些重复物品掉落数量异常的缺陷 by contr4l","init_client_info_v1.20250626.0_0806.json游戏数据更新"],"2025年8月3日":["怪物狂暴机制及对应trigger生效","精炼装备更新，护符数值调整，守护光环增加闪避率","init_client_info_v1.20250626.0_0802.json游戏数据更新","狂怒层数修正为5层","招架结算机制调整"],"2025年7月31日":["物品数据和怪物属性更新","尖刺外壳和奥术反射重做","强化数值更新","删除异常trigger","狮鹫盾的虚弱重做","君王剑招架对队友生效","狂怒特效最大层数修正为6层","涟漪特效增加10MP恢复","反伤正确显示其命中率","反伤机制调整","同步双手盾属性和反伤荆棘技能数值的调整"],"2025年7月22日":["暴击光环受远程等级加成","光环基础数值和等级加成调整"],"2025年7月17日":["批量模拟支持勾选星球","经验分配比例调整至30%+70%","光环及对应trigger，并按对应技能等级百分比加成","水火自然默认调整为元素光环","init_client_info_v1.20250626.0_0717.json游戏数据更新"],"2025年7月11日":["怪物经验和技能等级公式更新","闪避和抗性计算公式更新","力量更替为近战以及对应的兼容","init_client_info_v1.20250626.0_0711.json游戏数据更新"],"2025年7月10日":["修复贯穿技能由敌人释放时可能多次击中相同目标的缺陷"],"2025年7月9日":["掉落和掉率调整","经验调整","疫病射击和破甲之刺调整","怪物自动恢复移除","疫病射击trigger调整","获取价格使用官方API"],"2025年7月7日":["怪物属性缩放和地图多难度","法师技能调整和装备上\'技能伤害\'词缀生效","攻击等级和房屋等级对施法速度的影响生效","物品调整","精准重做以攻击等级计算","TEST 远程魔法经验的10%映射到攻击经验！","经验重做和护符装备"]}');
 
 /***/ }),
 
@@ -6365,14 +6441,24 @@ function createSimulationHistoryRateComparisonSection(
     title,
     rows,
     labelResolver,
-    maximumFractionDigits = 2,
-    lowerIsBetter = false,
+    {
+        maximumFractionDigits = 2,
+        lowerIsBetter = false,
+        valueMultiplier = 1,
+        rowSorter = null,
+    } = {},
 ) {
     const section = document.createElement("section");
     const heading = document.createElement("h6");
     heading.textContent = title;
     section.appendChild(heading);
-    if (rows.length === 0) {
+    let displayRows = valueMultiplier === 1
+        ? [...rows]
+        : (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.scaleSimulationHistoryComparisonRows)(rows, valueMultiplier);
+    if (typeof rowSorter === "function") {
+        displayRows = rowSorter(displayRows);
+    }
+    if (displayRows.length === 0) {
         const empty = document.createElement("p");
         empty.className = "small text-muted";
         empty.textContent = getSimulationHistoryText("noItems", "None");
@@ -6380,7 +6466,7 @@ function createSimulationHistoryRateComparisonSection(
         return section;
     }
     const table = createSimulationHistoryComparisonTable();
-    rows.forEach((row) => appendSimulationHistoryComparisonRow(
+    displayRows.forEach((row) => appendSimulationHistoryComparisonRow(
         table,
         labelResolver(row.key),
         row,
@@ -6388,30 +6474,42 @@ function createSimulationHistoryRateComparisonSection(
         "",
         lowerIsBetter,
     ));
-    section.appendChild(table);
+    const tableWrapper = document.createElement("div");
+    tableWrapper.className = "table-responsive";
+    tableWrapper.appendChild(table);
+    section.appendChild(tableWrapper);
     return section;
 }
 
+function getSimulationHistoryComparisonPlayerName(playerComparison) {
+    return playerComparison.comparison?.name
+        ?? playerComparison.baseline?.name
+        ?? "Player";
+}
+
+function appendSimulationHistoryMissingPlayerBadge(header, playerComparison) {
+    if (playerComparison.baseline && playerComparison.comparison) {
+        return;
+    }
+    const badge = document.createElement("span");
+    badge.className = "badge bg-secondary";
+    badge.textContent = !playerComparison.baseline
+        ? getSimulationHistoryText("missingBaseline", "Only in comparison")
+        : getSimulationHistoryText("missingComparison", "Only in baseline");
+    header.appendChild(badge);
+}
+
 function createSimulationHistoryPlayerComparison(playerComparison) {
-    const baselinePlayer = playerComparison.baseline;
-    const comparisonPlayer = playerComparison.comparison;
-    const playerName = comparisonPlayer?.name ?? baselinePlayer?.name ?? "Player";
+    const playerName = getSimulationHistoryComparisonPlayerName(playerComparison);
     const card = document.createElement("section");
-    card.className = "card history-player-card mb-3";
+    card.className = "card history-player-card history-stats-card mb-3";
 
     const header = document.createElement("div");
     header.className = "card-header d-flex justify-content-between align-items-center";
     const name = document.createElement("strong");
     name.textContent = playerName;
     header.appendChild(name);
-    if (!baselinePlayer || !comparisonPlayer) {
-        const badge = document.createElement("span");
-        badge.className = "badge bg-secondary";
-        badge.textContent = !baselinePlayer
-            ? getSimulationHistoryText("missingBaseline", "Only in comparison")
-            : getSimulationHistoryText("missingComparison", "Only in baseline");
-        header.appendChild(badge);
-    }
+    appendSimulationHistoryMissingPlayerBadge(header, playerComparison);
     card.appendChild(header);
 
     const body = document.createElement("div");
@@ -6435,29 +6533,25 @@ function createSimulationHistoryPlayerComparison(playerComparison) {
             definition.lowerIsBetter === true,
         );
     }
-    overviewColumn.appendChild(overviewTable);
+    const overviewTableWrapper = document.createElement("div");
+    overviewTableWrapper.className = "table-responsive";
+    overviewTableWrapper.appendChild(overviewTable);
+    overviewColumn.appendChild(overviewTableWrapper);
     grid.appendChild(overviewColumn);
 
     const sections = [
         {
-            className: "col-lg-6",
+            className: "col-12",
             title: getSimulationHistoryText("sections.experience", "Experience per Hour"),
             rows: playerComparison.experience,
             resolver: getSimulationHistorySkillName,
         },
         {
-            className: "col-lg-6",
+            className: "col-12",
             title: getSimulationHistoryText("sections.consumables", "Consumables per Hour"),
             rows: playerComparison.consumables,
             resolver: getSimulationHistoryItemName,
             lowerIsBetter: true,
-        },
-        {
-            className: "col-12",
-            title: getSimulationHistoryText("sections.drops", "Expected Drops per Hour"),
-            rows: playerComparison.drops,
-            resolver: getSimulationHistoryItemName,
-            maximumFractionDigits: 6,
         },
     ];
     for (const sectionData of sections) {
@@ -6467,13 +6561,56 @@ function createSimulationHistoryPlayerComparison(playerComparison) {
             sectionData.title,
             sectionData.rows,
             sectionData.resolver,
-            sectionData.maximumFractionDigits ?? 2,
-            sectionData.lowerIsBetter === true,
+            {
+                maximumFractionDigits: sectionData.maximumFractionDigits ?? 2,
+                lowerIsBetter: sectionData.lowerIsBetter === true,
+            },
         ));
         grid.appendChild(column);
     }
 
     body.appendChild(grid);
+    card.appendChild(body);
+    return card;
+}
+
+function createSimulationHistoryDropComparison(
+    playerComparison,
+    sharedPlayerNames = [],
+) {
+    const card = document.createElement("section");
+    card.className = "card history-player-card history-drops-card mb-3";
+
+    const header = document.createElement("div");
+    header.className = "card-header d-flex justify-content-between align-items-center gap-2";
+    const name = document.createElement("strong");
+    if (sharedPlayerNames.length > 0) {
+        name.textContent = `${getSimulationHistoryText(
+            "sharedDrops",
+            "Identical drops for all players",
+        )} · ${sharedPlayerNames.join("、")}`;
+    } else {
+        name.textContent = getSimulationHistoryComparisonPlayerName(playerComparison);
+        appendSimulationHistoryMissingPlayerBadge(header, playerComparison);
+    }
+    header.prepend(name);
+    card.appendChild(header);
+
+    const body = document.createElement("div");
+    body.className = "card-body";
+    body.appendChild(createSimulationHistoryRateComparisonSection(
+        getSimulationHistoryText(
+            "sections.drops24",
+            "Expected Drops per 24 Hours",
+        ),
+        playerComparison.drops,
+        getSimulationHistoryItemName,
+        {
+            maximumFractionDigits: 6,
+            valueMultiplier: _simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.SIMULATION_HISTORY_DROP_COMPARISON_HOURS,
+            rowSorter: _simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.sortSimulationHistoryDropRows,
+        },
+    ));
     card.appendChild(body);
     return card;
 }
@@ -6523,9 +6660,30 @@ function renderSimulationHistoryComparison(baseline, comparison) {
     summaryWrapper.appendChild(summaryTable);
     container.appendChild(summaryWrapper);
 
+    const comparisonLayout = document.createElement("div");
+    comparisonLayout.className = "row g-4 align-items-start history-comparison-layout";
+    const statsColumn = document.createElement("div");
+    statsColumn.className = "col-12 col-xl-6 history-comparison-column";
+    const dropsColumn = document.createElement("div");
+    dropsColumn.className = "col-12 col-xl-6 history-comparison-column";
+
     result.players.forEach((playerComparison) => {
-        container.appendChild(createSimulationHistoryPlayerComparison(playerComparison));
+        statsColumn.appendChild(createSimulationHistoryPlayerComparison(playerComparison));
     });
+
+    if ((0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.haveIdenticalSimulationHistoryDropComparisons)(result.players)) {
+        dropsColumn.appendChild(createSimulationHistoryDropComparison(
+            result.players[0],
+            result.players.map(getSimulationHistoryComparisonPlayerName),
+        ));
+    } else {
+        result.players.forEach((playerComparison) => {
+            dropsColumn.appendChild(createSimulationHistoryDropComparison(playerComparison));
+        });
+    }
+
+    comparisonLayout.append(statsColumn, dropsColumn);
+    container.appendChild(comparisonLayout);
     container.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 

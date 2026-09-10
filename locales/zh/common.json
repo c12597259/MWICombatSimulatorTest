@@ -157,12 +157,14 @@
         "delta": "变化 B-A",
         "missingBaseline": "仅在对比记录中",
         "missingComparison": "仅在基准记录中",
+        "sharedDrops": "所有角色掉落一致",
         "noItems": "无",
         "sections": {
             "overview": "主要指标",
             "experience": "每小时经验",
             "consumables": "每小时消耗品",
-            "drops": "每小时期望掉落"
+            "drops": "每小时期望掉落",
+            "drops24": "24小时期望掉落"
         },
         "metrics": {
             "dps": "DPS",

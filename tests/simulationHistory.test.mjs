@@ -12,7 +12,10 @@ const {
     compareSimulationHistoryRecords,
     getSimulationHistoryMapDescriptor,
     getSimulationHistoryStorageSummary,
+    haveIdenticalSimulationHistoryDropComparisons,
     matchSimulationHistoryPlayers,
+    scaleSimulationHistoryComparisonRows,
+    sortSimulationHistoryDropRows,
 } = await import(historyModuleUrl);
 
 const ONE_HOUR = 60 * 60 * 1e9;
@@ -181,6 +184,62 @@ test("compares player metrics and the union of item rates", () => {
         result.players[0].drops.map((item) => [item.key, item.delta]),
         [["/items/a", 1], ["/items/b", 1]],
     );
+});
+
+test("scales only displayed drop comparisons to 24 hours", () => {
+    const [scaled] = scaleSimulationHistoryComparisonRows([{
+        key: "/items/rare_drop",
+        baseline: 0.125,
+        comparison: 0.25,
+        delta: 0.125,
+        percent: 100,
+    }]);
+
+    assert.deepEqual(scaled, {
+        key: "/items/rare_drop",
+        baseline: 3,
+        comparison: 6,
+        delta: 3,
+        percent: 100,
+    });
+});
+
+test("orders important drop types before other items", () => {
+    const rows = [
+        { key: "/items/log" },
+        { key: "/items/swamp_essence" },
+        { key: "/items/advanced_attack_charm" },
+        { key: "/items/blue_key_fragment" },
+        { key: "/items/coin" },
+    ];
+
+    assert.deepEqual(
+        sortSimulationHistoryDropRows(rows).map((row) => row.key),
+        [
+            "/items/coin",
+            "/items/blue_key_fragment",
+            "/items/advanced_attack_charm",
+            "/items/swamp_essence",
+            "/items/log",
+        ],
+    );
+});
+
+test("detects when every player's drop comparison is identical", () => {
+    const identicalDrops = [
+        { key: "/items/coin", baseline: 10, comparison: 12 },
+        { key: "/items/blue_key_fragment", baseline: 0.1, comparison: 0.2 },
+    ];
+    const comparisons = ["Alice", "Bob", "Carol"].map((name) => ({
+        baseline: { name },
+        comparison: { name },
+        drops: structuredClone(identicalDrops),
+    }));
+
+    assert.equal(haveIdenticalSimulationHistoryDropComparisons(comparisons), true);
+    comparisons[2].drops[0].comparison = 13;
+    assert.equal(haveIdenticalSimulationHistoryDropComparisons(comparisons), false);
+    assert.equal(haveIdenticalSimulationHistoryDropComparisons(comparisons.slice(0, 1)), false);
 });
 
 test("reports the serialized history size", () => {
