@@ -12,8 +12,8 @@ const {
     compareSimulationHistoryRecords,
     getSimulationHistoryMapDescriptor,
     getSimulationHistoryStorageSummary,
-    haveIdenticalSimulationHistoryDropComparisons,
     matchSimulationHistoryPlayers,
+    partitionSimulationHistoryDropComparisons,
     scaleSimulationHistoryComparisonRows,
     sortSimulationHistoryDropRows,
 } = await import(historyModuleUrl);
@@ -225,7 +225,7 @@ test("orders important drop types before other items", () => {
     );
 });
 
-test("detects when every player's drop comparison is identical", () => {
+test("partitions shared drops from drops that differ by player", () => {
     const identicalDrops = [
         { key: "/items/coin", baseline: 10, comparison: 12 },
         { key: "/items/blue_key_fragment", baseline: 0.1, comparison: 0.2 },
@@ -236,10 +236,31 @@ test("detects when every player's drop comparison is identical", () => {
         drops: structuredClone(identicalDrops),
     }));
 
-    assert.equal(haveIdenticalSimulationHistoryDropComparisons(comparisons), true);
-    comparisons[2].drops[0].comparison = 13;
-    assert.equal(haveIdenticalSimulationHistoryDropComparisons(comparisons), false);
-    assert.equal(haveIdenticalSimulationHistoryDropComparisons(comparisons.slice(0, 1)), false);
+    let partition = partitionSimulationHistoryDropComparisons(comparisons);
+    assert.deepEqual(partition.sharedRows, identicalDrops);
+    assert.deepEqual(partition.differingRowsByPlayer, [[], [], []]);
+
+    comparisons.forEach((comparison, index) => {
+        comparison.drops.push({
+            key: "/items/large_treasure_chest",
+            baseline: 2 + index,
+            comparison: 3 + index,
+        });
+    });
+    partition = partitionSimulationHistoryDropComparisons(comparisons);
+    assert.deepEqual(partition.sharedRows, identicalDrops);
+    assert.deepEqual(
+        partition.differingRowsByPlayer.map((rows) => rows.map((row) => row.key)),
+        [
+            ["/items/large_treasure_chest"],
+            ["/items/large_treasure_chest"],
+            ["/items/large_treasure_chest"],
+        ],
+    );
+
+    partition = partitionSimulationHistoryDropComparisons(comparisons.slice(0, 1));
+    assert.deepEqual(partition.sharedRows, []);
+    assert.equal(partition.differingRowsByPlayer[0].length, 3);
 });
 
 test("reports the serialized history size", () => {

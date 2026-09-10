@@ -362,33 +362,45 @@ export function scaleSimulationHistoryComparisonRows(
     }));
 }
 
-function serializeSimulationHistoryDropComparison(rows = []) {
-    return JSON.stringify(
-        [...rows]
-            .map((row) => [
-                String(row?.key ?? ""),
-                roundNumber(row?.baseline, 8),
-                roundNumber(row?.comparison, 8),
-            ])
-            .sort((left, right) => left[0].localeCompare(right[0])),
-    );
+function haveSameSimulationHistoryDropValues(left, right) {
+    return left
+        && right
+        && roundNumber(left.baseline, 8) === roundNumber(right.baseline, 8)
+        && roundNumber(left.comparison, 8) === roundNumber(right.comparison, 8);
 }
 
-export function haveIdenticalSimulationHistoryDropComparisons(playerComparisons = []) {
+export function partitionSimulationHistoryDropComparisons(playerComparisons = []) {
+    const differingRowsByPlayer = playerComparisons.map(
+        (playerComparison) => [...(playerComparison?.drops ?? [])],
+    );
     if (playerComparisons.length < 2 || playerComparisons.some(
         (playerComparison) => !playerComparison?.baseline || !playerComparison?.comparison,
     )) {
-        return false;
+        return { sharedRows: [], differingRowsByPlayer };
     }
 
-    const firstComparison = serializeSimulationHistoryDropComparison(
-        playerComparisons[0]?.drops,
+    const rowMaps = playerComparisons.map((playerComparison) => new Map(
+        (playerComparison.drops ?? []).map((row) => [String(row?.key ?? ""), row]),
+    ));
+    const sharedKeys = new Set(
+        (playerComparisons[0]?.drops ?? [])
+            .filter((row) => rowMaps.slice(1).every(
+                (rowMap) => haveSameSimulationHistoryDropValues(
+                    row,
+                    rowMap.get(String(row?.key ?? "")),
+                ),
+            ))
+            .map((row) => String(row?.key ?? "")),
     );
-    return playerComparisons.slice(1).every(
-        (playerComparison) => serializeSimulationHistoryDropComparison(
-            playerComparison?.drops,
-        ) === firstComparison,
-    );
+
+    return {
+        sharedRows: (playerComparisons[0]?.drops ?? []).filter(
+            (row) => sharedKeys.has(String(row?.key ?? "")),
+        ),
+        differingRowsByPlayer: differingRowsByPlayer.map((rows) => rows.filter(
+            (row) => !sharedKeys.has(String(row?.key ?? "")),
+        )),
+    };
 }
 
 export function compareSimulationHistoryRecords(baseline, comparison) {

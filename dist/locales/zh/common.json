@@ -157,7 +157,8 @@
         "delta": "变化 B-A",
         "missingBaseline": "仅在对比记录中",
         "missingComparison": "仅在基准记录中",
-        "sharedDrops": "所有角色掉落一致",
+        "sharedDrops": "所有角色共同掉落",
+        "differentDrops": "角色间不同掉落",
         "noItems": "无",
         "sections": {
             "overview": "主要指标",

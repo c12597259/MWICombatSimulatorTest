@@ -157,7 +157,8 @@
         "delta": "Change B-A",
         "missingBaseline": "Only in comparison",
         "missingComparison": "Only in baseline",
-        "sharedDrops": "Identical drops for all players",
+        "sharedDrops": "Drops shared by all players",
+        "differentDrops": "Drops that differ by player",
         "noItems": "None",
         "sections": {
             "overview": "Main Metrics",

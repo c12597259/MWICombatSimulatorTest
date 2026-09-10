@@ -46,8 +46,8 @@ import {
     deleteSimulationHistoryMap,
     deleteSimulationHistoryRecord,
     getSimulationHistoryStorageSummary,
-    haveIdenticalSimulationHistoryDropComparisons,
     loadSimulationHistoryRecords,
+    partitionSimulationHistoryDropComparisons,
     saveSimulationHistoryRecord,
     scaleSimulationHistoryComparisonRows,
     SIMULATION_HISTORY_DROP_COMPARISON_HOURS,
@@ -2547,12 +2547,25 @@ function renderSimulationHistoryRecordDetails(record) {
     container.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-function formatSimulationHistoryComparisonDelta(metric, digits = 2, suffix = "") {
+function formatSimulationHistoryComparisonDelta(
+    metric,
+    digits = 2,
+    suffix = "",
+    valueFormatter = null,
+) {
+    const formatValue = valueFormatter
+        ?? ((value) => formatSimulationHistoryNumber(value, digits));
     const sign = metric.delta > 0 ? "+" : "";
     const percent = metric.percent === null
         ? ""
         : ` (${metric.percent > 0 ? "+" : ""}${formatSimulationHistoryNumber(metric.percent, 1)}%)`;
-    return `${sign}${formatSimulationHistoryNumber(metric.delta, digits)}${suffix}${percent}`;
+    return `${sign}${formatValue(metric.delta)}${suffix}${percent}`;
+}
+
+function formatSimulationHistoryDropNumber(value) {
+    const number = Number(value);
+    const maximumFractionDigits = number !== 0 && Math.abs(number) < 1 ? 6 : 2;
+    return formatSimulationHistoryNumber(number, maximumFractionDigits);
 }
 
 function appendSimulationHistoryComparisonRow(
@@ -2562,15 +2575,18 @@ function appendSimulationHistoryComparisonRow(
     digits = 2,
     suffix = "",
     lowerIsBetter = false,
+    valueFormatter = null,
 ) {
+    const formatValue = valueFormatter
+        ?? ((value) => formatSimulationHistoryNumber(value, digits));
     const row = document.createElement("tr");
     row.appendChild(createSimulationHistoryCell(label, "history-item-name"));
     row.appendChild(createSimulationHistoryCell(
-        `${formatSimulationHistoryNumber(metric.baseline, digits)}${suffix}`,
+        `${formatValue(metric.baseline)}${suffix}`,
         "text-end history-value-column",
     ));
     row.appendChild(createSimulationHistoryCell(
-        `${formatSimulationHistoryNumber(metric.comparison, digits)}${suffix}`,
+        `${formatValue(metric.comparison)}${suffix}`,
         "text-end history-value-column",
     ));
     const improvementDelta = lowerIsBetter ? -metric.delta : metric.delta;
@@ -2578,7 +2594,7 @@ function appendSimulationHistoryComparisonRow(
         ? "text-success"
         : (improvementDelta < 0 ? "text-danger" : "text-muted");
     row.appendChild(createSimulationHistoryCell(
-        formatSimulationHistoryComparisonDelta(metric, digits, suffix),
+        formatSimulationHistoryComparisonDelta(metric, digits, suffix, formatValue),
         `text-end history-value-column ${deltaClass}`,
     ));
     table.tBodies[0].appendChild(row);
@@ -2602,6 +2618,7 @@ function createSimulationHistoryRateComparisonSection(
         lowerIsBetter = false,
         valueMultiplier = 1,
         rowSorter = null,
+        valueFormatter = null,
     } = {},
 ) {
     const section = document.createElement("section");
@@ -2629,6 +2646,7 @@ function createSimulationHistoryRateComparisonSection(
         maximumFractionDigits,
         "",
         lowerIsBetter,
+        valueFormatter,
     ));
     const tableWrapper = document.createElement("div");
     tableWrapper.className = "table-responsive";
@@ -2733,6 +2751,7 @@ function createSimulationHistoryPlayerComparison(playerComparison) {
 function createSimulationHistoryDropComparison(
     playerComparison,
     sharedPlayerNames = [],
+    differenceOnly = false,
 ) {
     const card = document.createElement("section");
     card.className = "card history-player-card history-drops-card mb-3";
@@ -2746,7 +2765,12 @@ function createSimulationHistoryDropComparison(
             "Identical drops for all players",
         )} · ${sharedPlayerNames.join("、")}`;
     } else {
-        name.textContent = getSimulationHistoryComparisonPlayerName(playerComparison);
+        name.textContent = differenceOnly
+            ? `${getSimulationHistoryComparisonPlayerName(playerComparison)} · ${getSimulationHistoryText(
+                "differentDrops",
+                "Drops that differ by player",
+            )}`
+            : getSimulationHistoryComparisonPlayerName(playerComparison);
         appendSimulationHistoryMissingPlayerBadge(header, playerComparison);
     }
     header.prepend(name);
@@ -2765,6 +2789,7 @@ function createSimulationHistoryDropComparison(
             maximumFractionDigits: 6,
             valueMultiplier: SIMULATION_HISTORY_DROP_COMPARISON_HOURS,
             rowSorter: sortSimulationHistoryDropRows,
+            valueFormatter: formatSimulationHistoryDropNumber,
         },
     ));
     card.appendChild(body);
@@ -2827,16 +2852,26 @@ function renderSimulationHistoryComparison(baseline, comparison) {
         statsColumn.appendChild(createSimulationHistoryPlayerComparison(playerComparison));
     });
 
-    if (haveIdenticalSimulationHistoryDropComparisons(result.players)) {
+    const {
+        sharedRows,
+        differingRowsByPlayer,
+    } = partitionSimulationHistoryDropComparisons(result.players);
+    if (sharedRows.length > 0) {
         dropsColumn.appendChild(createSimulationHistoryDropComparison(
-            result.players[0],
+            { ...result.players[0], drops: sharedRows },
             result.players.map(getSimulationHistoryComparisonPlayerName),
         ));
-    } else {
-        result.players.forEach((playerComparison) => {
-            dropsColumn.appendChild(createSimulationHistoryDropComparison(playerComparison));
-        });
     }
+    result.players.forEach((playerComparison, index) => {
+        const differingRows = differingRowsByPlayer[index] ?? [];
+        if (differingRows.length > 0) {
+            dropsColumn.appendChild(createSimulationHistoryDropComparison(
+                { ...playerComparison, drops: differingRows },
+                [],
+                sharedRows.length > 0,
+            ));
+        }
+    });
 
     comparisonLayout.append(statsColumn, dropsColumn);
     container.appendChild(comparisonLayout);
