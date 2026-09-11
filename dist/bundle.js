@@ -6424,10 +6424,15 @@ function formatSimulationHistoryDropNumber(value, itemHrid = "") {
     if (String(itemHrid).toLocaleLowerCase() === "/items/coin" && absoluteValue > 100000) {
         return `${formatSimulationHistoryNumber(number / 1e6, 2)}M`;
     }
-    const maximumFractionDigits = absoluteValue <= 0.1
-        ? 6
-        : (absoluteValue < 100 ? 2 : 0);
-    return formatSimulationHistoryNumber(number, maximumFractionDigits);
+    if (absoluteValue > 0.1 && absoluteValue < 100) {
+        return Number.isFinite(number)
+            ? number.toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+            })
+            : "0";
+    }
+    return formatSimulationHistoryNumber(number, absoluteValue <= 0.1 ? 6 : 0);
 }
 
 function appendSimulationHistoryComparisonRow(
