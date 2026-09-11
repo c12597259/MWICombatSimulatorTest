@@ -2562,9 +2562,15 @@ function formatSimulationHistoryComparisonDelta(
     return `${sign}${formatValue(metric.delta)}${suffix}${percent}`;
 }
 
-function formatSimulationHistoryDropNumber(value) {
+function formatSimulationHistoryDropNumber(value, itemHrid = "") {
     const number = Number(value);
-    const maximumFractionDigits = number !== 0 && Math.abs(number) < 1 ? 6 : 2;
+    const absoluteValue = Math.abs(number);
+    if (String(itemHrid).toLocaleLowerCase() === "/items/coin" && absoluteValue > 100000) {
+        return `${formatSimulationHistoryNumber(number / 1e6, 2)}M`;
+    }
+    const maximumFractionDigits = absoluteValue <= 0.1
+        ? 6
+        : (absoluteValue < 100 ? 2 : 0);
     return formatSimulationHistoryNumber(number, maximumFractionDigits);
 }
 
@@ -2639,15 +2645,20 @@ function createSimulationHistoryRateComparisonSection(
         return section;
     }
     const table = createSimulationHistoryComparisonTable();
-    displayRows.forEach((row) => appendSimulationHistoryComparisonRow(
-        table,
-        labelResolver(row.key),
-        row,
-        maximumFractionDigits,
-        "",
-        lowerIsBetter,
-        valueFormatter,
-    ));
+    displayRows.forEach((row) => {
+        const rowValueFormatter = typeof valueFormatter === "function"
+            ? (value) => valueFormatter(value, row.key, row)
+            : null;
+        appendSimulationHistoryComparisonRow(
+            table,
+            labelResolver(row.key),
+            row,
+            maximumFractionDigits,
+            "",
+            lowerIsBetter,
+            rowValueFormatter,
+        );
+    });
     const tableWrapper = document.createElement("div");
     tableWrapper.className = "table-responsive";
     tableWrapper.appendChild(table);
