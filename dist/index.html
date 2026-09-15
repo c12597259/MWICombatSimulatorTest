@@ -167,6 +167,37 @@
             margin-bottom: 0;
         }
 
+        #simulationHistoryModal .history-player-tab-list {
+            position: sticky;
+            top: 0;
+            z-index: 3;
+            flex-wrap: nowrap;
+            overflow-x: auto;
+            overflow-y: hidden;
+            background-color: #fff;
+            scrollbar-width: thin;
+        }
+
+        #simulationHistoryModal .history-player-tab-list .nav-item {
+            flex: 0 0 auto;
+        }
+
+        #simulationHistoryModal .history-player-tab-list .nav-link {
+            white-space: nowrap;
+        }
+
+        #simulationHistoryModal .history-player-tab-content {
+            padding: 1rem;
+            border: 1px solid #dee2e6;
+            border-top: 0;
+            border-radius: 0 0 0.375rem 0.375rem;
+        }
+
+        #simulationHistoryModal .history-player-tab-content > .tab-pane > .history-player-card:last-child,
+        #simulationHistoryModal .history-player-tab-content .history-comparison-column > .history-player-card:last-child {
+            margin-bottom: 0 !important;
+        }
+
         #simulationHistoryModal .history-value-column {
             min-width: 7rem;
         }
@@ -204,6 +235,32 @@
         body.dark-mode #simulationHistoryModal .text-muted,
         body.dark-mode #simulationHistoryModal .text-secondary {
             color: #c8c8c8 !important;
+        }
+
+        body.dark-mode #simulationHistoryModal .history-player-tab-list {
+            background-color: #333;
+            border-bottom-color: #777;
+        }
+
+        body.dark-mode #simulationHistoryModal .history-player-tab-list .nav-link {
+            color: #d8d8d8;
+        }
+
+        body.dark-mode #simulationHistoryModal .history-player-tab-list .nav-link:hover,
+        body.dark-mode #simulationHistoryModal .history-player-tab-list .nav-link:focus {
+            color: #fff;
+            border-color: #666 #666 #777;
+        }
+
+        body.dark-mode #simulationHistoryModal .history-player-tab-list .nav-link.active {
+            color: #fff;
+            background-color: #444;
+            border-color: #777 #777 #444;
+        }
+
+        body.dark-mode #simulationHistoryModal .history-player-tab-content {
+            background-color: #444;
+            border-color: #777;
         }
 
         body.dark-mode #simulationHistoryComparisonResults .text-success {

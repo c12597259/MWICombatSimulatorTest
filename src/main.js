@@ -85,6 +85,7 @@ let modalTriggers = [];
 let currentSimResults = {};
 let pendingSimulationHistoryContext = null;
 let simulationHistoryRecords = [];
+let simulationHistoryPlayerTabSequence = 0;
 
 let currentPlayerTabId = '1';
 let lastAutoLoadedTeamPresetTargetKey = null;
@@ -2423,16 +2424,74 @@ function createSimulationHistoryRateSection(title, values, labelResolver, maximu
     return section;
 }
 
+function getSimulationHistoryPlayerSlotLabel(slot) {
+    return getLocalizedHistoryValue(
+        "common:teamComparison.slot",
+        "Slot {{slot}}",
+    ).replaceAll("{{slot}}", slot);
+}
+
+function createSimulationHistoryPlayerTabs(entries, getTabLabel, createTabContent) {
+    const tabGroupId = `simulation-history-player-tabs-${++simulationHistoryPlayerTabSequence}`;
+    const wrapper = document.createElement("section");
+    wrapper.className = "history-player-tabs mb-4";
+
+    const tabList = document.createElement("ul");
+    tabList.className = "nav nav-tabs history-player-tab-list";
+    tabList.setAttribute("role", "tablist");
+    tabList.setAttribute(
+        "aria-label",
+        getSimulationHistoryText("playerTabs", "Player records"),
+    );
+
+    const tabContent = document.createElement("div");
+    tabContent.className = "tab-content history-player-tab-content";
+
+    entries.forEach((entry, index) => {
+        const isActive = index === 0;
+        const tabId = `${tabGroupId}-tab-${index}`;
+        const paneId = `${tabGroupId}-pane-${index}`;
+        const tabItem = document.createElement("li");
+        tabItem.className = "nav-item";
+        tabItem.setAttribute("role", "presentation");
+
+        const tabButton = document.createElement("button");
+        tabButton.type = "button";
+        tabButton.id = tabId;
+        tabButton.className = `nav-link${isActive ? " active" : ""}`;
+        tabButton.textContent = getTabLabel(entry, index);
+        tabButton.setAttribute("data-bs-toggle", "tab");
+        tabButton.setAttribute("data-bs-target", `#${paneId}`);
+        tabButton.setAttribute("role", "tab");
+        tabButton.setAttribute("aria-controls", paneId);
+        tabButton.setAttribute("aria-selected", String(isActive));
+        tabItem.appendChild(tabButton);
+        tabList.appendChild(tabItem);
+
+        const pane = document.createElement("div");
+        pane.id = paneId;
+        pane.className = `tab-pane fade${isActive ? " show active" : ""}`;
+        pane.setAttribute("role", "tabpanel");
+        pane.setAttribute("aria-labelledby", tabId);
+        pane.setAttribute("tabindex", "0");
+        const content = createTabContent(entry, index);
+        if (content) {
+            pane.appendChild(content);
+        }
+        tabContent.appendChild(pane);
+    });
+
+    wrapper.append(tabList, tabContent);
+    return wrapper;
+}
+
 function createSimulationHistoryPlayerDetail(playerEntry) {
     const card = document.createElement("section");
     card.className = "card history-player-card mb-3";
 
     const header = document.createElement("div");
     header.className = "card-header fw-bold";
-    const slotLabel = getLocalizedHistoryValue(
-        "common:teamComparison.slot",
-        "Slot {{slot}}",
-    ).replaceAll("{{slot}}", playerEntry.slot);
+    const slotLabel = getSimulationHistoryPlayerSlotLabel(playerEntry.slot);
     header.textContent = `${playerEntry.name} · ${slotLabel}`;
     card.appendChild(header);
 
@@ -2541,9 +2600,11 @@ function renderSimulationHistoryRecordDetails(record) {
     overviewWrapper.appendChild(overview);
     container.appendChild(overviewWrapper);
 
-    record.players.forEach((playerEntry) => {
-        container.appendChild(createSimulationHistoryPlayerDetail(playerEntry));
-    });
+    container.appendChild(createSimulationHistoryPlayerTabs(
+        record.players,
+        (playerEntry) => `${playerEntry.name} · ${getSimulationHistoryPlayerSlotLabel(playerEntry.slot)}`,
+        createSimulationHistoryPlayerDetail,
+    ));
     container.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -2675,6 +2736,16 @@ function getSimulationHistoryComparisonPlayerName(playerComparison) {
     return playerComparison.comparison?.name
         ?? playerComparison.baseline?.name
         ?? "Player";
+}
+
+function getSimulationHistoryComparisonPlayerTabLabel(playerComparison) {
+    const playerName = getSimulationHistoryComparisonPlayerName(playerComparison);
+    const baselineSlot = playerComparison.baseline?.slot;
+    const comparisonSlot = playerComparison.comparison?.slot;
+    if (baselineSlot && comparisonSlot && String(baselineSlot) !== String(comparisonSlot)) {
+        return `${playerName} · ${getSimulationHistoryPlayerSlotLabel(baselineSlot)} → ${getSimulationHistoryPlayerSlotLabel(comparisonSlot)}`;
+    }
+    return `${playerName} · ${getSimulationHistoryPlayerSlotLabel(comparisonSlot ?? baselineSlot ?? "?")}`;
 }
 
 function appendSimulationHistoryMissingPlayerBadge(header, playerComparison) {
@@ -2857,40 +2928,49 @@ function renderSimulationHistoryComparison(baseline, comparison) {
     summaryWrapper.appendChild(summaryTable);
     container.appendChild(summaryWrapper);
 
-    const comparisonLayout = document.createElement("div");
-    comparisonLayout.className = "row g-4 align-items-start history-comparison-layout";
-    const statsColumn = document.createElement("div");
-    statsColumn.className = "col-12 col-xl-6 history-comparison-column";
-    const dropsColumn = document.createElement("div");
-    dropsColumn.className = "col-12 col-xl-6 history-comparison-column";
-
-    result.players.forEach((playerComparison) => {
-        statsColumn.appendChild(createSimulationHistoryPlayerComparison(playerComparison));
-    });
-
     const {
         sharedRows,
         differingRowsByPlayer,
     } = partitionSimulationHistoryDropComparisons(result.players);
     if (sharedRows.length > 0) {
-        dropsColumn.appendChild(createSimulationHistoryDropComparison(
+        const sharedDrops = createSimulationHistoryDropComparison(
             { ...result.players[0], drops: sharedRows },
             result.players.map(getSimulationHistoryComparisonPlayerName),
-        ));
+        );
+        sharedDrops.classList.add("history-shared-drops");
+        container.appendChild(sharedDrops);
     }
-    result.players.forEach((playerComparison, index) => {
-        const differingRows = differingRowsByPlayer[index] ?? [];
-        if (differingRows.length > 0) {
-            dropsColumn.appendChild(createSimulationHistoryDropComparison(
-                { ...playerComparison, drops: differingRows },
-                [],
-                sharedRows.length > 0,
-            ));
-        }
-    });
 
-    comparisonLayout.append(statsColumn, dropsColumn);
-    container.appendChild(comparisonLayout);
+    container.appendChild(createSimulationHistoryPlayerTabs(
+        result.players,
+        getSimulationHistoryComparisonPlayerTabLabel,
+        (playerComparison, index) => {
+            const comparisonLayout = document.createElement("div");
+            comparisonLayout.className = "row g-4 align-items-start history-comparison-layout";
+            const differingRows = differingRowsByPlayer[index] ?? [];
+            const hasPlayerDrops = differingRows.length > 0;
+
+            const statsColumn = document.createElement("div");
+            statsColumn.className = hasPlayerDrops
+                ? "col-12 col-xl-6 history-comparison-column"
+                : "col-12 history-comparison-column";
+            statsColumn.appendChild(createSimulationHistoryPlayerComparison(playerComparison));
+            comparisonLayout.appendChild(statsColumn);
+
+            if (hasPlayerDrops) {
+                const dropsColumn = document.createElement("div");
+                dropsColumn.className = "col-12 col-xl-6 history-comparison-column";
+                dropsColumn.appendChild(createSimulationHistoryDropComparison(
+                    { ...playerComparison, drops: differingRows },
+                    [],
+                    sharedRows.length > 0,
+                ));
+                comparisonLayout.appendChild(dropsColumn);
+            }
+            return comparisonLayout;
+        },
+    ));
+
     container.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
