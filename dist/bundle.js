@@ -2277,9 +2277,10 @@ function getGuildCombatShrineBoosts(typeHrid, levels = {}) {
 __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   PLAYER_FORMATION_SLOTS: () => (/* binding */ PLAYER_FORMATION_SLOTS),
-/* harmony export */   mergeSelectedPlayerFormation: () => (/* binding */ mergeSelectedPlayerFormation),
+/* harmony export */   createFixedPlayerSlotAssignments: () => (/* binding */ createFixedPlayerSlotAssignments),
 /* harmony export */   normalizePlayerFormation: () => (/* binding */ normalizePlayerFormation),
-/* harmony export */   orderSelectedPlayerSlots: () => (/* binding */ orderSelectedPlayerSlots)
+/* harmony export */   orderSelectedPlayerSlots: () => (/* binding */ orderSelectedPlayerSlots),
+/* harmony export */   remapPlayerSlotValues: () => (/* binding */ remapPlayerSlotValues)
 /* harmony export */ });
 const PLAYER_FORMATION_SLOTS = Object.freeze(["1", "2", "3", "4", "5"]);
 
@@ -2311,10 +2312,32 @@ function orderSelectedPlayerSlots(formation, selectedSlots) {
     return normalizePlayerFormation(formation).filter((slot) => selected.has(slot));
 }
 
-function mergeSelectedPlayerFormation(selectedSlots, currentFormation) {
-    const selected = normalizeSlotList(selectedSlots, PLAYER_FORMATION_SLOTS);
-    const current = normalizePlayerFormation(currentFormation);
-    return [...selected, ...current.filter((slot) => !selected.includes(slot))];
+function remapPlayerSlotValues(
+    valuesBySlot,
+    sourceOrder,
+    availableSlots = PLAYER_FORMATION_SLOTS,
+) {
+    const slots = [...availableSlots].map(String);
+    const normalizedSourceOrder = normalizePlayerFormation(sourceOrder, slots);
+    return Object.fromEntries(slots.map((destinationSlot, index) => [
+        destinationSlot,
+        valuesBySlot?.[normalizedSourceOrder[index]],
+    ]));
+}
+
+function createFixedPlayerSlotAssignments(
+    sourceSlots,
+    availableSlots = PLAYER_FORMATION_SLOTS,
+) {
+    const slots = [...availableSlots].map(String);
+    const sources = normalizeSlotList(sourceSlots, slots);
+    const destinations = [...sources].sort(
+        (left, right) => slots.indexOf(left) - slots.indexOf(right),
+    );
+    return destinations.map((destinationSlot, index) => ({
+        destinationSlot,
+        sourceSlot: sources[index],
+    }));
 }
 
 
@@ -3365,13 +3388,57 @@ function compareAchievementChanges(baseline, current, changes) {
     }
 }
 
-function getCharacterIdentity(playerData) {
+function getCharacterIdentity(playerData, fallbackName = "") {
     const id = playerData?.characterId ?? playerData?.characterMeta?.id;
-    const name = playerData?.characterName ?? playerData?.characterMeta?.name;
+    const serializedName = playerData?.characterName ?? playerData?.characterMeta?.name;
+    const name = typeof serializedName === "string" && serializedName.trim()
+        ? serializedName
+        : fallbackName;
     return {
         id: id === undefined || id === null ? "" : String(id),
         name: typeof name === "string" ? name.trim() : "",
     };
+}
+
+function findMatchingCurrentPlayerIndex(baselineEntry, currentEntries, usedCurrentIndexes) {
+    const baselineIdentity = baselineEntry.identity;
+    if (baselineIdentity.id) {
+        const idMatchIndex = currentEntries.findIndex((currentEntry, index) =>
+            !usedCurrentIndexes.has(index) &&
+            currentEntry.identity.id &&
+            currentEntry.identity.id === baselineIdentity.id
+        );
+        if (idMatchIndex >= 0) {
+            return idMatchIndex;
+        }
+    }
+
+    const normalizedBaselineName = baselineIdentity.name.toLocaleLowerCase();
+    if (normalizedBaselineName) {
+        const nameMatchIndex = currentEntries.findIndex((currentEntry, index) => {
+            if (usedCurrentIndexes.has(index)) {
+                return false;
+            }
+            if (
+                baselineIdentity.id &&
+                currentEntry.identity.id &&
+                baselineIdentity.id !== currentEntry.identity.id
+            ) {
+                return false;
+            }
+            return currentEntry.identity.name.toLocaleLowerCase() === normalizedBaselineName;
+        });
+        if (nameMatchIndex >= 0) {
+            return nameMatchIndex;
+        }
+    }
+
+    if (!baselineIdentity.id && !baselineIdentity.name) {
+        return currentEntries.findIndex((currentEntry, index) =>
+            !usedCurrentIndexes.has(index) && currentEntry.slot === baselineEntry.slot
+        );
+    }
+    return -1;
 }
 
 function comparePlayerLoadouts(baseline, current) {
@@ -3401,41 +3468,84 @@ function comparePlayerLoadouts(baseline, current) {
     return changes;
 }
 
-function compareTeamPresetWithCurrent(preset, currentPlayerDataMap, currentSelectedPlayers) {
+function compareTeamPresetWithCurrent(
+    preset,
+    currentPlayerDataMap,
+    currentSelectedPlayers,
+    currentPlayerNames = {},
+) {
     if (!isPlainObject(preset) || !isPlainObject(preset.playerDataMap)) {
         throw new TypeError("A valid team preset is required.");
     }
 
     const baselineSlots = normalizePlayerSlots(preset.selectedPlayers);
     const currentSlots = normalizePlayerSlots(currentSelectedPlayers);
-    const allSlots = [...new Set([...baselineSlots, ...currentSlots])]
-        .sort((left, right) => Number(left) - Number(right));
+    const baselineEntries = baselineSlots.map((slot) => {
+        const data = parsePlayerData(preset.playerDataMap[slot], slot);
+        return {
+            slot,
+            data,
+            identity: getCharacterIdentity(data, preset.playerNames?.[slot]),
+        };
+    });
+    const currentEntries = currentSlots.map((slot) => {
+        const data = parsePlayerData(currentPlayerDataMap?.[slot], slot);
+        return {
+            slot,
+            data,
+            identity: getCharacterIdentity(data, currentPlayerNames?.[slot]),
+        };
+    });
+    const usedCurrentIndexes = new Set();
     const players = [];
 
-    for (const slot of allSlots) {
-        const isInBaseline = baselineSlots.includes(slot);
-        const isInCurrent = currentSlots.includes(slot);
-        const baselineData = isInBaseline
-            ? parsePlayerData(preset.playerDataMap[slot], slot)
-            : null;
-        const currentData = isInCurrent
-            ? parsePlayerData(currentPlayerDataMap?.[slot], slot)
-            : null;
-        let status;
-        let changes;
-
-        if (!isInBaseline) {
-            status = "added";
-            changes = [{ kind: "membership", section: "team", before: false, after: true }];
-        } else if (!isInCurrent) {
-            status = "removed";
-            changes = [{ kind: "membership", section: "team", before: true, after: false }];
-        } else {
-            changes = comparePlayerLoadouts(baselineData, currentData);
-            status = changes.length > 0 ? "changed" : "unchanged";
+    for (const baselineEntry of baselineEntries) {
+        const currentIndex = findMatchingCurrentPlayerIndex(
+            baselineEntry,
+            currentEntries,
+            usedCurrentIndexes,
+        );
+        if (currentIndex < 0) {
+            players.push({
+                slot: baselineEntry.slot,
+                baselineSlot: baselineEntry.slot,
+                currentSlot: null,
+                status: "removed",
+                baselineData: baselineEntry.data,
+                currentData: null,
+                changes: [{ kind: "membership", section: "team", before: true, after: false }],
+            });
+            continue;
         }
 
-        players.push({ slot, status, baselineData, currentData, changes });
+        usedCurrentIndexes.add(currentIndex);
+        const currentEntry = currentEntries[currentIndex];
+        const changes = comparePlayerLoadouts(baselineEntry.data, currentEntry.data);
+        players.push({
+            slot: currentEntry.slot,
+            baselineSlot: baselineEntry.slot,
+            currentSlot: currentEntry.slot,
+            status: changes.length > 0 ? "changed" : "unchanged",
+            baselineData: baselineEntry.data,
+            currentData: currentEntry.data,
+            changes,
+        });
+    }
+
+    for (let index = 0; index < currentEntries.length; index += 1) {
+        if (usedCurrentIndexes.has(index)) {
+            continue;
+        }
+        const currentEntry = currentEntries[index];
+        players.push({
+            slot: currentEntry.slot,
+            baselineSlot: null,
+            currentSlot: currentEntry.slot,
+            status: "added",
+            baselineData: null,
+            currentData: currentEntry.data,
+            changes: [{ kind: "membership", section: "team", before: false, after: true }],
+        });
     }
 
     return {
@@ -3585,7 +3695,7 @@ function createTeamPresetId() {
   \************************/
 /***/ ((module) => {
 
-module.exports = /*#__PURE__*/JSON.parse('{"2026年9月11日":["优化历史掉落数量显示：小数按数值范围保留精度，大额数量取整，超过10万的金币使用M缩写","提高黑暗模式下历史比较增减数值的绿色与红色亮度"],"2026年9月10日":["模拟历史比较改为左右分栏，战斗指标与资源消耗在左、期望掉落在右","历史比较中的期望掉落改为24小时产量，并优先显示金币、钥匙碎片、护符和精华","全队共同掉落只显示一份，角色间确有差异的掉落单独列出","历史比较中的掉落数量达到1时最多显示两位小数，小于1时保留更多精度"],"2026年8月29日":["玩家标签支持拖动调整队伍站位，贯穿攻击会按标签从左到右的顺序处理","玩家站位会保存在当前浏览器中，并在加载队伍预设时恢复","新增按地图自动保存的模拟历史，不同难度记录会归入同一地图","模拟历史支持查看全队每名角色的主要指标、消耗品与期望掉落","支持选择同地图两条历史记录，按角色比较战斗表现与资源变化"],"2026年8月28日":["支持从私有配装数据导入每名角色实际生效的公会神龛战斗增益","房屋面板新增五种公会战斗神龛等级显示与模拟调整","逐怪物伤害与承伤明细改为默认折叠显示","钥匙碎片时间成本移至期望掉落上方，并新增每日碎片产量","钥匙碎片总耗时支持使用角色专业等级及游戏当前生效的专业增益精确计算","房屋面板改为房屋与公会神龛左右分栏显示","移除价格设置、市场价格获取与期望利润相关功能"],"2026年5月5日":["更新装备数据和本地化名称"],"2026年4月7日":["增加字段显示迷宫尝试次数和迷宫成功率"],"2026年3月5日":["优化狂怒相关的模拟性能"],"2026年3月3日":["支持迷宫封印对应的个人增益"],"2026年2月24日":["更新迷宫补丁的数据","新增支持迷宫单体/批量模拟"],"2026年2月1日":["修正战斗等级计算的精度","修正地下城完成或失败后重新进入战斗的时间间隔 by wangchyan","修正诅咒和削弱的持续时间 by wangchyan","修正诅咒和狂怒的触发逻辑 by wangchyan","修正地下城团灭重置机制的部分逻辑 by wangchyan","修复守护光环和速度光环部分增益未正确受对应等级加强的异常 by wangchyan","修复无敌技能未正确影响韧性数值的缺陷 by wangchyan","修复初次进入战斗时未能优先吃喝的异常 by wangchyan","战斗时长相关的统计现在仅计算已完成的战斗，不再包含当前未结束的战斗 by wangchyan"],"2026年1月11日":["修复trigger错误计算已阵亡单位的问题 by wangchyan"],"2025年12月31日":["实验性功能新增HP/MP可视化图表 by wangchyan","修复防御伤害未正确受damge加成的异常 by wangchyan","修复守护光环的治疗加成效果未生效的异常 by wangchyan","修复快速治疗等技能未正确选择最低%生命为目标的错误 by wangchyan"],"2025年12月30日":["地下城增加最短完成时间记录"],"2025年12月24日":["修复技能释放选择的缺陷，之前可能存在异常缺蓝等情况"],"2025年12月18日":["支持成就系统及对应buff效果","地下城怪物的掉落不再生效"],"2025年12月6日":["修复游戏更新后技能在无trigger情况下由[]变为null时造成的异常"],"2025年11月7日":["兼容支持从CN镜像站调用API获取价格"],"2025年10月14日":["修复怪物攻击间隔数值未能适配攻击等级的问题"],"2025年9月17日":["修复暴击光环的trigger缺陷"],"2025年9月9日":["复活时不再错误的清空所有buff","团灭日志增加反伤、荆棘和DOT伤害记录"],"2025年8月21日":["增加单挑战斗批量模拟和对应怪物选项","增加MooPass和社区buff的选项及对应功能","精炼装备数值加强","秘法主教属性削弱","init_client_info_v1.20250819.0.json游戏数据更新"],"2025年8月20日":["修复经验和掉落计算在极端情况下的可能异常"],"2025年8月19日":["合并Test和Temp分支的rework内容","init_client_info_v1.20250818.0.json游戏数据更新"],"2025年8月18日":["修复贯穿技能可能对相同目标造成重复伤害的问题","修复团灭日志在黑夜模式下的显示异常","战斗等级公式更新","钟乳石魔像的荆棘数值调整","init_client_info_v1.20250626.0_0817.json游戏数据更新"],"2025年8月16日":["增加停止模拟按钮 by BKN46","增加技能顺序调整按钮 by BKN46","增加团灭日志 by TruthLight","怪物属性更新","奥术反射更名为报应","init_client_info_v1.20250626.0_0815.json游戏数据更新"],"2025年8月14日":["怪物属性更新","远程和法师装备属性调整","反伤计算上限调整","修复战斗间隔释放技能的异常","修复技能释放判断逻辑的异常","法力值耗尽比例更加准确","调整远程经验的15%和魔法经验的12%映射到攻击经验","init_client_info_v1.20250626.0_0813.json游戏数据更新"],"2025年8月11日":["怪物属性更新","近战和物理技能施法时间更新","盾击和重锤数值调整","双手盾防御经验加成调整","init_client_info_v1.20250626.0_0811.json游戏数据更新"],"2025年8月8日":["实现组队等级差过大时对掉落和经验的惩罚","实现怪物经验随狂暴进度百分比增加","暴击光环数值调整","增加战斗等级数值显示","增加等级差距惩罚数值显示","init_client_info_v1.20250626.0_0807.json游戏数据更新"],"2025年8月7日":["修复组队战斗时一些重复物品掉落数量异常的缺陷 by contr4l","init_client_info_v1.20250626.0_0806.json游戏数据更新"],"2025年8月3日":["怪物狂暴机制及对应trigger生效","精炼装备更新，护符数值调整，守护光环增加闪避率","init_client_info_v1.20250626.0_0802.json游戏数据更新","狂怒层数修正为5层","招架结算机制调整"],"2025年7月31日":["物品数据和怪物属性更新","尖刺外壳和奥术反射重做","强化数值更新","删除异常trigger","狮鹫盾的虚弱重做","君王剑招架对队友生效","狂怒特效最大层数修正为6层","涟漪特效增加10MP恢复","反伤正确显示其命中率","反伤机制调整","同步双手盾属性和反伤荆棘技能数值的调整"],"2025年7月22日":["暴击光环受远程等级加成","光环基础数值和等级加成调整"],"2025年7月17日":["批量模拟支持勾选星球","经验分配比例调整至30%+70%","光环及对应trigger，并按对应技能等级百分比加成","水火自然默认调整为元素光环","init_client_info_v1.20250626.0_0717.json游戏数据更新"],"2025年7月11日":["怪物经验和技能等级公式更新","闪避和抗性计算公式更新","力量更替为近战以及对应的兼容","init_client_info_v1.20250626.0_0711.json游戏数据更新"],"2025年7月10日":["修复贯穿技能由敌人释放时可能多次击中相同目标的缺陷"],"2025年7月9日":["掉落和掉率调整","经验调整","疫病射击和破甲之刺调整","怪物自动恢复移除","疫病射击trigger调整","获取价格使用官方API"],"2025年7月7日":["怪物属性缩放和地图多难度","法师技能调整和装备上\'技能伤害\'词缀生效","攻击等级和房屋等级对施法速度的影响生效","物品调整","精准重做以攻击等级计算","TEST 远程魔法经验的10%映射到攻击经验！","经验重做和护符装备"]}');
+module.exports = /*#__PURE__*/JSON.parse('{"2026年9月15日":["调整站位时保持玩家1至玩家5槽位固定，仅在槽位之间移动角色与完整配装数据","配装比对改为按角色身份匹配，单纯交换站位不再被识别为整套配装变化","加载旧队伍预设时自动将原站位顺序转换到固定槽位"],"2026年9月11日":["优化历史掉落数量显示：小数按数值范围保留精度，大额数量取整，超过10万的金币使用M缩写","提高黑暗模式下历史比较增减数值的绿色与红色亮度"],"2026年9月10日":["模拟历史比较改为左右分栏，战斗指标与资源消耗在左、期望掉落在右","历史比较中的期望掉落改为24小时产量，并优先显示金币、钥匙碎片、护符和精华","全队共同掉落只显示一份，角色间确有差异的掉落单独列出","历史比较中的掉落数量达到1时最多显示两位小数，小于1时保留更多精度"],"2026年8月29日":["玩家标签支持拖动调整队伍站位，贯穿攻击会按标签从左到右的顺序处理","玩家站位会保存在当前浏览器中，并在加载队伍预设时恢复","新增按地图自动保存的模拟历史，不同难度记录会归入同一地图","模拟历史支持查看全队每名角色的主要指标、消耗品与期望掉落","支持选择同地图两条历史记录，按角色比较战斗表现与资源变化"],"2026年8月28日":["支持从私有配装数据导入每名角色实际生效的公会神龛战斗增益","房屋面板新增五种公会战斗神龛等级显示与模拟调整","逐怪物伤害与承伤明细改为默认折叠显示","钥匙碎片时间成本移至期望掉落上方，并新增每日碎片产量","钥匙碎片总耗时支持使用角色专业等级及游戏当前生效的专业增益精确计算","房屋面板改为房屋与公会神龛左右分栏显示","移除价格设置、市场价格获取与期望利润相关功能"],"2026年5月5日":["更新装备数据和本地化名称"],"2026年4月7日":["增加字段显示迷宫尝试次数和迷宫成功率"],"2026年3月5日":["优化狂怒相关的模拟性能"],"2026年3月3日":["支持迷宫封印对应的个人增益"],"2026年2月24日":["更新迷宫补丁的数据","新增支持迷宫单体/批量模拟"],"2026年2月1日":["修正战斗等级计算的精度","修正地下城完成或失败后重新进入战斗的时间间隔 by wangchyan","修正诅咒和削弱的持续时间 by wangchyan","修正诅咒和狂怒的触发逻辑 by wangchyan","修正地下城团灭重置机制的部分逻辑 by wangchyan","修复守护光环和速度光环部分增益未正确受对应等级加强的异常 by wangchyan","修复无敌技能未正确影响韧性数值的缺陷 by wangchyan","修复初次进入战斗时未能优先吃喝的异常 by wangchyan","战斗时长相关的统计现在仅计算已完成的战斗，不再包含当前未结束的战斗 by wangchyan"],"2026年1月11日":["修复trigger错误计算已阵亡单位的问题 by wangchyan"],"2025年12月31日":["实验性功能新增HP/MP可视化图表 by wangchyan","修复防御伤害未正确受damge加成的异常 by wangchyan","修复守护光环的治疗加成效果未生效的异常 by wangchyan","修复快速治疗等技能未正确选择最低%生命为目标的错误 by wangchyan"],"2025年12月30日":["地下城增加最短完成时间记录"],"2025年12月24日":["修复技能释放选择的缺陷，之前可能存在异常缺蓝等情况"],"2025年12月18日":["支持成就系统及对应buff效果","地下城怪物的掉落不再生效"],"2025年12月6日":["修复游戏更新后技能在无trigger情况下由[]变为null时造成的异常"],"2025年11月7日":["兼容支持从CN镜像站调用API获取价格"],"2025年10月14日":["修复怪物攻击间隔数值未能适配攻击等级的问题"],"2025年9月17日":["修复暴击光环的trigger缺陷"],"2025年9月9日":["复活时不再错误的清空所有buff","团灭日志增加反伤、荆棘和DOT伤害记录"],"2025年8月21日":["增加单挑战斗批量模拟和对应怪物选项","增加MooPass和社区buff的选项及对应功能","精炼装备数值加强","秘法主教属性削弱","init_client_info_v1.20250819.0.json游戏数据更新"],"2025年8月20日":["修复经验和掉落计算在极端情况下的可能异常"],"2025年8月19日":["合并Test和Temp分支的rework内容","init_client_info_v1.20250818.0.json游戏数据更新"],"2025年8月18日":["修复贯穿技能可能对相同目标造成重复伤害的问题","修复团灭日志在黑夜模式下的显示异常","战斗等级公式更新","钟乳石魔像的荆棘数值调整","init_client_info_v1.20250626.0_0817.json游戏数据更新"],"2025年8月16日":["增加停止模拟按钮 by BKN46","增加技能顺序调整按钮 by BKN46","增加团灭日志 by TruthLight","怪物属性更新","奥术反射更名为报应","init_client_info_v1.20250626.0_0815.json游戏数据更新"],"2025年8月14日":["怪物属性更新","远程和法师装备属性调整","反伤计算上限调整","修复战斗间隔释放技能的异常","修复技能释放判断逻辑的异常","法力值耗尽比例更加准确","调整远程经验的15%和魔法经验的12%映射到攻击经验","init_client_info_v1.20250626.0_0813.json游戏数据更新"],"2025年8月11日":["怪物属性更新","近战和物理技能施法时间更新","盾击和重锤数值调整","双手盾防御经验加成调整","init_client_info_v1.20250626.0_0811.json游戏数据更新"],"2025年8月8日":["实现组队等级差过大时对掉落和经验的惩罚","实现怪物经验随狂暴进度百分比增加","暴击光环数值调整","增加战斗等级数值显示","增加等级差距惩罚数值显示","init_client_info_v1.20250626.0_0807.json游戏数据更新"],"2025年8月7日":["修复组队战斗时一些重复物品掉落数量异常的缺陷 by contr4l","init_client_info_v1.20250626.0_0806.json游戏数据更新"],"2025年8月3日":["怪物狂暴机制及对应trigger生效","精炼装备更新，护符数值调整，守护光环增加闪避率","init_client_info_v1.20250626.0_0802.json游戏数据更新","狂怒层数修正为5层","招架结算机制调整"],"2025年7月31日":["物品数据和怪物属性更新","尖刺外壳和奥术反射重做","强化数值更新","删除异常trigger","狮鹫盾的虚弱重做","君王剑招架对队友生效","狂怒特效最大层数修正为6层","涟漪特效增加10MP恢复","反伤正确显示其命中率","反伤机制调整","同步双手盾属性和反伤荆棘技能数值的调整"],"2025年7月22日":["暴击光环受远程等级加成","光环基础数值和等级加成调整"],"2025年7月17日":["批量模拟支持勾选星球","经验分配比例调整至30%+70%","光环及对应trigger，并按对应技能等级百分比加成","水火自然默认调整为元素光环","init_client_info_v1.20250626.0_0717.json游戏数据更新"],"2025年7月11日":["怪物经验和技能等级公式更新","闪避和抗性计算公式更新","力量更替为近战以及对应的兼容","init_client_info_v1.20250626.0_0711.json游戏数据更新"],"2025年7月10日":["修复贯穿技能由敌人释放时可能多次击中相同目标的缺陷"],"2025年7月9日":["掉落和掉率调整","经验调整","疫病射击和破甲之刺调整","怪物自动恢复移除","疫病射击trigger调整","获取价格使用官方API"],"2025年7月7日":["怪物属性缩放和地图多难度","法师技能调整和装备上\'技能伤害\'词缀生效","攻击等级和房屋等级对施法速度的影响生效","物品调整","精准重做以攻击等级计算","TEST 远程魔法经验的10%映射到攻击经验！","经验重做和护符装备"]}');
 
 /***/ }),
 
@@ -3919,7 +4029,6 @@ __webpack_require__.r(__webpack_exports__);
 
 const ONE_SECOND = 1e9;
 const ONE_HOUR = 60 * 60 * ONE_SECOND;
-const PLAYER_FORMATION_STORAGE_KEY = "mwiCombatSimulatorPlayerFormation_v1";
 
 let buttonStartSimulation = document.getElementById("buttonStartSimulation");
 let buttonStopSimulation = document.getElementById("buttonStopSimulation");
@@ -7799,29 +7908,6 @@ function getPlayerFormationOrder() {
     return (0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_24__.normalizePlayerFormation)(visibleOrder);
 }
 
-function loadPlayerFormationOrder() {
-    try {
-        const storedFormation = JSON.parse(
-            window.localStorage.getItem(PLAYER_FORMATION_STORAGE_KEY) || "null",
-        );
-        return (0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_24__.normalizePlayerFormation)(storedFormation);
-    } catch (error) {
-        console.warn("Unable to load the saved player formation.", error);
-        return (0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_24__.normalizePlayerFormation)([]);
-    }
-}
-
-function savePlayerFormationOrder(formation) {
-    try {
-        window.localStorage.setItem(
-            PLAYER_FORMATION_STORAGE_KEY,
-            JSON.stringify((0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_24__.normalizePlayerFormation)(formation)),
-        );
-    } catch (error) {
-        console.warn("Unable to save the player formation.", error);
-    }
-}
-
 function syncPlayerCheckboxOrder(formation) {
     const playerContainer = document.getElementById("playerCheckBox");
     if (!playerContainer) {
@@ -7836,27 +7922,68 @@ function syncPlayerCheckboxOrder(formation) {
     }
 }
 
-function applyPlayerFormationOrder(formation, { persist = true } = {}) {
-    const normalizedFormation = (0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_24__.normalizePlayerFormation)(formation);
+function restoreFixedPlayerSlotOrder() {
+    const fixedSlotOrder = (0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_24__.normalizePlayerFormation)([]);
     const playerTab = document.getElementById("playerTab");
     if (!playerTab) {
-        return normalizedFormation;
+        return fixedSlotOrder;
     }
 
-    for (const slot of normalizedFormation) {
+    for (const slot of fixedSlotOrder) {
         const tabItem = document.getElementById(`player${slot}-tab`)?.closest(".nav-item");
         if (tabItem) {
             playerTab.appendChild(tabItem);
         }
     }
 
-    playerTab.dataset.playerFormation = normalizedFormation.join(",");
-    syncPlayerCheckboxOrder(normalizedFormation);
+    playerTab.dataset.playerFormation = fixedSlotOrder.join(",");
+    syncPlayerCheckboxOrder(fixedSlotOrder);
     updateTeamPresetPlayerLabels();
-    if (persist) {
-        savePlayerFormationOrder(normalizedFormation);
+    return fixedSlotOrder;
+}
+
+function normalizeRemappedPlayerLabel(label, destinationSlot) {
+    const normalizedLabel = typeof label === "string" ? label.trim() : "";
+    if (!normalizedLabel || /^Player\s+[1-5]$/i.test(normalizedLabel)) {
+        return `Player ${destinationSlot}`;
     }
-    return normalizedFormation;
+    return normalizedLabel;
+}
+
+function movePlayerLoadoutsToFixedSlots(sourceOrder) {
+    const fixedSlotOrder = (0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_24__.normalizePlayerFormation)([]);
+    const normalizedSourceOrder = (0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_24__.normalizePlayerFormation)(sourceOrder);
+    const formationChanged = normalizedSourceOrder.some(
+        (slot, index) => slot !== fixedSlotOrder[index],
+    );
+    if (!formationChanged) {
+        restoreFixedPlayerSlotOrder();
+        return;
+    }
+
+    savePreviousPlayer(currentPlayerTabId);
+    const playerLabels = Object.fromEntries(fixedSlotOrder.map((slot) => [
+        slot,
+        document.getElementById(`player${slot}-tab`)?.textContent?.trim() || "",
+    ]));
+    const remappedPlayerData = (0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_24__.remapPlayerSlotValues)(playerDataMap, normalizedSourceOrder);
+    const remappedPlayerLabels = (0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_24__.remapPlayerSlotValues)(playerLabels, normalizedSourceOrder);
+
+    for (const destinationSlot of fixedSlotOrder) {
+        playerDataMap[destinationSlot] = remappedPlayerData[destinationSlot];
+        const tab = document.getElementById(`player${destinationSlot}-tab`);
+        if (tab) {
+            tab.textContent = normalizeRemappedPlayerLabel(
+                remappedPlayerLabels[destinationSlot],
+                destinationSlot,
+            );
+        }
+    }
+
+    restoreFixedPlayerSlotOrder();
+    updateNextPlayer(currentPlayerTabId);
+    updateState();
+    updateUI();
 }
 
 function initPlayerTabReordering() {
@@ -7865,11 +7992,11 @@ function initPlayerTabReordering() {
         return;
     }
 
-    applyPlayerFormationOrder(loadPlayerFormationOrder(), { persist: false });
+    restoreFixedPlayerSlotOrder();
     let draggedTabItem = null;
 
     const commitFormation = () => {
-        applyPlayerFormationOrder(getPlayerFormationOrder());
+        movePlayerLoadoutsToFixedSlots(getPlayerFormationOrder());
     };
     const finishDragging = () => {
         if (!draggedTabItem) {
@@ -7931,7 +8058,7 @@ function initPlayerTabReordering() {
         dragHandle.type = "button";
         dragHandle.className = "player-tab-drag-handle";
         dragHandle.textContent = "↔";
-        dragHandle.title = "Drag to change formation / 拖动调整站位";
+        dragHandle.title = "Drag loadout to change formation / 拖动配装调整站位";
         dragHandle.setAttribute("aria-label", dragHandle.title);
         dragHandle.addEventListener("click", (event) => {
             event.preventDefault();
@@ -8074,7 +8201,7 @@ function initSimulationControls() {
         const checkedPlayerSlots = [...document.querySelectorAll('.player-checkbox:checked')]
             .map((checkbox) => checkbox.id.replace('player', ''));
         selectedPlayers = (0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_24__.orderSelectedPlayerSlots)(
-            getPlayerFormationOrder(),
+            [],
             checkedPlayerSlots,
         ).map(Number);
 
@@ -10010,12 +10137,17 @@ function loadTeamPreset(presetId) {
         return;
     }
 
+    const slotAssignments = (0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_24__.createFixedPlayerSlotAssignments)(preset.selectedPlayers);
     const validatedPlayerData = {};
+    const validatedPlayerNames = {};
     try {
-        for (const playerNumber of preset.selectedPlayers) {
-            const playerImportData = preset.playerDataMap[playerNumber];
-            JSON.parse(playerImportData);
-            validatedPlayerData[playerNumber] = playerImportData;
+        for (const { sourceSlot } of slotAssignments) {
+            const playerImportData = preset.playerDataMap[sourceSlot];
+            const parsedPlayerData = JSON.parse(playerImportData);
+            validatedPlayerData[sourceSlot] = playerImportData;
+            validatedPlayerNames[sourceSlot] = normalizeTeamPresetNamePart(
+                parsedPlayerData.characterName || parsedPlayerData.characterMeta?.name,
+            );
         }
     } catch (error) {
         console.error("Invalid player data while loading a team preset.", error);
@@ -10027,28 +10159,28 @@ function loadTeamPreset(presetId) {
     }
 
     savePreviousPlayer(currentPlayerTabId);
-    for (const playerNumber of preset.selectedPlayers) {
-        playerDataMap[playerNumber] = validatedPlayerData[playerNumber];
+    for (const { sourceSlot, destinationSlot } of slotAssignments) {
+        playerDataMap[destinationSlot] = validatedPlayerData[sourceSlot];
 
-        const tab = document.getElementById(`player${playerNumber}-tab`);
+        const tab = document.getElementById(`player${destinationSlot}-tab`);
         if (tab) {
-            tab.textContent = preset.playerNames[playerNumber] || `Player ${playerNumber}`;
+            tab.textContent = preset.playerNames?.[sourceSlot]
+                || validatedPlayerNames[sourceSlot]
+                || `Player ${destinationSlot}`;
         }
     }
 
-    applyPlayerFormationOrder((0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_24__.mergeSelectedPlayerFormation)(
-        preset.selectedPlayers,
-        getPlayerFormationOrder(),
-    ));
+    restoreFixedPlayerSlotOrder();
+    const selectedFixedSlots = slotAssignments.map(({ destinationSlot }) => destinationSlot);
 
     document.querySelectorAll(".player-checkbox").forEach((checkbox) => {
-        checkbox.checked = preset.selectedPlayers.includes(checkbox.id.replace("player", ""));
+        checkbox.checked = selectedFixedSlots.includes(checkbox.id.replace("player", ""));
     });
     updateTeamPresetPlayerLabels();
 
-    const playerToShow = preset.selectedPlayers.includes(currentPlayerTabId)
+    const playerToShow = selectedFixedSlots.includes(currentPlayerTabId)
         ? currentPlayerTabId
-        : preset.selectedPlayers[0];
+        : selectedFixedSlots[0];
     if (playerToShow === currentPlayerTabId) {
         updateNextPlayer(currentPlayerTabId);
         updateState();
@@ -10339,6 +10471,13 @@ function getCurrentComparisonPlayerSlots(preset) {
         .filter((checkbox) => checkbox.closest(".form-check")?.style.display !== "none")
         .map((checkbox) => checkbox.id.replace("player", ""));
     return checkedPlayerSlots.length > 0 ? checkedPlayerSlots : preset.selectedPlayers;
+}
+
+function getCurrentComparisonPlayerNames() {
+    return Object.fromEntries((0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_24__.normalizePlayerFormation)([]).map((slot) => [
+        slot,
+        document.getElementById(`player${slot}-tab`)?.textContent?.trim() || "",
+    ]));
 }
 
 function createPrivateLoadoutBaselineRequestId() {
@@ -10633,23 +10772,50 @@ function resolveTeamComparisonItemLabel(change) {
     }
 }
 
+function getTeamComparisonBaselineSlot(playerComparison) {
+    return playerComparison.baselineSlot
+        || (playerComparison.baselineData ? playerComparison.slot : null);
+}
+
+function getTeamComparisonCurrentSlot(playerComparison) {
+    return playerComparison.currentSlot
+        || (playerComparison.currentData ? playerComparison.slot : null);
+}
+
+function formatTeamComparisonPlayerSlot(playerComparison) {
+    const baselineSlot = getTeamComparisonBaselineSlot(playerComparison);
+    const currentSlot = getTeamComparisonCurrentSlot(playerComparison);
+    const formatSlot = (slot) => getTeamComparisonText(
+        "slot",
+        "Slot {{slot}}",
+        { slot },
+    );
+    if (baselineSlot && currentSlot && baselineSlot !== currentSlot) {
+        return `${formatSlot(baselineSlot)} → ${formatSlot(currentSlot)}`;
+    }
+    return formatSlot(currentSlot || baselineSlot || playerComparison.slot);
+}
+
 function getTeamComparisonCharacterName(playerComparison, preset, side) {
     const isBaseline = side === "baseline";
     const playerData = isBaseline ? playerComparison.baselineData : playerComparison.currentData;
+    const comparisonSlot = isBaseline
+        ? getTeamComparisonBaselineSlot(playerComparison)
+        : getTeamComparisonCurrentSlot(playerComparison);
     const serializedName = playerData?.characterName || playerData?.characterMeta?.name;
     if (typeof serializedName === "string" && serializedName.trim()) {
         return serializedName.trim();
     }
-    if (isBaseline && preset.playerNames?.[playerComparison.slot]) {
-        return preset.playerNames[playerComparison.slot];
+    if (isBaseline && preset.playerNames?.[comparisonSlot]) {
+        return preset.playerNames[comparisonSlot];
     }
-    if (!isBaseline) {
-        const tabName = document.getElementById(`player${playerComparison.slot}-tab`)?.textContent?.trim();
+    if (!isBaseline && comparisonSlot) {
+        const tabName = document.getElementById(`player${comparisonSlot}-tab`)?.textContent?.trim();
         if (tabName) {
             return tabName;
         }
     }
-    return `Player ${playerComparison.slot}`;
+    return `Player ${comparisonSlot || playerComparison.slot}`;
 }
 
 function appendTeamComparisonTableCell(row, tagName, text, className = "") {
@@ -10710,18 +10876,15 @@ function renderTeamPresetComparison(preset, comparison, resolution) {
         const cardHeader = document.createElement("div");
         cardHeader.className = "card-header d-flex flex-wrap justify-content-between align-items-center gap-2";
         const playerTitle = document.createElement("strong");
-        const slotLabel = getTeamComparisonText(
-            "slot",
-            "Slot {{slot}}",
-            { slot: playerComparison.slot },
-        );
+        const slotLabel = formatTeamComparisonPlayerSlot(playerComparison);
+        const baselineSlot = getTeamComparisonBaselineSlot(playerComparison);
         const baselineName = getTeamComparisonCharacterName(playerComparison, preset, "baseline");
         const currentName = getTeamComparisonCharacterName(playerComparison, preset, "current");
         const playerName = baselineName === currentName
             ? currentName
             : `${baselineName} → ${currentName}`;
         const baselineLoadoutName = playerComparison.baselineData?.loadoutName
-            || resolution.matchedSlots.find((match) => match.slot === playerComparison.slot)?.loadoutName
+            || resolution.matchedSlots.find((match) => match.slot === baselineSlot)?.loadoutName
             || "";
         playerTitle.textContent = baselineLoadoutName
             ? `${slotLabel} · ${playerName} · ${baselineLoadoutName}`
@@ -10767,7 +10930,7 @@ function renderTeamPresetComparison(preset, comparison, resolution) {
             appendTeamComparisonTableCell(
                 headingRow,
                 "th",
-                resolution.matchedSlots.some((match) => match.slot === playerComparison.slot)
+                resolution.matchedSlots.some((match) => match.slot === baselineSlot)
                     ? getTeamComparisonText("columns.gameLoadout", "Game loadout")
                     : getTeamComparisonText("columns.presetSnapshot", "Preset snapshot"),
             );
@@ -10868,6 +11031,7 @@ async function compareCurrentTeamToSelectedPreset() {
             resolution.baselinePreset,
             playerDataMap,
             getCurrentComparisonPlayerSlots(preset),
+            getCurrentComparisonPlayerNames(),
         );
         renderTeamPresetComparison(preset, comparison, resolution);
         setTeamPresetComparisonStatus(

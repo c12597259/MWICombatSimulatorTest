@@ -240,13 +240,57 @@ function compareAchievementChanges(baseline, current, changes) {
     }
 }
 
-function getCharacterIdentity(playerData) {
+function getCharacterIdentity(playerData, fallbackName = "") {
     const id = playerData?.characterId ?? playerData?.characterMeta?.id;
-    const name = playerData?.characterName ?? playerData?.characterMeta?.name;
+    const serializedName = playerData?.characterName ?? playerData?.characterMeta?.name;
+    const name = typeof serializedName === "string" && serializedName.trim()
+        ? serializedName
+        : fallbackName;
     return {
         id: id === undefined || id === null ? "" : String(id),
         name: typeof name === "string" ? name.trim() : "",
     };
+}
+
+function findMatchingCurrentPlayerIndex(baselineEntry, currentEntries, usedCurrentIndexes) {
+    const baselineIdentity = baselineEntry.identity;
+    if (baselineIdentity.id) {
+        const idMatchIndex = currentEntries.findIndex((currentEntry, index) =>
+            !usedCurrentIndexes.has(index) &&
+            currentEntry.identity.id &&
+            currentEntry.identity.id === baselineIdentity.id
+        );
+        if (idMatchIndex >= 0) {
+            return idMatchIndex;
+        }
+    }
+
+    const normalizedBaselineName = baselineIdentity.name.toLocaleLowerCase();
+    if (normalizedBaselineName) {
+        const nameMatchIndex = currentEntries.findIndex((currentEntry, index) => {
+            if (usedCurrentIndexes.has(index)) {
+                return false;
+            }
+            if (
+                baselineIdentity.id &&
+                currentEntry.identity.id &&
+                baselineIdentity.id !== currentEntry.identity.id
+            ) {
+                return false;
+            }
+            return currentEntry.identity.name.toLocaleLowerCase() === normalizedBaselineName;
+        });
+        if (nameMatchIndex >= 0) {
+            return nameMatchIndex;
+        }
+    }
+
+    if (!baselineIdentity.id && !baselineIdentity.name) {
+        return currentEntries.findIndex((currentEntry, index) =>
+            !usedCurrentIndexes.has(index) && currentEntry.slot === baselineEntry.slot
+        );
+    }
+    return -1;
 }
 
 export function comparePlayerLoadouts(baseline, current) {
@@ -276,41 +320,84 @@ export function comparePlayerLoadouts(baseline, current) {
     return changes;
 }
 
-export function compareTeamPresetWithCurrent(preset, currentPlayerDataMap, currentSelectedPlayers) {
+export function compareTeamPresetWithCurrent(
+    preset,
+    currentPlayerDataMap,
+    currentSelectedPlayers,
+    currentPlayerNames = {},
+) {
     if (!isPlainObject(preset) || !isPlainObject(preset.playerDataMap)) {
         throw new TypeError("A valid team preset is required.");
     }
 
     const baselineSlots = normalizePlayerSlots(preset.selectedPlayers);
     const currentSlots = normalizePlayerSlots(currentSelectedPlayers);
-    const allSlots = [...new Set([...baselineSlots, ...currentSlots])]
-        .sort((left, right) => Number(left) - Number(right));
+    const baselineEntries = baselineSlots.map((slot) => {
+        const data = parsePlayerData(preset.playerDataMap[slot], slot);
+        return {
+            slot,
+            data,
+            identity: getCharacterIdentity(data, preset.playerNames?.[slot]),
+        };
+    });
+    const currentEntries = currentSlots.map((slot) => {
+        const data = parsePlayerData(currentPlayerDataMap?.[slot], slot);
+        return {
+            slot,
+            data,
+            identity: getCharacterIdentity(data, currentPlayerNames?.[slot]),
+        };
+    });
+    const usedCurrentIndexes = new Set();
     const players = [];
 
-    for (const slot of allSlots) {
-        const isInBaseline = baselineSlots.includes(slot);
-        const isInCurrent = currentSlots.includes(slot);
-        const baselineData = isInBaseline
-            ? parsePlayerData(preset.playerDataMap[slot], slot)
-            : null;
-        const currentData = isInCurrent
-            ? parsePlayerData(currentPlayerDataMap?.[slot], slot)
-            : null;
-        let status;
-        let changes;
-
-        if (!isInBaseline) {
-            status = "added";
-            changes = [{ kind: "membership", section: "team", before: false, after: true }];
-        } else if (!isInCurrent) {
-            status = "removed";
-            changes = [{ kind: "membership", section: "team", before: true, after: false }];
-        } else {
-            changes = comparePlayerLoadouts(baselineData, currentData);
-            status = changes.length > 0 ? "changed" : "unchanged";
+    for (const baselineEntry of baselineEntries) {
+        const currentIndex = findMatchingCurrentPlayerIndex(
+            baselineEntry,
+            currentEntries,
+            usedCurrentIndexes,
+        );
+        if (currentIndex < 0) {
+            players.push({
+                slot: baselineEntry.slot,
+                baselineSlot: baselineEntry.slot,
+                currentSlot: null,
+                status: "removed",
+                baselineData: baselineEntry.data,
+                currentData: null,
+                changes: [{ kind: "membership", section: "team", before: true, after: false }],
+            });
+            continue;
         }
 
-        players.push({ slot, status, baselineData, currentData, changes });
+        usedCurrentIndexes.add(currentIndex);
+        const currentEntry = currentEntries[currentIndex];
+        const changes = comparePlayerLoadouts(baselineEntry.data, currentEntry.data);
+        players.push({
+            slot: currentEntry.slot,
+            baselineSlot: baselineEntry.slot,
+            currentSlot: currentEntry.slot,
+            status: changes.length > 0 ? "changed" : "unchanged",
+            baselineData: baselineEntry.data,
+            currentData: currentEntry.data,
+            changes,
+        });
+    }
+
+    for (let index = 0; index < currentEntries.length; index += 1) {
+        if (usedCurrentIndexes.has(index)) {
+            continue;
+        }
+        const currentEntry = currentEntries[index];
+        players.push({
+            slot: currentEntry.slot,
+            baselineSlot: null,
+            currentSlot: currentEntry.slot,
+            status: "added",
+            baselineData: null,
+            currentData: currentEntry.data,
+            changes: [{ kind: "membership", section: "team", before: false, after: true }],
+        });
     }
 
     return {

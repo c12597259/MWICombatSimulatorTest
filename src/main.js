@@ -54,16 +54,16 @@ import {
     sortSimulationHistoryDropRows,
 } from "./simulationHistory.js";
 import {
-    mergeSelectedPlayerFormation,
+    createFixedPlayerSlotAssignments,
     normalizePlayerFormation,
     orderSelectedPlayerSlots,
+    remapPlayerSlotValues,
 } from "./playerFormation.js";
 
 import patchNote from "../patchNote.json";
 
 const ONE_SECOND = 1e9;
 const ONE_HOUR = 60 * 60 * ONE_SECOND;
-const PLAYER_FORMATION_STORAGE_KEY = "mwiCombatSimulatorPlayerFormation_v1";
 
 let buttonStartSimulation = document.getElementById("buttonStartSimulation");
 let buttonStopSimulation = document.getElementById("buttonStopSimulation");
@@ -3943,29 +3943,6 @@ function getPlayerFormationOrder() {
     return normalizePlayerFormation(visibleOrder);
 }
 
-function loadPlayerFormationOrder() {
-    try {
-        const storedFormation = JSON.parse(
-            window.localStorage.getItem(PLAYER_FORMATION_STORAGE_KEY) || "null",
-        );
-        return normalizePlayerFormation(storedFormation);
-    } catch (error) {
-        console.warn("Unable to load the saved player formation.", error);
-        return normalizePlayerFormation([]);
-    }
-}
-
-function savePlayerFormationOrder(formation) {
-    try {
-        window.localStorage.setItem(
-            PLAYER_FORMATION_STORAGE_KEY,
-            JSON.stringify(normalizePlayerFormation(formation)),
-        );
-    } catch (error) {
-        console.warn("Unable to save the player formation.", error);
-    }
-}
-
 function syncPlayerCheckboxOrder(formation) {
     const playerContainer = document.getElementById("playerCheckBox");
     if (!playerContainer) {
@@ -3980,27 +3957,68 @@ function syncPlayerCheckboxOrder(formation) {
     }
 }
 
-function applyPlayerFormationOrder(formation, { persist = true } = {}) {
-    const normalizedFormation = normalizePlayerFormation(formation);
+function restoreFixedPlayerSlotOrder() {
+    const fixedSlotOrder = normalizePlayerFormation([]);
     const playerTab = document.getElementById("playerTab");
     if (!playerTab) {
-        return normalizedFormation;
+        return fixedSlotOrder;
     }
 
-    for (const slot of normalizedFormation) {
+    for (const slot of fixedSlotOrder) {
         const tabItem = document.getElementById(`player${slot}-tab`)?.closest(".nav-item");
         if (tabItem) {
             playerTab.appendChild(tabItem);
         }
     }
 
-    playerTab.dataset.playerFormation = normalizedFormation.join(",");
-    syncPlayerCheckboxOrder(normalizedFormation);
+    playerTab.dataset.playerFormation = fixedSlotOrder.join(",");
+    syncPlayerCheckboxOrder(fixedSlotOrder);
     updateTeamPresetPlayerLabels();
-    if (persist) {
-        savePlayerFormationOrder(normalizedFormation);
+    return fixedSlotOrder;
+}
+
+function normalizeRemappedPlayerLabel(label, destinationSlot) {
+    const normalizedLabel = typeof label === "string" ? label.trim() : "";
+    if (!normalizedLabel || /^Player\s+[1-5]$/i.test(normalizedLabel)) {
+        return `Player ${destinationSlot}`;
     }
-    return normalizedFormation;
+    return normalizedLabel;
+}
+
+function movePlayerLoadoutsToFixedSlots(sourceOrder) {
+    const fixedSlotOrder = normalizePlayerFormation([]);
+    const normalizedSourceOrder = normalizePlayerFormation(sourceOrder);
+    const formationChanged = normalizedSourceOrder.some(
+        (slot, index) => slot !== fixedSlotOrder[index],
+    );
+    if (!formationChanged) {
+        restoreFixedPlayerSlotOrder();
+        return;
+    }
+
+    savePreviousPlayer(currentPlayerTabId);
+    const playerLabels = Object.fromEntries(fixedSlotOrder.map((slot) => [
+        slot,
+        document.getElementById(`player${slot}-tab`)?.textContent?.trim() || "",
+    ]));
+    const remappedPlayerData = remapPlayerSlotValues(playerDataMap, normalizedSourceOrder);
+    const remappedPlayerLabels = remapPlayerSlotValues(playerLabels, normalizedSourceOrder);
+
+    for (const destinationSlot of fixedSlotOrder) {
+        playerDataMap[destinationSlot] = remappedPlayerData[destinationSlot];
+        const tab = document.getElementById(`player${destinationSlot}-tab`);
+        if (tab) {
+            tab.textContent = normalizeRemappedPlayerLabel(
+                remappedPlayerLabels[destinationSlot],
+                destinationSlot,
+            );
+        }
+    }
+
+    restoreFixedPlayerSlotOrder();
+    updateNextPlayer(currentPlayerTabId);
+    updateState();
+    updateUI();
 }
 
 function initPlayerTabReordering() {
@@ -4009,11 +4027,11 @@ function initPlayerTabReordering() {
         return;
     }
 
-    applyPlayerFormationOrder(loadPlayerFormationOrder(), { persist: false });
+    restoreFixedPlayerSlotOrder();
     let draggedTabItem = null;
 
     const commitFormation = () => {
-        applyPlayerFormationOrder(getPlayerFormationOrder());
+        movePlayerLoadoutsToFixedSlots(getPlayerFormationOrder());
     };
     const finishDragging = () => {
         if (!draggedTabItem) {
@@ -4075,7 +4093,7 @@ function initPlayerTabReordering() {
         dragHandle.type = "button";
         dragHandle.className = "player-tab-drag-handle";
         dragHandle.textContent = "↔";
-        dragHandle.title = "Drag to change formation / 拖动调整站位";
+        dragHandle.title = "Drag loadout to change formation / 拖动配装调整站位";
         dragHandle.setAttribute("aria-label", dragHandle.title);
         dragHandle.addEventListener("click", (event) => {
             event.preventDefault();
@@ -4218,7 +4236,7 @@ function initSimulationControls() {
         const checkedPlayerSlots = [...document.querySelectorAll('.player-checkbox:checked')]
             .map((checkbox) => checkbox.id.replace('player', ''));
         selectedPlayers = orderSelectedPlayerSlots(
-            getPlayerFormationOrder(),
+            [],
             checkedPlayerSlots,
         ).map(Number);
 
@@ -6154,12 +6172,17 @@ function loadTeamPreset(presetId) {
         return;
     }
 
+    const slotAssignments = createFixedPlayerSlotAssignments(preset.selectedPlayers);
     const validatedPlayerData = {};
+    const validatedPlayerNames = {};
     try {
-        for (const playerNumber of preset.selectedPlayers) {
-            const playerImportData = preset.playerDataMap[playerNumber];
-            JSON.parse(playerImportData);
-            validatedPlayerData[playerNumber] = playerImportData;
+        for (const { sourceSlot } of slotAssignments) {
+            const playerImportData = preset.playerDataMap[sourceSlot];
+            const parsedPlayerData = JSON.parse(playerImportData);
+            validatedPlayerData[sourceSlot] = playerImportData;
+            validatedPlayerNames[sourceSlot] = normalizeTeamPresetNamePart(
+                parsedPlayerData.characterName || parsedPlayerData.characterMeta?.name,
+            );
         }
     } catch (error) {
         console.error("Invalid player data while loading a team preset.", error);
@@ -6171,28 +6194,28 @@ function loadTeamPreset(presetId) {
     }
 
     savePreviousPlayer(currentPlayerTabId);
-    for (const playerNumber of preset.selectedPlayers) {
-        playerDataMap[playerNumber] = validatedPlayerData[playerNumber];
+    for (const { sourceSlot, destinationSlot } of slotAssignments) {
+        playerDataMap[destinationSlot] = validatedPlayerData[sourceSlot];
 
-        const tab = document.getElementById(`player${playerNumber}-tab`);
+        const tab = document.getElementById(`player${destinationSlot}-tab`);
         if (tab) {
-            tab.textContent = preset.playerNames[playerNumber] || `Player ${playerNumber}`;
+            tab.textContent = preset.playerNames?.[sourceSlot]
+                || validatedPlayerNames[sourceSlot]
+                || `Player ${destinationSlot}`;
         }
     }
 
-    applyPlayerFormationOrder(mergeSelectedPlayerFormation(
-        preset.selectedPlayers,
-        getPlayerFormationOrder(),
-    ));
+    restoreFixedPlayerSlotOrder();
+    const selectedFixedSlots = slotAssignments.map(({ destinationSlot }) => destinationSlot);
 
     document.querySelectorAll(".player-checkbox").forEach((checkbox) => {
-        checkbox.checked = preset.selectedPlayers.includes(checkbox.id.replace("player", ""));
+        checkbox.checked = selectedFixedSlots.includes(checkbox.id.replace("player", ""));
     });
     updateTeamPresetPlayerLabels();
 
-    const playerToShow = preset.selectedPlayers.includes(currentPlayerTabId)
+    const playerToShow = selectedFixedSlots.includes(currentPlayerTabId)
         ? currentPlayerTabId
-        : preset.selectedPlayers[0];
+        : selectedFixedSlots[0];
     if (playerToShow === currentPlayerTabId) {
         updateNextPlayer(currentPlayerTabId);
         updateState();
@@ -6483,6 +6506,13 @@ function getCurrentComparisonPlayerSlots(preset) {
         .filter((checkbox) => checkbox.closest(".form-check")?.style.display !== "none")
         .map((checkbox) => checkbox.id.replace("player", ""));
     return checkedPlayerSlots.length > 0 ? checkedPlayerSlots : preset.selectedPlayers;
+}
+
+function getCurrentComparisonPlayerNames() {
+    return Object.fromEntries(normalizePlayerFormation([]).map((slot) => [
+        slot,
+        document.getElementById(`player${slot}-tab`)?.textContent?.trim() || "",
+    ]));
 }
 
 function createPrivateLoadoutBaselineRequestId() {
@@ -6777,23 +6807,50 @@ function resolveTeamComparisonItemLabel(change) {
     }
 }
 
+function getTeamComparisonBaselineSlot(playerComparison) {
+    return playerComparison.baselineSlot
+        || (playerComparison.baselineData ? playerComparison.slot : null);
+}
+
+function getTeamComparisonCurrentSlot(playerComparison) {
+    return playerComparison.currentSlot
+        || (playerComparison.currentData ? playerComparison.slot : null);
+}
+
+function formatTeamComparisonPlayerSlot(playerComparison) {
+    const baselineSlot = getTeamComparisonBaselineSlot(playerComparison);
+    const currentSlot = getTeamComparisonCurrentSlot(playerComparison);
+    const formatSlot = (slot) => getTeamComparisonText(
+        "slot",
+        "Slot {{slot}}",
+        { slot },
+    );
+    if (baselineSlot && currentSlot && baselineSlot !== currentSlot) {
+        return `${formatSlot(baselineSlot)} → ${formatSlot(currentSlot)}`;
+    }
+    return formatSlot(currentSlot || baselineSlot || playerComparison.slot);
+}
+
 function getTeamComparisonCharacterName(playerComparison, preset, side) {
     const isBaseline = side === "baseline";
     const playerData = isBaseline ? playerComparison.baselineData : playerComparison.currentData;
+    const comparisonSlot = isBaseline
+        ? getTeamComparisonBaselineSlot(playerComparison)
+        : getTeamComparisonCurrentSlot(playerComparison);
     const serializedName = playerData?.characterName || playerData?.characterMeta?.name;
     if (typeof serializedName === "string" && serializedName.trim()) {
         return serializedName.trim();
     }
-    if (isBaseline && preset.playerNames?.[playerComparison.slot]) {
-        return preset.playerNames[playerComparison.slot];
+    if (isBaseline && preset.playerNames?.[comparisonSlot]) {
+        return preset.playerNames[comparisonSlot];
     }
-    if (!isBaseline) {
-        const tabName = document.getElementById(`player${playerComparison.slot}-tab`)?.textContent?.trim();
+    if (!isBaseline && comparisonSlot) {
+        const tabName = document.getElementById(`player${comparisonSlot}-tab`)?.textContent?.trim();
         if (tabName) {
             return tabName;
         }
     }
-    return `Player ${playerComparison.slot}`;
+    return `Player ${comparisonSlot || playerComparison.slot}`;
 }
 
 function appendTeamComparisonTableCell(row, tagName, text, className = "") {
@@ -6854,18 +6911,15 @@ function renderTeamPresetComparison(preset, comparison, resolution) {
         const cardHeader = document.createElement("div");
         cardHeader.className = "card-header d-flex flex-wrap justify-content-between align-items-center gap-2";
         const playerTitle = document.createElement("strong");
-        const slotLabel = getTeamComparisonText(
-            "slot",
-            "Slot {{slot}}",
-            { slot: playerComparison.slot },
-        );
+        const slotLabel = formatTeamComparisonPlayerSlot(playerComparison);
+        const baselineSlot = getTeamComparisonBaselineSlot(playerComparison);
         const baselineName = getTeamComparisonCharacterName(playerComparison, preset, "baseline");
         const currentName = getTeamComparisonCharacterName(playerComparison, preset, "current");
         const playerName = baselineName === currentName
             ? currentName
             : `${baselineName} → ${currentName}`;
         const baselineLoadoutName = playerComparison.baselineData?.loadoutName
-            || resolution.matchedSlots.find((match) => match.slot === playerComparison.slot)?.loadoutName
+            || resolution.matchedSlots.find((match) => match.slot === baselineSlot)?.loadoutName
             || "";
         playerTitle.textContent = baselineLoadoutName
             ? `${slotLabel} · ${playerName} · ${baselineLoadoutName}`
@@ -6911,7 +6965,7 @@ function renderTeamPresetComparison(preset, comparison, resolution) {
             appendTeamComparisonTableCell(
                 headingRow,
                 "th",
-                resolution.matchedSlots.some((match) => match.slot === playerComparison.slot)
+                resolution.matchedSlots.some((match) => match.slot === baselineSlot)
                     ? getTeamComparisonText("columns.gameLoadout", "Game loadout")
                     : getTeamComparisonText("columns.presetSnapshot", "Preset snapshot"),
             );
@@ -7012,6 +7066,7 @@ async function compareCurrentTeamToSelectedPreset() {
             resolution.baselinePreset,
             playerDataMap,
             getCurrentComparisonPlayerSlots(preset),
+            getCurrentComparisonPlayerNames(),
         );
         renderTeamPresetComparison(preset, comparison, resolution);
         setTeamPresetComparisonStatus(

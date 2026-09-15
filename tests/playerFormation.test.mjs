@@ -8,9 +8,10 @@ const formationSource = await readFile(
 );
 const formationModuleUrl = `data:text/javascript;base64,${Buffer.from(formationSource).toString("base64")}`;
 const {
-    mergeSelectedPlayerFormation,
+    createFixedPlayerSlotAssignments,
     normalizePlayerFormation,
     orderSelectedPlayerSlots,
+    remapPlayerSlotValues,
 } = await import(formationModuleUrl);
 
 test("normalizes a saved formation and appends missing player slots", () => {
@@ -27,9 +28,23 @@ test("orders selected players by their visible tab formation", () => {
     );
 });
 
-test("restores a preset formation while keeping unused slots available", () => {
+test("moves loadout values between fixed player slots", () => {
     assert.deepEqual(
-        mergeSelectedPlayerFormation(["4", "2", "5"], ["3", "2", "1", "5", "4"]),
-        ["4", "2", "5", "3", "1"],
+        remapPlayerSlotValues(
+            { "1": "A", "2": "B", "3": "C", "4": "D", "5": "E" },
+            ["2", "3", "1", "4", "5"],
+        ),
+        { "1": "B", "2": "C", "3": "A", "4": "D", "5": "E" },
+    );
+});
+
+test("maps a legacy preset formation onto the same fixed selected slots", () => {
+    assert.deepEqual(
+        createFixedPlayerSlotAssignments(["4", "2", "5"]),
+        [
+            { destinationSlot: "2", sourceSlot: "4" },
+            { destinationSlot: "4", sourceSlot: "2" },
+            { destinationSlot: "5", sourceSlot: "5" },
+        ],
     );
 });

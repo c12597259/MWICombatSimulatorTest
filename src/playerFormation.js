@@ -28,8 +28,30 @@ export function orderSelectedPlayerSlots(formation, selectedSlots) {
     return normalizePlayerFormation(formation).filter((slot) => selected.has(slot));
 }
 
-export function mergeSelectedPlayerFormation(selectedSlots, currentFormation) {
-    const selected = normalizeSlotList(selectedSlots, PLAYER_FORMATION_SLOTS);
-    const current = normalizePlayerFormation(currentFormation);
-    return [...selected, ...current.filter((slot) => !selected.includes(slot))];
+export function remapPlayerSlotValues(
+    valuesBySlot,
+    sourceOrder,
+    availableSlots = PLAYER_FORMATION_SLOTS,
+) {
+    const slots = [...availableSlots].map(String);
+    const normalizedSourceOrder = normalizePlayerFormation(sourceOrder, slots);
+    return Object.fromEntries(slots.map((destinationSlot, index) => [
+        destinationSlot,
+        valuesBySlot?.[normalizedSourceOrder[index]],
+    ]));
+}
+
+export function createFixedPlayerSlotAssignments(
+    sourceSlots,
+    availableSlots = PLAYER_FORMATION_SLOTS,
+) {
+    const slots = [...availableSlots].map(String);
+    const sources = normalizeSlotList(sourceSlots, slots);
+    const destinations = [...sources].sort(
+        (left, right) => slots.indexOf(left) - slots.indexOf(right),
+    );
+    return destinations.map((destinationSlot, index) => ({
+        destinationSlot,
+        sourceSlot: sources[index],
+    }));
 }

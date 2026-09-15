@@ -154,3 +154,110 @@ test("compares the union of preset and currently selected team slots", () => {
     assert.equal(result.totalChanges, 2);
     assert.equal(result.changedPlayers, 2);
 });
+
+test("matches characters by identity after their fixed-slot positions are swapped", () => {
+    const playerOne = createPlayerData();
+    const playerTwo = createPlayerData({
+        characterId: "character-2",
+        characterName: "Player Two",
+    });
+    const preset = {
+        selectedPlayers: ["1", "2"],
+        playerDataMap: {
+            "1": JSON.stringify(playerOne),
+            "2": JSON.stringify(playerTwo),
+        },
+    };
+    const currentPlayerDataMap = {
+        "1": JSON.stringify(playerTwo),
+        "2": JSON.stringify(playerOne),
+    };
+
+    const result = compareTeamPresetWithCurrent(preset, currentPlayerDataMap, ["1", "2"]);
+
+    assert.equal(result.totalChanges, 0);
+    assert.equal(result.changedPlayers, 0);
+    assert.deepEqual(
+        result.players.map((player) => [player.baselineSlot, player.currentSlot, player.status]),
+        [
+            ["1", "2", "unchanged"],
+            ["2", "1", "unchanged"],
+        ],
+    );
+});
+
+test("uses visible character names when older snapshots have no identity metadata", () => {
+    const unnamedPlayerOne = createPlayerData({
+        characterId: undefined,
+        characterName: undefined,
+    });
+    const unnamedPlayerTwo = createPlayerData({
+        characterId: undefined,
+        characterName: undefined,
+        player: {
+            ...createPlayerData().player,
+            rangedLevel: 123,
+        },
+    });
+    const preset = {
+        selectedPlayers: ["1", "2"],
+        playerNames: { "1": "Alpha", "2": "Beta" },
+        playerDataMap: {
+            "1": JSON.stringify(unnamedPlayerOne),
+            "2": JSON.stringify(unnamedPlayerTwo),
+        },
+    };
+    const currentPlayerDataMap = {
+        "1": JSON.stringify(unnamedPlayerTwo),
+        "2": JSON.stringify(unnamedPlayerOne),
+    };
+
+    const result = compareTeamPresetWithCurrent(
+        preset,
+        currentPlayerDataMap,
+        ["1", "2"],
+        { "1": "Beta", "2": "Alpha" },
+    );
+
+    assert.equal(result.totalChanges, 0);
+    assert.deepEqual(
+        result.players.map((player) => [player.baselineSlot, player.currentSlot]),
+        [["1", "2"], ["2", "1"]],
+    );
+});
+
+test("reports only real loadout edits when a character also changes position", () => {
+    const playerOne = createPlayerData();
+    const playerTwo = createPlayerData({
+        characterId: "character-2",
+        characterName: "Player Two",
+    });
+    const editedPlayerOne = createPlayerData({
+        player: {
+            ...createPlayerData().player,
+            defenseLevel: 101,
+        },
+    });
+    const preset = {
+        selectedPlayers: ["1", "2"],
+        playerDataMap: {
+            "1": JSON.stringify(playerOne),
+            "2": JSON.stringify(playerTwo),
+        },
+    };
+    const currentPlayerDataMap = {
+        "1": JSON.stringify(playerTwo),
+        "2": JSON.stringify(editedPlayerOne),
+    };
+
+    const result = compareTeamPresetWithCurrent(preset, currentPlayerDataMap, ["1", "2"]);
+    const playerOneComparison = result.players.find((player) => player.baselineSlot === "1");
+
+    assert.equal(result.totalChanges, 1);
+    assert.equal(result.changedPlayers, 1);
+    assert.equal(playerOneComparison.currentSlot, "2");
+    assert.deepEqual(
+        playerOneComparison.changes.map((change) => [change.kind, change.field]),
+        [["level", "defenseLevel"]],
+    );
+});
