@@ -23,14 +23,6 @@ import {
     normalizeGuildCombatShrineLevels,
     resolveGuildCombatShrineLevels,
 } from "./guildCombatShrines.js";
-import {
-    createTeamPresetId,
-    createTeamPresetTargetKey,
-    getDefaultTeamPreset,
-    getTeamPresetsForTarget,
-    loadTeamPresetStore,
-    saveTeamPresetStore,
-} from "./teamPresetStore.js";
 import { compareTeamPresetWithCurrent } from "./teamPresetComparison.js";
 import {
     PRIVATE_LOADOUT_BASELINE_BRIDGE_ATTRIBUTE,
@@ -43,8 +35,10 @@ import {
     buildSimulationHistoryRecord,
     clearSimulationHistory,
     compareSimulationHistoryRecords,
+    decodeSimulationHistorySnapshot,
     deleteSimulationHistoryMap,
     deleteSimulationHistoryRecord,
+    encodeSimulationHistorySnapshot,
     getSimulationHistoryStorageSummary,
     loadSimulationHistoryRecords,
     partitionSimulationHistoryDropComparisons,
@@ -54,7 +48,6 @@ import {
     sortSimulationHistoryDropRows,
 } from "./simulationHistory.js";
 import {
-    createFixedPlayerSlotAssignments,
     normalizePlayerFormation,
     orderSelectedPlayerSlots,
     remapPlayerSlotValues,
@@ -88,7 +81,6 @@ let simulationHistoryRecords = [];
 let simulationHistoryPlayerTabSequence = 0;
 
 let currentPlayerTabId = '1';
-let lastAutoLoadedTeamPresetTargetKey = null;
 const pendingImporterLoadoutNames = new Map();
 let playerDataMap = {
     "1": "{\"player\":{\"attackLevel\":1,\"magicLevel\":1,\"meleeLevel\":1,\"rangedLevel\":1,\"defenseLevel\":1,\"staminaLevel\":1,\"intelligenceLevel\":1,\"equipment\":[]},\"food\":{\"/action_types/combat\":[{\"itemHrid\":\"\"},{\"itemHrid\":\"\"},{\"itemHrid\":\"\"}]},\"drinks\":{\"/action_types/combat\":[{\"itemHrid\":\"\"},{\"itemHrid\":\"\"},{\"itemHrid\":\"\"}]},\"abilities\":[{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"},{\"abilityHrid\":\"\",\"level\":\"1\"}],\"triggerMap\":{},\"zone\":\"/actions/combat/fly\",\"simulationTime\":\"100\",\"houseRooms\":{\"/house_rooms/dairy_barn\":0,\"/house_rooms/garden\":0,\"/house_rooms/log_shed\":0,\"/house_rooms/forge\":0,\"/house_rooms/workshop\":0,\"/house_rooms/sewing_parlor\":0,\"/house_rooms/kitchen\":0,\"/house_rooms/brewery\":0,\"/house_rooms/laboratory\":0,\"/house_rooms/dining_room\":0,\"/house_rooms/library\":0,\"/house_rooms/dojo\":0,\"/house_rooms/gym\":0,\"/house_rooms/armory\":0,\"/house_rooms/archery_range\":0,\"/house_rooms/mystical_study\":0,\"/house_rooms/observatory\":0},\"achievements\":{}}",
@@ -2071,20 +2063,42 @@ function getCurrentSimulationHistoryMapKey() {
 }
 
 function captureSimulationHistoryContext(selectedPlayerNumbers) {
-    const players = selectedPlayerNumbers.map((playerNumber) => {
+    const selectedPlayers = selectedPlayerNumbers.map(String);
+    const snapshotPlayerDataMap = {};
+    const snapshotPlayerNames = {};
+    const players = selectedPlayers.map((playerNumber) => {
         const playerKey = `player${playerNumber}`;
         const tabName = document.getElementById(`${playerKey}-tab`)?.textContent?.trim();
+        const serializedPlayerData = playerDataMap[playerNumber];
+        const parsedPlayerData = JSON.parse(serializedPlayerData);
+        if (!parsedPlayerData || typeof parsedPlayerData !== "object" || !parsedPlayerData.player) {
+            throw new Error(`Invalid player snapshot in slot ${playerNumber}.`);
+        }
+        const name = tabName
+            || parsedPlayerData.characterName
+            || parsedPlayerData.characterMeta?.name
+            || `Player ${playerNumber}`;
+        snapshotPlayerDataMap[playerNumber] = serializedPlayerData;
+        snapshotPlayerNames[playerNumber] = name;
         return {
             slot: String(playerNumber),
             playerKey,
-            name: tabName || `Player ${playerNumber}`,
+            name,
+            loadoutName: normalizeLoadoutMetadataText(
+                parsedPlayerData.loadoutName || parsedPlayerData.loadoutMeta?.name,
+            ),
         };
     });
 
     return {
         startedAt: new Date().toISOString(),
-        teamPresetName: document.getElementById("inputTeamPresetName")?.value?.trim() ?? "",
         players,
+        snapshot: {
+            selectedPlayers,
+            playerDataMap: snapshotPlayerDataMap,
+            playerNames: snapshotPlayerNames,
+            simulationTime: document.getElementById("inputSimulationTime")?.value ?? "",
+        },
     };
 }
 
@@ -2123,15 +2137,15 @@ async function saveCompletedSimulationHistory(simResult) {
         }
     }
 
-    const record = buildSimulationHistoryRecord({
-        simResult,
-        players: context.players,
-        expectedDropsByPlayer,
-        teamPresetName: context.teamPresetName,
-        startedAt: context.startedAt,
-    });
-
     try {
+        const teamSnapshot = await encodeSimulationHistorySnapshot(context.snapshot);
+        const record = buildSimulationHistoryRecord({
+            simResult,
+            players: context.players,
+            expectedDropsByPlayer,
+            teamSnapshot,
+            startedAt: context.startedAt,
+        });
         await saveSimulationHistoryRecord(record);
         simulationHistoryRecords = await loadSimulationHistoryRecords();
         updateSimulationHistoryCount();
@@ -2170,8 +2184,14 @@ function createSimulationHistoryCell(text, className = "") {
 }
 
 function getSimulationHistoryRecordOptionText(record) {
-    const preset = record.teamPresetName || getSimulationHistoryText("unknownPreset", "Unnamed team");
-    return `${formatSimulationHistoryDate(record.createdAt)} · ${getSimulationHistoryDifficulty(record)} · ${preset}`;
+    return `${formatSimulationHistoryDate(record.createdAt)} · ${getSimulationHistoryDifficulty(record)} · ${getSimulationHistoryLoadoutSummary(record)}`;
+}
+
+function getSimulationHistoryLoadoutSummary(record) {
+    const manualLabel = getSimulationHistoryText("manualLoadout", "Manual configuration");
+    return (record.players ?? [])
+        .map((playerEntry) => playerEntry.loadoutName || manualLabel)
+        .join(" / ");
 }
 
 function fillSimulationHistoryRecordSelect(select, records, preferredValue, fallbackIndex) {
@@ -2206,9 +2226,7 @@ function renderSimulationHistoryRecordRows(records) {
         const row = document.createElement("tr");
         row.appendChild(createSimulationHistoryCell(formatSimulationHistoryDate(record.createdAt)));
         row.appendChild(createSimulationHistoryCell(getSimulationHistoryDifficulty(record)));
-        row.appendChild(createSimulationHistoryCell(
-            record.teamPresetName || getSimulationHistoryText("unknownPreset", "Unnamed team"),
-        ));
+        row.appendChild(createSimulationHistoryCell(getSimulationHistoryLoadoutSummary(record)));
         row.appendChild(createSimulationHistoryCell(record.playerNames.join(", ")));
         row.appendChild(createSimulationHistoryCell(
             getSimulationHistoryText("hours", "{{hours}} hours", {
@@ -2223,6 +2241,14 @@ function renderSimulationHistoryRecordRows(records) {
 
         const actionCell = document.createElement("td");
         actionCell.className = "text-nowrap";
+        const importButton = document.createElement("button");
+        importButton.type = "button";
+        importButton.className = "btn btn-primary btn-sm me-2";
+        importButton.dataset.historyAction = "import";
+        importButton.dataset.recordId = record.id;
+        importButton.textContent = getSimulationHistoryText("import", "Import");
+        actionCell.appendChild(importButton);
+
         const detailButton = document.createElement("button");
         detailButton.type = "button";
         detailButton.className = "btn btn-outline-primary btn-sm me-2";
@@ -2492,7 +2518,9 @@ function createSimulationHistoryPlayerDetail(playerEntry) {
     const header = document.createElement("div");
     header.className = "card-header fw-bold";
     const slotLabel = getSimulationHistoryPlayerSlotLabel(playerEntry.slot);
-    header.textContent = `${playerEntry.name} · ${slotLabel}`;
+    const loadoutLabel = playerEntry.loadoutName
+        || getSimulationHistoryText("manualLoadout", "Manual configuration");
+    header.textContent = `${playerEntry.name} · ${loadoutLabel} · ${slotLabel}`;
     card.appendChild(header);
 
     const body = document.createElement("div");
@@ -2566,8 +2594,8 @@ function renderSimulationHistoryRecordDetails(record) {
     const overview = createSimulationHistoryTable();
     appendSimulationHistoryValueRow(
         overview,
-        getSimulationHistoryText("teamPreset", "Team Preset"),
-        record.teamPresetName || getSimulationHistoryText("unknownPreset", "Unnamed team"),
+        getSimulationHistoryText("loadouts", "Loadouts"),
+        getSimulationHistoryLoadoutSummary(record),
     );
     appendSimulationHistoryValueRow(
         overview,
@@ -2578,7 +2606,7 @@ function renderSimulationHistoryRecordDetails(record) {
     );
     appendSimulationHistoryValueRow(
         overview,
-        getSimulationHistoryText("encountersPerHour", "Encounters per Hour"),
+        getSimulationHistoryText("encountersPerHour", "eph"),
         formatSimulationHistoryNumber(record.encountersPerHour),
     );
     if (record.successRate !== null) {
@@ -2602,7 +2630,11 @@ function renderSimulationHistoryRecordDetails(record) {
 
     container.appendChild(createSimulationHistoryPlayerTabs(
         record.players,
-        (playerEntry) => `${playerEntry.name} · ${getSimulationHistoryPlayerSlotLabel(playerEntry.slot)}`,
+        (playerEntry) => {
+            const loadoutLabel = playerEntry.loadoutName
+                || getSimulationHistoryText("manualLoadout", "Manual configuration");
+            return `${playerEntry.name} · ${loadoutLabel} · ${getSimulationHistoryPlayerSlotLabel(playerEntry.slot)}`;
+        },
         createSimulationHistoryPlayerDetail,
     ));
     container.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -2901,7 +2933,7 @@ function renderSimulationHistoryComparison(baseline, comparison) {
     const summaryTable = createSimulationHistoryComparisonTable();
     appendSimulationHistoryComparisonRow(
         summaryTable,
-        getSimulationHistoryText("encountersPerHour", "Encounters per Hour"),
+        getSimulationHistoryText("encountersPerHour", "eph"),
         result.summary.encountersPerHour,
     );
     if (baseline.successRate !== null || comparison.successRate !== null) {
@@ -2989,6 +3021,30 @@ async function handleSimulationHistoryRecordAction(event) {
         return;
     }
 
+    if (button.dataset.historyAction === "import") {
+        if (!confirm(getSimulationHistoryText(
+            "importConfirm",
+            "Replace the current team with this history snapshot?",
+        ))) {
+            return;
+        }
+        button.disabled = true;
+        try {
+            await importSimulationHistoryTeam(record);
+        } catch (error) {
+            console.warn("Unable to import simulation history team snapshot.", error);
+            setSimulationHistoryStatus(
+                getSimulationHistoryText(
+                    "importError",
+                    "This history snapshot could not be imported.",
+                ),
+                "danger",
+            );
+            button.disabled = false;
+        }
+        return;
+    }
+
     if (button.dataset.historyAction === "delete") {
         if (!confirm(getSimulationHistoryText("deleteRecordConfirm", "Delete this simulation history record?"))) {
             return;
@@ -3006,6 +3062,102 @@ async function handleSimulationHistoryRecordAction(event) {
             button.disabled = false;
         }
     }
+}
+
+function restoreSimulationHistoryTarget(record) {
+    const allToggleIds = [
+        "simAllZoneToggle",
+        "simAllSoloToggle",
+        "simAllLabyrinthsToggle",
+    ];
+    allToggleIds.forEach((id) => {
+        const toggle = document.getElementById(id);
+        if (toggle) {
+            toggle.checked = false;
+        }
+    });
+
+    const dungeonToggle = document.getElementById("simDungeonToggle");
+    const labyrinthToggle = document.getElementById("simLabyrinthToggle");
+    dungeonToggle.checked = record.mapType === "dungeon";
+    labyrinthToggle.checked = record.mapType === "labyrinth";
+    dungeonToggle.dispatchEvent(new Event("change", { bubbles: true }));
+    labyrinthToggle.dispatchEvent(new Event("change", { bubbles: true }));
+
+    if (record.mapType === "labyrinth") {
+        document.getElementById("selectLabyrinth").value = record.mapHrid;
+        document.getElementById("inputRoomLevel").value = record.difficulty;
+    } else {
+        const targetSelect = document.getElementById(
+            record.mapType === "dungeon" ? "selectDungeon" : "selectZone",
+        );
+        targetSelect.value = record.mapHrid;
+        document.getElementById("selectDifficulty").value = record.difficulty;
+    }
+}
+
+async function importSimulationHistoryTeam(record) {
+    const snapshot = await decodeSimulationHistorySnapshot(record.teamSnapshot);
+    const selectedSlots = Array.isArray(snapshot?.selectedPlayers)
+        ? [...new Set(snapshot.selectedPlayers.map(String))]
+            .filter((slot) => /^[1-5]$/.test(slot))
+        : [];
+    if (selectedSlots.length === 0) {
+        throw new Error("The history snapshot contains no players.");
+    }
+
+    const validatedPlayerData = {};
+    for (const slot of selectedSlots) {
+        const serialized = snapshot.playerDataMap?.[slot];
+        const parsed = typeof serialized === "string" ? JSON.parse(serialized) : serialized;
+        if (!parsed || typeof parsed !== "object" || !parsed.player) {
+            throw new Error(`Invalid player snapshot in slot ${slot}.`);
+        }
+        validatedPlayerData[slot] = JSON.stringify(parsed);
+    }
+
+    savePreviousPlayer(currentPlayerTabId);
+    for (const slot of selectedSlots) {
+        playerDataMap[slot] = validatedPlayerData[slot];
+        const importedData = JSON.parse(validatedPlayerData[slot]);
+        const playerName = normalizeLoadoutMetadataText(
+            snapshot.playerNames?.[slot]
+            || importedData.characterName
+            || importedData.characterMeta?.name,
+        );
+        document.getElementById(`player${slot}-tab`).textContent = playerName || `Player ${slot}`;
+    }
+
+    restoreFixedPlayerSlotOrder();
+    const firstSlot = selectedSlots[0];
+    currentPlayerTabId = firstSlot;
+    updateNextPlayer(firstSlot);
+    if (snapshot.simulationTime !== undefined && snapshot.simulationTime !== "") {
+        document.getElementById("inputSimulationTime").value = snapshot.simulationTime;
+    }
+    restoreSimulationHistoryTarget(record);
+    document.querySelectorAll(".player-checkbox").forEach((checkbox) => {
+        checkbox.checked = selectedSlots.includes(checkbox.id.replace("player", ""));
+    });
+    updatePlayerCheckboxLabels();
+    updateState();
+    updateUI();
+
+    const tabElement = document.getElementById(`player${firstSlot}-tab`);
+    if (tabElement && typeof bootstrap !== "undefined" && bootstrap.Tab) {
+        bootstrap.Tab.getOrCreateInstance(tabElement).show();
+    }
+
+    bootstrap.Modal.getOrCreateInstance(
+        document.getElementById("simulationHistoryModal"),
+    ).hide();
+    const message = getSimulationHistoryText(
+        "imported",
+        "Imported the team snapshot from {{date}}.",
+        { date: formatSimulationHistoryDate(record.createdAt) },
+    );
+    setSimulationHistoryStatus(message, "success");
+    document.getElementById("buttonSimulationHistory")?.setAttribute("title", message);
 }
 
 async function deleteCurrentSimulationHistoryMap() {
@@ -4053,7 +4205,7 @@ function restoreFixedPlayerSlotOrder() {
 
     playerTab.dataset.playerFormation = fixedSlotOrder.join(",");
     syncPlayerCheckboxOrder(fixedSlotOrder);
-    updateTeamPresetPlayerLabels();
+    updatePlayerCheckboxLabels();
     return fixedSlotOrder;
 }
 
@@ -4243,7 +4395,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function updatePlayerNames() {
-        updateTeamPresetPlayerLabels();
+        updatePlayerCheckboxLabels();
     }
 
     function updatePlayersCheckbox(isCheck) {
@@ -4324,7 +4476,6 @@ function initSimulationControls() {
             alert("You need to select at least one player to sim.");
             return;
         }
-        autoSaveCurrentTeamPreset(selectedPlayers);
         // buttonStartSimulation.disabled = true;
         buttonStopSimulation.style.display = 'block';
         startSimulation(selectedPlayers);
@@ -5510,7 +5661,7 @@ function doGroupImport() {
     if (needUpdateCurrentTab) {
         updateNextPlayer(currentPlayerTabId);
     }
-    updateTeamPresetPlayerLabels();
+    updatePlayerCheckboxLabels();
 }
 
 function doSoloImport() {
@@ -5892,73 +6043,20 @@ function updateNextPlayer(currentPlayerNumber) {
     refreshAchievementStatics();
 }
 
-// #region Team Presets
+// #region Loadout Comparison
 
-function interpolateTeamPresetFallback(fallback, values = {}) {
+function interpolateTextFallback(fallback, values = {}) {
     return Object.entries(values).reduce(
         (result, [key, value]) => result.replaceAll(`{{${key}}}`, String(value)),
         fallback,
     );
 }
 
-function getTeamPresetText(key, fallback, values = {}) {
-    try {
-        if (typeof i18next !== "undefined" && i18next.isInitialized) {
-            const translationKey = `common:teamPresets.${key}`;
-            const translated = i18next.t(translationKey, values);
-            if (translated && translated !== translationKey) {
-                return translated;
-            }
-        }
-    } catch (error) {
-        console.warn("Unable to translate team preset text.", error);
-    }
-    return interpolateTeamPresetFallback(fallback, values);
+function normalizeLoadoutMetadataText(value) {
+    return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
 }
 
-function setTeamPresetStatus(message = "", style = "muted") {
-    const status = document.getElementById("teamPresetStatus");
-    status.textContent = message;
-    status.classList.remove("text-muted", "text-success", "text-danger");
-    status.classList.add(`text-${style}`);
-}
-
-function getCurrentTeamPresetTarget() {
-    const unsupportedToggleIds = [
-        "simAllZoneToggle",
-        "simAllSoloToggle",
-        "simLabyrinthToggle",
-        "simAllLabyrinthsToggle",
-    ];
-    if (unsupportedToggleIds.some((id) => document.getElementById(id)?.checked)) {
-        return null;
-    }
-
-    const isDungeon = document.getElementById("simDungeonToggle")?.checked === true;
-    const select = document.getElementById(isDungeon ? "selectDungeon" : "selectZone");
-    const difficultyTier = Number(document.getElementById("selectDifficulty")?.value ?? 0);
-    if (!select?.value) {
-        return null;
-    }
-
-    return {
-        kind: isDungeon ? "dungeon" : "zone",
-        hrid: select.value,
-        difficultyTier,
-    };
-}
-
-function getTeamPresetTargetLabel(target) {
-    const selectId = target.kind === "dungeon" ? "selectDungeon" : "selectZone";
-    const targetSelect = document.getElementById(selectId);
-    const targetName = targetSelect?.selectedOptions?.[0]?.textContent?.trim() || target.hrid;
-    const kindName = target.kind === "dungeon"
-        ? getTeamPresetText("dungeon", "Dungeon")
-        : getTeamPresetText("zone", "Zone");
-    return `${kindName}: ${targetName} · T${target.difficultyTier}`;
-}
-
-function updateTeamPresetPlayerLabels() {
+function updatePlayerCheckboxLabels() {
     for (let playerNumber = 1; playerNumber <= 5; playerNumber++) {
         const tab = document.getElementById(`player${playerNumber}-tab`);
         const playerName = tab?.textContent?.trim() || `Player ${playerNumber}`;
@@ -5966,440 +6064,6 @@ function updateTeamPresetPlayerLabels() {
             label.textContent = playerName;
         });
     }
-}
-
-function updateTeamPresetActionButtons() {
-    const target = getCurrentTeamPresetTarget();
-    const presetId = document.getElementById("selectTeamPreset").value;
-    const hasPreset = Boolean(target && presetId);
-
-    document.getElementById("selectTeamPreset").disabled = !target;
-    document.getElementById("inputTeamPresetName").disabled = !target;
-    document.getElementById("buttonSaveTeamPreset").disabled = !target;
-    document.getElementById("buttonLoadTeamPreset").disabled = !hasPreset;
-    document.getElementById("buttonDefaultTeamPreset").disabled = !hasPreset;
-    document.getElementById("buttonDeleteTeamPreset").disabled = !hasPreset;
-}
-
-function refreshTeamPresetControls({ allowAutoLoad = false, preferredPresetId = null } = {}) {
-    const target = getCurrentTeamPresetTarget();
-    const presetSelect = document.getElementById("selectTeamPreset");
-    const presetNameInput = document.getElementById("inputTeamPresetName");
-    const targetLabel = document.getElementById("teamPresetTargetLabel");
-    const store = loadTeamPresetStore();
-    document.getElementById("autoLoadTeamPreset").checked = store.autoLoad;
-
-    presetSelect.replaceChildren();
-    if (!target) {
-        if (allowAutoLoad) {
-            lastAutoLoadedTeamPresetTargetKey = null;
-        }
-        const unsupportedOption = new Option(
-            getTeamPresetText("unsupported", "Presets currently support one zone or dungeon at a time."),
-            "",
-        );
-        presetSelect.add(unsupportedOption);
-        targetLabel.textContent = getTeamPresetText(
-            "unsupported",
-            "Presets currently support one zone or dungeon at a time.",
-        );
-        presetNameInput.value = "";
-        updateTeamPresetActionButtons();
-        refreshTeamPresetComparisonControls({ preferredPresetId: "" });
-        return;
-    }
-
-    const targetKey = createTeamPresetTargetKey(target);
-    const targetChanged = lastAutoLoadedTeamPresetTargetKey !== targetKey;
-    if (allowAutoLoad) {
-        lastAutoLoadedTeamPresetTargetKey = targetKey;
-    }
-    const presets = getTeamPresetsForTarget(store, targetKey);
-    const defaultPreset = getDefaultTeamPreset(store, targetKey);
-    const previousSelection = preferredPresetId ?? presetSelect.dataset.selectedPresetId ?? "";
-
-    presetSelect.add(new Option(getTeamPresetText("newPreset", "+ New preset..."), ""));
-    for (const preset of presets) {
-        const isDefault = preset.id === defaultPreset?.id;
-        const defaultBadge = getTeamPresetText("defaultBadge", "default");
-        const optionLabel = isDefault ? `${preset.name} ★ (${defaultBadge})` : preset.name;
-        presetSelect.add(new Option(optionLabel, preset.id));
-    }
-
-    const selectionExists = presets.some((preset) => preset.id === previousSelection);
-    presetSelect.value = selectionExists ? previousSelection : (defaultPreset?.id ?? "");
-    presetSelect.dataset.selectedPresetId = presetSelect.value;
-    const selectedPreset = presets.find((preset) => preset.id === presetSelect.value);
-    presetNameInput.value = selectedPreset?.name ?? "";
-    targetLabel.textContent = getTeamPresetText(
-        "currentTarget",
-        "Current: {{target}}",
-        { target: getTeamPresetTargetLabel(target) },
-    );
-    updateTeamPresetActionButtons();
-    refreshTeamPresetComparisonControls({ preferredPresetId: presetSelect.value });
-
-    if (
-        allowAutoLoad &&
-        store.autoLoad &&
-        defaultPreset &&
-        targetChanged
-    ) {
-        loadTeamPreset(defaultPreset.id);
-    }
-}
-
-function normalizeTeamPresetNamePart(value) {
-    return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
-}
-
-function captureCurrentTeamPreset(selectedPlayerNumbers) {
-    const selectedPlayerData = {};
-    const selectedPlayerNames = {};
-    const generatedNameParts = [];
-
-    for (const playerNumber of selectedPlayerNumbers.map(String)) {
-        const serializedPlayerData = playerDataMap[playerNumber];
-        const playerImportData = JSON.parse(serializedPlayerData);
-        const tabName = normalizeTeamPresetNamePart(
-            document.getElementById(`player${playerNumber}-tab`)?.textContent,
-        );
-        const characterName = normalizeTeamPresetNamePart(playerImportData.characterName)
-            || tabName
-            || `Player ${playerNumber}`;
-        const loadoutName = normalizeTeamPresetNamePart(playerImportData.loadoutName)
-            || getTeamPresetText("manualLoadout", "Manual loadout");
-
-        selectedPlayerData[playerNumber] = serializedPlayerData;
-        selectedPlayerNames[playerNumber] = characterName;
-        generatedNameParts.push(`${characterName}-${loadoutName}`);
-    }
-
-    const loadoutReferences = Object.fromEntries(buildPrivateLoadoutReferences({
-        selectedPlayers: selectedPlayerNumbers,
-        playerDataMap: selectedPlayerData,
-        playerNames: selectedPlayerNames,
-    }).map((reference) => [reference.slot, reference]));
-
-    return {
-        selectedPlayers: selectedPlayerNumbers.map(String),
-        playerDataMap: selectedPlayerData,
-        playerNames: selectedPlayerNames,
-        loadoutReferences,
-        generatedName: generatedNameParts.join(" "),
-    };
-}
-
-function persistTeamPreset(target, name, snapshot, existingPresetId = "") {
-    const store = loadTeamPresetStore();
-    const targetKey = createTeamPresetTargetKey(target);
-    const existingPreset = store.presets.find((preset) =>
-        preset.id === existingPresetId && preset.targetKey === targetKey
-    );
-    const duplicatePreset = store.presets.find((preset) =>
-        preset.targetKey === targetKey &&
-        preset.id !== existingPreset?.id &&
-        preset.name.toLocaleLowerCase() === name.toLocaleLowerCase()
-    );
-    if (duplicatePreset) {
-        return { status: "duplicate", preset: duplicatePreset };
-    }
-
-    const now = new Date().toISOString();
-    const presetId = existingPreset?.id ?? createTeamPresetId();
-    const preset = {
-        id: presetId,
-        name,
-        targetKey,
-        target,
-        selectedPlayers: snapshot.selectedPlayers,
-        playerDataMap: snapshot.playerDataMap,
-        playerNames: snapshot.playerNames,
-        loadoutReferences: snapshot.loadoutReferences,
-        createdAt: existingPreset?.createdAt ?? now,
-        updatedAt: now,
-    };
-
-    if (existingPreset) {
-        store.presets[store.presets.findIndex((candidate) => candidate.id === existingPreset.id)] = preset;
-    } else {
-        store.presets.push(preset);
-    }
-    if (!store.defaults[targetKey]) {
-        store.defaults[targetKey] = presetId;
-    }
-
-    try {
-        saveTeamPresetStore(store);
-    } catch (error) {
-        console.error("Unable to save team preset.", error);
-        return { status: "error", error };
-    }
-
-    return { status: "saved", preset };
-}
-
-function saveCurrentTeamPreset() {
-    const target = getCurrentTeamPresetTarget();
-    if (!target) {
-        setTeamPresetStatus(
-            getTeamPresetText("unsupported", "Presets currently support one zone or dungeon at a time."),
-            "danger",
-        );
-        return;
-    }
-
-    const selectedPlayerNumbers = [...document.querySelectorAll(".player-checkbox:checked")]
-        .map((checkbox) => checkbox.id.replace("player", ""));
-    if (selectedPlayerNumbers.length === 0) {
-        setTeamPresetStatus(
-            getTeamPresetText("selectPlayers", "Select at least one player before saving."),
-            "danger",
-        );
-        return;
-    }
-
-    savePreviousPlayer(currentPlayerTabId);
-    let snapshot;
-    try {
-        snapshot = captureCurrentTeamPreset(selectedPlayerNumbers);
-    } catch (error) {
-        console.error("Invalid player data while saving a team preset.", error);
-        setTeamPresetStatus(
-            getTeamPresetText("invalidData", "One of the selected player loadouts is invalid."),
-            "danger",
-        );
-        return;
-    }
-
-    const name = document.getElementById("inputTeamPresetName").value.trim() || snapshot.generatedName;
-    const selectedPresetId = document.getElementById("selectTeamPreset").value;
-    const result = persistTeamPreset(target, name, snapshot, selectedPresetId);
-    if (result.status === "duplicate") {
-        setTeamPresetStatus(
-            getTeamPresetText("duplicateName", "A preset with that name already exists for this target."),
-            "danger",
-        );
-        return;
-    }
-    if (result.status === "error") {
-        setTeamPresetStatus(
-            getTeamPresetText("storageError", "The preset could not be saved in this browser."),
-            "danger",
-        );
-        return;
-    }
-
-    lastAutoLoadedTeamPresetTargetKey = result.preset.targetKey;
-    refreshTeamPresetControls({ preferredPresetId: result.preset.id });
-    setTeamPresetStatus(
-        getTeamPresetText("saved", "Saved preset: {{name}}", { name }),
-        "success",
-    );
-}
-
-function autoSaveCurrentTeamPreset(selectedPlayerNumbers) {
-    const target = getCurrentTeamPresetTarget();
-    if (!target) {
-        return;
-    }
-
-    let snapshot;
-    try {
-        snapshot = captureCurrentTeamPreset(selectedPlayerNumbers);
-    } catch (error) {
-        console.warn("Unable to automatically save the current team preset.", error);
-        return;
-    }
-
-    const result = persistTeamPreset(target, snapshot.generatedName, snapshot);
-    if (result.status === "error") {
-        setTeamPresetStatus(
-            getTeamPresetText("storageError", "The preset could not be saved in this browser."),
-            "danger",
-        );
-        return;
-    }
-
-    lastAutoLoadedTeamPresetTargetKey = result.preset.targetKey;
-    refreshTeamPresetControls({ preferredPresetId: result.preset.id });
-    if (result.status === "duplicate") {
-        setTeamPresetStatus(
-            getTeamPresetText("alreadySaved", "Preset already exists; skipped: {{name}}", { name: result.preset.name }),
-        );
-        return;
-    }
-
-    setTeamPresetStatus(
-        getTeamPresetText("autoSaved", "Automatically saved: {{name}}", { name: result.preset.name }),
-        "success",
-    );
-}
-
-function loadTeamPreset(presetId) {
-    const target = getCurrentTeamPresetTarget();
-    if (!target) {
-        return;
-    }
-
-    const targetKey = createTeamPresetTargetKey(target);
-    const store = loadTeamPresetStore();
-    const preset = store.presets.find((candidate) =>
-        candidate.id === presetId && candidate.targetKey === targetKey
-    );
-    if (!preset) {
-        refreshTeamPresetControls();
-        return;
-    }
-
-    const slotAssignments = createFixedPlayerSlotAssignments(preset.selectedPlayers);
-    const validatedPlayerData = {};
-    const validatedPlayerNames = {};
-    try {
-        for (const { sourceSlot } of slotAssignments) {
-            const playerImportData = preset.playerDataMap[sourceSlot];
-            const parsedPlayerData = JSON.parse(playerImportData);
-            validatedPlayerData[sourceSlot] = playerImportData;
-            validatedPlayerNames[sourceSlot] = normalizeTeamPresetNamePart(
-                parsedPlayerData.characterName || parsedPlayerData.characterMeta?.name,
-            );
-        }
-    } catch (error) {
-        console.error("Invalid player data while loading a team preset.", error);
-        setTeamPresetStatus(
-            getTeamPresetText("invalidData", "One of the selected player loadouts is invalid."),
-            "danger",
-        );
-        return;
-    }
-
-    savePreviousPlayer(currentPlayerTabId);
-    for (const { sourceSlot, destinationSlot } of slotAssignments) {
-        playerDataMap[destinationSlot] = validatedPlayerData[sourceSlot];
-
-        const tab = document.getElementById(`player${destinationSlot}-tab`);
-        if (tab) {
-            tab.textContent = preset.playerNames?.[sourceSlot]
-                || validatedPlayerNames[sourceSlot]
-                || `Player ${destinationSlot}`;
-        }
-    }
-
-    restoreFixedPlayerSlotOrder();
-    const selectedFixedSlots = slotAssignments.map(({ destinationSlot }) => destinationSlot);
-
-    document.querySelectorAll(".player-checkbox").forEach((checkbox) => {
-        checkbox.checked = selectedFixedSlots.includes(checkbox.id.replace("player", ""));
-    });
-    updateTeamPresetPlayerLabels();
-
-    const playerToShow = selectedFixedSlots.includes(currentPlayerTabId)
-        ? currentPlayerTabId
-        : selectedFixedSlots[0];
-    if (playerToShow === currentPlayerTabId) {
-        updateNextPlayer(currentPlayerTabId);
-        updateState();
-        updateUI();
-    } else {
-        const tabElement = document.getElementById(`player${playerToShow}-tab`);
-        if (tabElement && typeof bootstrap !== "undefined" && bootstrap.Tab) {
-            bootstrap.Tab.getOrCreateInstance(tabElement).show();
-        } else {
-            currentPlayerTabId = playerToShow;
-            updateNextPlayer(currentPlayerTabId);
-            updateState();
-            updateUI();
-        }
-    }
-
-    lastAutoLoadedTeamPresetTargetKey = targetKey;
-    refreshTeamPresetControls({ preferredPresetId: preset.id });
-    setTeamPresetStatus(
-        getTeamPresetText("loaded", "Loaded preset: {{name}}", { name: preset.name }),
-        "success",
-    );
-}
-
-function setDefaultTeamPreset() {
-    const target = getCurrentTeamPresetTarget();
-    const presetId = document.getElementById("selectTeamPreset").value;
-    if (!target || !presetId) {
-        return;
-    }
-
-    const targetKey = createTeamPresetTargetKey(target);
-    const store = loadTeamPresetStore();
-    const preset = store.presets.find((candidate) =>
-        candidate.id === presetId && candidate.targetKey === targetKey
-    );
-    if (!preset) {
-        return;
-    }
-
-    store.defaults[targetKey] = preset.id;
-    try {
-        saveTeamPresetStore(store);
-    } catch (error) {
-        console.error("Unable to set the default team preset.", error);
-        setTeamPresetStatus(
-            getTeamPresetText("storageError", "The preset could not be saved in this browser."),
-            "danger",
-        );
-        return;
-    }
-
-    refreshTeamPresetControls({ preferredPresetId: preset.id });
-    setTeamPresetStatus(
-        getTeamPresetText("defaultSet", "Default preset: {{name}}", { name: preset.name }),
-        "success",
-    );
-}
-
-function deleteTeamPreset() {
-    const target = getCurrentTeamPresetTarget();
-    const presetId = document.getElementById("selectTeamPreset").value;
-    if (!target || !presetId) {
-        return;
-    }
-
-    const targetKey = createTeamPresetTargetKey(target);
-    const store = loadTeamPresetStore();
-    const preset = store.presets.find((candidate) =>
-        candidate.id === presetId && candidate.targetKey === targetKey
-    );
-    if (!preset) {
-        return;
-    }
-
-    const confirmationMessage = getTeamPresetText(
-        "deleteConfirm",
-        "Delete preset '{{name}}'?",
-        { name: preset.name },
-    );
-    if (!confirm(confirmationMessage)) {
-        return;
-    }
-
-    store.presets = store.presets.filter((candidate) => candidate.id !== preset.id);
-    if (store.defaults[targetKey] === preset.id) {
-        delete store.defaults[targetKey];
-    }
-    try {
-        saveTeamPresetStore(store);
-    } catch (error) {
-        console.error("Unable to delete team preset.", error);
-        setTeamPresetStatus(
-            getTeamPresetText("storageError", "The preset could not be saved in this browser."),
-            "danger",
-        );
-        return;
-    }
-
-    refreshTeamPresetControls();
-    setTeamPresetStatus(
-        getTeamPresetText("deleted", "Deleted preset: {{name}}", { name: preset.name }),
-        "success",
-    );
 }
 
 const TEAM_COMPARISON_SECTION_ORDER = [
@@ -6452,7 +6116,7 @@ function getTeamComparisonText(key, fallback, values = {}) {
     } catch (error) {
         console.warn("Unable to translate team comparison text.", error);
     }
-    return interpolateTeamPresetFallback(fallback, values);
+    return interpolateTextFallback(fallback, values);
 }
 
 function getLocalizedGameText(key, fallback) {
@@ -6486,106 +6150,11 @@ function setTeamPresetComparisonStatus(message = "", style = "muted") {
     status.classList.add(`text-${style}`);
 }
 
-function refreshTeamPresetComparisonControls({ preferredPresetId = null } = {}) {
-    const comparisonSelect = document.getElementById("selectTeamPresetComparison");
-    const compareButton = document.getElementById("buttonCompareTeamPreset");
-    if (!comparisonSelect || !compareButton) {
-        return;
-    }
-
-    const target = getCurrentTeamPresetTarget();
-    const previousSelection = comparisonSelect.dataset.selectedPresetId || "";
-    comparisonSelect.replaceChildren();
-
-    if (!target) {
-        comparisonSelect.add(new Option(
-            getTeamComparisonText("unsupported", "Select one combat zone or dungeon first."),
-            "",
-        ));
-        comparisonSelect.disabled = true;
-        compareButton.disabled = true;
-        comparisonSelect.dataset.selectedPresetId = "";
-        setTeamPresetComparisonStatus(
-            getTeamComparisonText("unsupported", "Select one combat zone or dungeon first."),
-        );
-        return;
-    }
-
-    const store = loadTeamPresetStore();
-    const targetKey = createTeamPresetTargetKey(target);
-    const presets = getTeamPresetsForTarget(store, targetKey);
-    const defaultPreset = getDefaultTeamPreset(store, targetKey);
-    comparisonSelect.add(new Option(
-        getTeamComparisonText("selectBaseline", "Baseline: select a team preset"),
-        "",
-    ));
-
-    for (const preset of presets) {
-        const defaultBadge = getTeamComparisonText("defaultBadge", "default");
-        const optionLabel = preset.id === defaultPreset?.id
-            ? `${preset.name} ★ (${defaultBadge})`
-            : preset.name;
-        comparisonSelect.add(new Option(optionLabel, preset.id));
-    }
-
-    const mainPresetSelection = document.getElementById("selectTeamPreset")?.value || "";
-    const requestedSelection = preferredPresetId ?? mainPresetSelection ?? previousSelection;
-    const candidates = [requestedSelection, previousSelection, mainPresetSelection, defaultPreset?.id]
-        .filter(Boolean);
-    const selectedPresetId = candidates.find((presetId) =>
-        presets.some((preset) => preset.id === presetId)
-    ) || "";
-
-    comparisonSelect.value = selectedPresetId;
-    comparisonSelect.dataset.selectedPresetId = selectedPresetId;
-    comparisonSelect.disabled = presets.length === 0;
-    compareButton.disabled = !selectedPresetId;
-    setTeamPresetComparisonStatus(
-        presets.length === 0
-            ? getTeamComparisonText("noPresets", "There are no team presets for the current target.")
-            : "",
-    );
-}
-
-function syncTeamPresetSelectionFromComparison(presetId) {
-    const comparisonSelect = document.getElementById("selectTeamPresetComparison");
-    comparisonSelect.dataset.selectedPresetId = presetId;
-    document.getElementById("buttonCompareTeamPreset").disabled = !presetId;
-    setTeamPresetComparisonStatus();
-
-    const teamPresetSelect = document.getElementById("selectTeamPreset");
-    if (!teamPresetSelect || ![...teamPresetSelect.options].some((option) => option.value === presetId)) {
-        return;
-    }
-    teamPresetSelect.value = presetId;
-    teamPresetSelect.dataset.selectedPresetId = presetId;
-    const target = getCurrentTeamPresetTarget();
-    const store = loadTeamPresetStore();
-    const targetKey = target ? createTeamPresetTargetKey(target) : "";
-    const selectedPreset = store.presets.find((preset) =>
-        preset.id === presetId && preset.targetKey === targetKey
-    );
-    document.getElementById("inputTeamPresetName").value = selectedPreset?.name ?? "";
-    updateTeamPresetActionButtons();
-}
-
-function getSelectedTeamPresetForComparison() {
-    const presetId = document.getElementById("selectTeamPresetComparison")?.value || "";
-    const target = getCurrentTeamPresetTarget();
-    if (!presetId || !target) {
-        return null;
-    }
-    const targetKey = createTeamPresetTargetKey(target);
-    return loadTeamPresetStore().presets.find((preset) =>
-        preset.id === presetId && preset.targetKey === targetKey
-    ) ?? null;
-}
-
-function getCurrentComparisonPlayerSlots(preset) {
+function getCurrentComparisonPlayerSlots() {
     const checkedPlayerSlots = [...document.querySelectorAll(".player-checkbox:checked")]
         .filter((checkbox) => checkbox.closest(".form-check")?.style.display !== "none")
         .map((checkbox) => checkbox.id.replace("player", ""));
-    return checkedPlayerSlots.length > 0 ? checkedPlayerSlots : preset.selectedPlayers;
+    return checkedPlayerSlots;
 }
 
 function getCurrentComparisonPlayerNames() {
@@ -6593,6 +6162,53 @@ function getCurrentComparisonPlayerNames() {
         slot,
         document.getElementById(`player${slot}-tab`)?.textContent?.trim() || "",
     ]));
+}
+
+function captureCurrentLoadoutComparison() {
+    const currentSlots = getCurrentComparisonPlayerSlots();
+    const currentPlayerNames = getCurrentComparisonPlayerNames();
+    const playerDataMapForComparison = {};
+    const comparableSlots = [];
+    const skippedSlots = [];
+
+    for (const slot of currentSlots) {
+        let playerData;
+        try {
+            playerData = JSON.parse(playerDataMap[slot]);
+        } catch (error) {
+            error.slot = slot;
+            throw error;
+        }
+        const loadoutName = normalizeLoadoutMetadataText(
+            playerData.loadoutName || playerData.loadoutMeta?.name,
+        );
+        if (!loadoutName) {
+            skippedSlots.push({
+                slot,
+                characterName: normalizeLoadoutMetadataText(
+                    playerData.characterName
+                    || playerData.characterMeta?.name
+                    || currentPlayerNames[slot],
+                ),
+            });
+            continue;
+        }
+        comparableSlots.push(slot);
+        playerDataMapForComparison[slot] = playerDataMap[slot];
+    }
+
+    const baselineRequest = {
+        selectedPlayers: comparableSlots,
+        playerDataMap: playerDataMapForComparison,
+        playerNames: currentPlayerNames,
+    };
+    return {
+        baselineRequest,
+        currentSlots,
+        currentPlayerNames,
+        skippedSlots,
+        references: buildPrivateLoadoutReferences(baselineRequest),
+    };
 }
 
 function createPrivateLoadoutBaselineRequestId() {
@@ -6667,21 +6283,21 @@ function getPrivateLoadoutReferenceLabel(reference) {
 
 function appendPrivateLoadoutResolutionSummary(summary, resolution) {
     const notice = document.createElement("div");
-    notice.className = resolution.allMatched
+    notice.className = resolution.matchedSlots.length > 0 && resolution.fallbackSlots.length === 0
         ? "alert alert-info py-2 mt-2 mb-0"
         : "alert alert-warning py-2 mt-2 mb-0";
 
     const message = document.createElement("div");
-    if (resolution.allMatched) {
+    if (resolution.matchedSlots.length > 0 && resolution.fallbackSlots.length === 0) {
         message.textContent = getTeamComparisonText(
             "serverMatched",
-            "Matched {{count}} latest game loadouts from the private server using this preset.",
+            "Matched {{count}} latest game loadouts from the private server.",
             { count: resolution.matchedSlots.length },
         );
     } else if (resolution.usesServerData) {
         message.textContent = getTeamComparisonText(
             "serverPartiallyMatched",
-            "Matched {{matched}} server loadouts; {{fallback}} slots use the saved preset snapshot.",
+            "Matched {{matched}} server loadouts; {{fallback}} named loadouts could not be matched and were skipped.",
             {
                 matched: resolution.matchedSlots.length,
                 fallback: resolution.fallbackSlots.length,
@@ -6690,7 +6306,7 @@ function appendPrivateLoadoutResolutionSummary(summary, resolution) {
     } else {
         message.textContent = getTeamComparisonText(
             "serverNotMatched",
-            "No server loadouts could be matched. The saved preset snapshot is used as the fallback baseline.",
+            "No named loadouts could be matched on the private server.",
         );
     }
     notice.appendChild(message);
@@ -6705,6 +6321,16 @@ function appendPrivateLoadoutResolutionSummary(summary, resolution) {
             list.appendChild(item);
         }
         notice.appendChild(list);
+    }
+    if (resolution.skippedSlots?.length > 0) {
+        const skipped = document.createElement("div");
+        skipped.className = "small mt-1";
+        skipped.textContent = getTeamComparisonText(
+            "manualSkipped",
+            "Skipped {{count}} manually configured players without a recorded loadout name.",
+            { count: resolution.skippedSlots.length },
+        );
+        notice.appendChild(skipped);
     }
     summary.appendChild(notice);
 }
@@ -6943,7 +6569,7 @@ function appendTeamComparisonTableCell(row, tagName, text, className = "") {
     return cell;
 }
 
-function renderTeamPresetComparison(preset, comparison, resolution) {
+function renderCurrentLoadoutComparison(baseline, comparison, resolution) {
     const summary = document.getElementById("teamPresetComparisonSummary");
     const results = document.getElementById("teamPresetComparisonResults");
     summary.replaceChildren();
@@ -6951,15 +6577,10 @@ function renderTeamPresetComparison(preset, comparison, resolution) {
 
     const direction = document.createElement("div");
     direction.className = "fw-semibold";
-    const directionKey = resolution.allMatched
-        ? "serverDirection"
-        : (resolution.usesServerData ? "mixedDirection" : "fallbackDirection");
-    const directionFallback = resolution.allMatched
-        ? "Latest game loadouts located by preset '{{name}}' → current team"
-        : (resolution.usesServerData
-            ? "Server game loadouts plus preset snapshot fallbacks from '{{name}}' → current team"
-            : "Saved snapshot of preset '{{name}}' → current team");
-    direction.textContent = getTeamComparisonText(directionKey, directionFallback, { name: preset.name });
+    direction.textContent = getTeamComparisonText(
+        "serverDirection",
+        "Latest game loadouts matched by character and loadout name → current simulator team",
+    );
     summary.appendChild(direction);
 
     const totals = document.createElement("div");
@@ -6972,14 +6593,23 @@ function renderTeamPresetComparison(preset, comparison, resolution) {
     summary.appendChild(totals);
     appendPrivateLoadoutResolutionSummary(summary, resolution);
 
+    if (comparison.players.length === 0) {
+        const unavailable = document.createElement("div");
+        unavailable.className = "alert alert-warning mb-0";
+        unavailable.textContent = getTeamComparisonText(
+            "noComparablePlayers",
+            "No players could be compared. Check that the current players have recorded loadout names and exist on the private server.",
+        );
+        results.appendChild(unavailable);
+        return;
+    }
+
     if (comparison.totalChanges === 0) {
         const noChanges = document.createElement("div");
         noChanges.className = "alert alert-success mb-0";
         noChanges.textContent = getTeamComparisonText(
-            resolution.allMatched ? "noChangesFromServer" : "noChanges",
-            resolution.allMatched
-                ? "The current team exactly matches the game loadouts found on the private server."
-                : "The current team exactly matches the selected baseline.",
+            "noChangesFromServer",
+            "The current team exactly matches the game loadouts found on the private server.",
         );
         results.appendChild(noChanges);
         return;
@@ -6993,8 +6623,8 @@ function renderTeamPresetComparison(preset, comparison, resolution) {
         const playerTitle = document.createElement("strong");
         const slotLabel = formatTeamComparisonPlayerSlot(playerComparison);
         const baselineSlot = getTeamComparisonBaselineSlot(playerComparison);
-        const baselineName = getTeamComparisonCharacterName(playerComparison, preset, "baseline");
-        const currentName = getTeamComparisonCharacterName(playerComparison, preset, "current");
+        const baselineName = getTeamComparisonCharacterName(playerComparison, baseline, "baseline");
+        const currentName = getTeamComparisonCharacterName(playerComparison, baseline, "current");
         const playerName = baselineName === currentName
             ? currentName
             : `${baselineName} → ${currentName}`;
@@ -7045,9 +6675,7 @@ function renderTeamPresetComparison(preset, comparison, resolution) {
             appendTeamComparisonTableCell(
                 headingRow,
                 "th",
-                resolution.matchedSlots.some((match) => match.slot === baselineSlot)
-                    ? getTeamComparisonText("columns.gameLoadout", "Game loadout")
-                    : getTeamComparisonText("columns.presetSnapshot", "Preset snapshot"),
+                getTeamComparisonText("columns.gameLoadout", "Game loadout"),
             );
             appendTeamComparisonTableCell(
                 headingRow,
@@ -7111,13 +6739,7 @@ function renderTeamPresetComparison(preset, comparison, resolution) {
     }
 }
 
-async function compareCurrentTeamToSelectedPreset() {
-    const preset = getSelectedTeamPresetForComparison();
-    if (!preset) {
-        refreshTeamPresetComparisonControls();
-        return;
-    }
-
+async function compareCurrentTeamToExistingLoadouts() {
     const compareButton = document.getElementById("buttonCompareTeamPreset");
     if (compareButton?.dataset.loading === "true") {
         return;
@@ -7135,42 +6757,52 @@ async function compareCurrentTeamToSelectedPreset() {
 
     savePreviousPlayer(currentPlayerTabId);
     try {
-        const references = buildPrivateLoadoutReferences(preset);
-        const response = await requestPrivateLoadoutBaselines(references);
+        const current = captureCurrentLoadoutComparison();
+        const response = current.references.length > 0
+            ? await requestPrivateLoadoutBaselines(current.references)
+            : { errorCode: "missing-reference", results: [] };
         const resolution = resolvePrivateLoadoutBaseline(
-            preset,
+            current.baselineRequest,
             response,
             response?.errorCode || "bridge-unavailable",
         );
+        resolution.skippedSlots = current.skippedSlots;
+        const matchedSlots = resolution.matchedSlots.map((match) => match.slot);
+        const matchedBaseline = {
+            ...resolution.baselinePreset,
+            selectedPlayers: matchedSlots,
+        };
         const comparison = compareTeamPresetWithCurrent(
-            resolution.baselinePreset,
+            matchedBaseline,
             playerDataMap,
-            getCurrentComparisonPlayerSlots(preset),
-            getCurrentComparisonPlayerNames(),
+            matchedSlots,
+            current.currentPlayerNames,
         );
-        renderTeamPresetComparison(preset, comparison, resolution);
+        renderCurrentLoadoutComparison(matchedBaseline, comparison, resolution);
         setTeamPresetComparisonStatus(
-            resolution.allMatched
+            resolution.matchedSlots.length > 0 && resolution.fallbackSlots.length === 0
                 ? getTeamComparisonText(
                     "serverMatchedShort",
                     "Using the latest game loadouts matched from the private server.",
                 )
-                : (resolution.usesServerData
+                : (resolution.matchedSlots.length > 0
                     ? getTeamComparisonText(
                         "usingFallbackShort",
-                        "Some baselines use the saved preset snapshot; see the comparison details.",
+                        "Some named loadouts could not be matched and were skipped; see the comparison details.",
                     )
                     : getTeamComparisonText(
                         "usingSnapshotShort",
-                        "No server loadout was matched; the saved preset snapshot is being used.",
+                        "No current player could be matched to a named server loadout.",
                     )),
-            resolution.allMatched ? "success" : "warning",
+            resolution.matchedSlots.length > 0 && resolution.fallbackSlots.length === 0
+                ? "success"
+                : "warning",
         );
         bootstrap.Modal.getOrCreateInstance(
             document.getElementById("teamPresetComparisonModal"),
         ).show();
     } catch (error) {
-        console.error("Unable to compare the current team with its preset.", error);
+        console.error("Unable to compare the current team with existing loadouts.", error);
         setTeamPresetComparisonStatus(
             getTeamComparisonText(
                 "invalidData",
@@ -7182,7 +6814,7 @@ async function compareCurrentTeamToSelectedPreset() {
     } finally {
         if (compareButton) {
             compareButton.dataset.loading = "false";
-            compareButton.disabled = !document.getElementById("selectTeamPresetComparison")?.value;
+            compareButton.disabled = false;
         }
     }
 }
@@ -7235,7 +6867,7 @@ function initImporterLoadoutNameCapture() {
         const playerNumber = /^[1-5]$/.test(slotFromLabel)
             ? slotFromLabel
             : String(slotButtons.indexOf(selectedSlotButton) + 1);
-        const loadoutName = normalizeTeamPresetNamePart(loadoutButton.textContent);
+        const loadoutName = normalizeLoadoutMetadataText(loadoutButton.textContent);
         if (!loadoutName || !/^[1-5]$/.test(playerNumber)) {
             return;
         }
@@ -7247,78 +6879,19 @@ function initImporterLoadoutNameCapture() {
     }, true);
 }
 
-function initTeamPresets() {
+function initCurrentLoadoutComparison() {
     initImporterLoadoutNameCapture();
     initLegacyLoadoutControlRetirement();
-    const targetControlIds = [
-        "selectZone",
-        "selectDungeon",
-        "selectDifficulty",
-        "simAllZoneToggle",
-        "simAllSoloToggle",
-        "simDungeonToggle",
-        "simLabyrinthToggle",
-        "simAllLabyrinthsToggle",
-    ];
-    targetControlIds.forEach((id) => {
-        document.getElementById(id)?.addEventListener("change", () => {
-            setTeamPresetStatus();
-            refreshTeamPresetControls({ allowAutoLoad: true });
-        });
-    });
-
-    document.getElementById("selectTeamPreset").addEventListener("change", (event) => {
-        event.target.dataset.selectedPresetId = event.target.value;
-        const store = loadTeamPresetStore();
-        const selectedPreset = store.presets.find((preset) => preset.id === event.target.value);
-        document.getElementById("inputTeamPresetName").value = selectedPreset?.name ?? "";
-        updateTeamPresetActionButtons();
-        refreshTeamPresetComparisonControls({ preferredPresetId: event.target.value });
-        setTeamPresetStatus();
-    });
-    document.getElementById("selectTeamPresetComparison").addEventListener("change", (event) => {
-        syncTeamPresetSelectionFromComparison(event.target.value);
-    });
-    document.getElementById("buttonCompareTeamPreset").addEventListener(
-        "click",
-        compareCurrentTeamToSelectedPreset,
-    );
-    document.getElementById("buttonLoadTeamPreset").addEventListener("click", () => {
-        loadTeamPreset(document.getElementById("selectTeamPreset").value);
-    });
-    document.getElementById("buttonSaveTeamPreset").addEventListener("click", saveCurrentTeamPreset);
-    document.getElementById("buttonDefaultTeamPreset").addEventListener("click", setDefaultTeamPreset);
-    document.getElementById("buttonDeleteTeamPreset").addEventListener("click", deleteTeamPreset);
-    document.getElementById("autoLoadTeamPreset").addEventListener("change", (event) => {
-        const store = loadTeamPresetStore();
-        store.autoLoad = event.target.checked;
-        try {
-            saveTeamPresetStore(store);
-        } catch (error) {
-            console.error("Unable to update team preset auto-load.", error);
-            event.target.checked = !event.target.checked;
-            setTeamPresetStatus(
-                getTeamPresetText("storageError", "The preset could not be saved in this browser."),
-                "danger",
-            );
-            return;
-        }
-
-        if (event.target.checked) {
-            lastAutoLoadedTeamPresetTargetKey = null;
-            refreshTeamPresetControls({ allowAutoLoad: true });
-        }
-    });
-    document.getElementById("buttonSimulationSetup").addEventListener("click", () => {
-        refreshTeamPresetControls();
-    });
-
-    if (typeof i18next !== "undefined" && typeof i18next.on === "function") {
-        const refreshLocalizedTeamPresetControls = () => refreshTeamPresetControls();
-        i18next.on("languageChanged", refreshLocalizedTeamPresetControls);
-        i18next.on("initialized", refreshLocalizedTeamPresetControls);
+    try {
+        localStorage.removeItem("mwiCombatSimulatorTeamPresets_v1");
+    } catch (error) {
+        console.warn("Unable to clear legacy team presets.", error);
     }
-    refreshTeamPresetControls({ allowAutoLoad: true });
+
+    document.getElementById("buttonCompareTeamPreset")?.addEventListener(
+        "click",
+        compareCurrentTeamToExistingLoadouts,
+    );
 }
 
 // #endregion
@@ -7548,7 +7121,7 @@ initSimulationHistory();
 initEquipmentSetsModal();
 initErrorHandling();
 initImportExportModal();
-document.addEventListener("DOMContentLoaded", initTeamPresets);
+document.addEventListener("DOMContentLoaded", initCurrentLoadoutComparison);
 initDamageDoneTaken();
 initPatchNotes();
 initExtraBuffSection();

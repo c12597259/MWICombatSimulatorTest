@@ -1,7 +1,11 @@
 export const SIMULATION_HISTORY_DATABASE_NAME = "mwiCombatSimulatorHistory";
 export const SIMULATION_HISTORY_STORE_NAME = "records";
-export const SIMULATION_HISTORY_SCHEMA_VERSION = 1;
+export const SIMULATION_HISTORY_SCHEMA_VERSION = 2;
+export const SIMULATION_HISTORY_SNAPSHOT_VERSION = 1;
 export const SIMULATION_HISTORY_DROP_COMPARISON_HOURS = 24;
+
+const SNAPSHOT_GZIP_ENCODING = "gzip-json";
+const SNAPSHOT_JSON_ENCODING = "json";
 
 const PLAYER_KEYS = new Set(["player1", "player2", "player3", "player4", "player5"]);
 const SKILL_KEYS = ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"];
@@ -106,6 +110,114 @@ export function createSimulationHistoryId(completedAt = new Date().toISOString()
     return `${Date.parse(completedAt).toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
+function encodeText(value) {
+    return typeof TextEncoder === "function"
+        ? new TextEncoder().encode(value)
+        : Uint8Array.from([...value].map((character) => character.charCodeAt(0)));
+}
+
+function decodeText(value) {
+    return typeof TextDecoder === "function"
+        ? new TextDecoder().decode(value)
+        : String.fromCharCode(...value);
+}
+
+function normalizeSnapshotBytes(value) {
+    if (value instanceof Uint8Array) {
+        return value;
+    }
+    if (value instanceof ArrayBuffer) {
+        return new Uint8Array(value);
+    }
+    if (ArrayBuffer.isView(value)) {
+        return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    }
+    if (Array.isArray(value)) {
+        return Uint8Array.from(value);
+    }
+    return null;
+}
+
+async function readByteStream(stream) {
+    const reader = stream.getReader();
+    const chunks = [];
+    let length = 0;
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+            break;
+        }
+        const chunk = normalizeSnapshotBytes(value) ?? new Uint8Array();
+        chunks.push(chunk);
+        length += chunk.byteLength;
+    }
+
+    const result = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+        result.set(chunk, offset);
+        offset += chunk.byteLength;
+    }
+    return result;
+}
+
+export async function encodeSimulationHistorySnapshot(value) {
+    const json = JSON.stringify(value);
+    if (
+        typeof CompressionStream === "function"
+        && typeof Blob === "function"
+    ) {
+        const stream = new Blob([encodeText(json)])
+            .stream()
+            .pipeThrough(new CompressionStream("gzip"));
+        return {
+            version: SIMULATION_HISTORY_SNAPSHOT_VERSION,
+            encoding: SNAPSHOT_GZIP_ENCODING,
+            data: await readByteStream(stream),
+        };
+    }
+
+    return {
+        version: SIMULATION_HISTORY_SNAPSHOT_VERSION,
+        encoding: SNAPSHOT_JSON_ENCODING,
+        data: json,
+    };
+}
+
+export function isCompatibleSimulationHistorySnapshot(snapshot) {
+    if (!snapshot || snapshot.version !== SIMULATION_HISTORY_SNAPSHOT_VERSION) {
+        return false;
+    }
+    if (snapshot.encoding === SNAPSHOT_JSON_ENCODING) {
+        return typeof snapshot.data === "string";
+    }
+    return snapshot.encoding === SNAPSHOT_GZIP_ENCODING
+        && normalizeSnapshotBytes(snapshot.data) !== null;
+}
+
+export async function decodeSimulationHistorySnapshot(snapshot) {
+    if (!isCompatibleSimulationHistorySnapshot(snapshot)) {
+        throw new Error("Unsupported simulation history snapshot.");
+    }
+
+    let json;
+    if (snapshot.encoding === SNAPSHOT_JSON_ENCODING) {
+        json = snapshot.data;
+    } else {
+        if (
+            typeof DecompressionStream !== "function"
+            || typeof Blob !== "function"
+        ) {
+            throw new Error("Gzip decompression is unavailable in this browser.");
+        }
+        const stream = new Blob([normalizeSnapshotBytes(snapshot.data)])
+            .stream()
+            .pipeThrough(new DecompressionStream("gzip"));
+        json = decodeText(await readByteStream(stream));
+    }
+    return JSON.parse(json);
+}
+
 export function getSimulationHistoryMapDescriptor(simResult) {
     if (simResult?.isLabyrinth) {
         const mapHrid = simResult.labyrinthName ?? "unknown";
@@ -131,7 +243,7 @@ export function buildSimulationHistoryRecord({
     simResult,
     players = [],
     expectedDropsByPlayer = {},
-    teamPresetName = "",
+    teamSnapshot = null,
     startedAt = "",
     completedAt = new Date().toISOString(),
     id = createSimulationHistoryId(completedAt),
@@ -192,6 +304,7 @@ export function buildSimulationHistoryRecord({
             slot,
             playerKey,
             name: String(playerContext.name ?? playerKey).trim() || playerKey,
+            loadoutName: String(playerContext.loadoutName ?? "").trim(),
             deathsPerHour: roundNumber(
                 simulatedHours > 0
                     ? toFiniteNumber(simResult?.deaths?.[playerKey]) / simulatedHours
@@ -250,7 +363,7 @@ export function buildSimulationHistoryRecord({
         startedAt,
         ...map,
         simulationHours: roundNumber(simulatedHours),
-        teamPresetName: String(teamPresetName ?? "").trim(),
+        teamSnapshot,
         playerNames: historyPlayers.map((playerEntry) => playerEntry.name),
         encountersPerHour: roundNumber(encounterCount / completedHours),
         labyrinthAttemptsPerHour: simResult?.isLabyrinth
@@ -537,8 +650,26 @@ export function saveSimulationHistoryRecord(record, indexedDb = window.indexedDB
 }
 
 export async function loadSimulationHistoryRecords(indexedDb = window.indexedDB) {
-    const records = await runHistoryTransaction(indexedDb, "readonly", (store) => store.getAll());
-    return (records ?? []).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    const records = await runHistoryTransaction(indexedDb, "readwrite", (store) => {
+        const request = store.getAll();
+        request.onsuccess = () => {
+            for (const record of request.result ?? []) {
+                if (
+                    record?.schemaVersion !== SIMULATION_HISTORY_SCHEMA_VERSION
+                    || !isCompatibleSimulationHistorySnapshot(record.teamSnapshot)
+                ) {
+                    store.delete(record?.id);
+                }
+            }
+        };
+        return request;
+    });
+    return (records ?? [])
+        .filter((record) =>
+            record?.schemaVersion === SIMULATION_HISTORY_SCHEMA_VERSION
+            && isCompatibleSimulationHistorySnapshot(record.teamSnapshot)
+        )
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
 export function deleteSimulationHistoryRecord(id, indexedDb = window.indexedDB) {
@@ -577,9 +708,27 @@ export function clearSimulationHistory(indexedDb = window.indexedDB) {
 }
 
 export function getSimulationHistoryStorageSummary(records = []) {
-    const serialized = JSON.stringify(records);
+    if (records.length === 0) {
+        return { count: 0, bytes: 0 };
+    }
+    let snapshotBytes = 0;
+    const metadataOnlyRecords = records.map((record) => {
+        const snapshot = record?.teamSnapshot;
+        if (snapshot?.encoding === SNAPSHOT_GZIP_ENCODING) {
+            snapshotBytes += normalizeSnapshotBytes(snapshot.data)?.byteLength ?? 0;
+        } else if (snapshot?.encoding === SNAPSHOT_JSON_ENCODING) {
+            snapshotBytes += encodeText(snapshot.data ?? "").byteLength;
+        }
+        return {
+            ...record,
+            teamSnapshot: snapshot
+                ? { version: snapshot.version, encoding: snapshot.encoding }
+                : null,
+        };
+    });
+    const serialized = JSON.stringify(metadataOnlyRecords);
     const bytes = typeof TextEncoder === "function"
         ? new TextEncoder().encode(serialized).length
         : serialized.length * 2;
-    return { count: records.length, bytes };
+    return { count: records.length, bytes: bytes + snapshotBytes };
 }

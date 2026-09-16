@@ -10,8 +10,11 @@ const historyModuleUrl = `data:text/javascript;base64,${Buffer.from(historySourc
 const {
     buildSimulationHistoryRecord,
     compareSimulationHistoryRecords,
+    decodeSimulationHistorySnapshot,
+    encodeSimulationHistorySnapshot,
     getSimulationHistoryMapDescriptor,
     getSimulationHistoryStorageSummary,
+    isCompatibleSimulationHistorySnapshot,
     matchSimulationHistoryPlayers,
     partitionSimulationHistoryDropComparisons,
     scaleSimulationHistoryComparisonRows,
@@ -75,18 +78,19 @@ function createSimResult() {
     };
 }
 
-test("builds a compact per-player history record with consumables and expected drops", () => {
+test("builds a compact per-player history record with loadout names, consumables, and expected drops", () => {
+    const teamSnapshot = { version: 1, encoding: "json", data: "{}" };
     const record = buildSimulationHistoryRecord({
         simResult: createSimResult(),
         players: [
-            { slot: 1, playerKey: "player1", name: "Alice" },
-            { slot: 2, playerKey: "player2", name: "Bob" },
+            { slot: 1, playerKey: "player1", name: "Alice", loadoutName: "Boss" },
+            { slot: 2, playerKey: "player2", name: "Bob", loadoutName: "Support" },
         ],
         expectedDropsByPlayer: {
             player1: { "/items/coin": 20 },
             player2: { "/items/coin": 10 },
         },
-        teamPresetName: "Alice-Loadout Bob-Loadout",
+        teamSnapshot,
         id: "record-1",
         completedAt: "2026-08-29T00:00:00.000Z",
     });
@@ -96,6 +100,8 @@ test("builds a compact per-player history record with consumables and expected d
     assert.equal(record.encountersPerHour, 120);
     assert.equal(record.monsterKillsPerHour["/monsters/frog"], 120);
     assert.equal(record.players.length, 2);
+    assert.equal(record.players[0].loadoutName, "Boss");
+    assert.equal(record.teamSnapshot, teamSnapshot);
 
     const alice = record.players[0];
     assert.equal(alice.dps, 1);
@@ -106,6 +112,21 @@ test("builds a compact per-player history record with consumables and expected d
     assert.equal(alice.expectedDropsPerHour["/items/coin"], 20);
     assert.equal(alice.hitpointsSpentPerHour, 300);
     assert.equal(alice.hitpointsRestoredPerSecond, 1);
+});
+
+test("compresses and restores a full team snapshot", async () => {
+    const value = {
+        selectedPlayers: ["1", "2"],
+        playerNames: { 1: "Alice", 2: "Bob" },
+        playerDataMap: {
+            1: JSON.stringify({ player: { staminaLevel: 100 }, loadoutName: "Boss" }),
+            2: JSON.stringify({ player: { staminaLevel: 110 }, loadoutName: "Support" }),
+        },
+    };
+
+    const encoded = await encodeSimulationHistorySnapshot(value);
+    assert.equal(isCompatibleSimulationHistorySnapshot(encoded), true);
+    assert.deepEqual(await decodeSimulationHistorySnapshot(encoded), value);
 });
 
 test("distinguishes normal zones, dungeons, and labyrinths without splitting difficulty", () => {
@@ -264,6 +285,7 @@ test("partitions shared drops from drops that differ by player", () => {
 });
 
 test("reports the serialized history size", () => {
+    assert.deepEqual(getSimulationHistoryStorageSummary([]), { count: 0, bytes: 0 });
     const summary = getSimulationHistoryStorageSummary([{ id: "one" }, { id: "two" }]);
     assert.equal(summary.count, 2);
     assert.ok(summary.bytes > 0);
