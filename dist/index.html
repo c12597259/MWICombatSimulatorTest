@@ -1681,8 +1681,15 @@
                         <div class="row mb-1">
                             <label for="selectZone" class="col-md-3 col-form-label"  data-i18n="party.selectZone">Zone</label>
                             <div class="col-md">
-                                <select id="selectZone" class="form-select">
-                                </select>
+                                <div class="d-flex align-items-center gap-3">
+                                    <select id="selectZone" class="form-select flex-grow-1">
+                                    </select>
+                                    <div class="form-check flex-shrink-0 mb-0">
+                                        <input id="allowSoloZoneToggle" class="form-check-input" type="checkbox" />
+                                        <label class="form-check-label text-nowrap" for="allowSoloZoneToggle"
+                                            data-i18n="common:allowSoloZone">Allow Solo</label>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         <div class="row mb-1">

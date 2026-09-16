@@ -365,6 +365,7 @@
     "selectSolo": "选择单人目标",
     "simDungeon": "模拟地下城",
     "simulationSettings": "模拟配置",
+    "allowSoloZone": "允许单刷",
     "allZonesData": "批量模拟数据",
     "simulateAllZonesResults" : "批量模拟结果",
     "exportToCSV" : "导出为CSV",

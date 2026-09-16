@@ -366,6 +366,7 @@
     "selectSolo": "Select Solo Target",
     "simDungeon": "Sim Dungeon",
     "simulationSettings": "Simulation Settings",
+    "allowSoloZone": "Allow Solo",
     "allZonesData": "All Zones Data",
     "simulateAllZonesResults" : "Simulate All Zones Results",
     "exportToCSV" : "Export To CSV",

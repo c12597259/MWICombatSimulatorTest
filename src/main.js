@@ -75,6 +75,11 @@ import {
     normalizeSimulationPlans,
     setSimulationPlanStepHistorySource,
 } from "./simulationPlan.js";
+import {
+    ALLOW_SOLO_ZONE_STORAGE_KEY,
+    getSelectableCombatZones,
+    isSingleMonsterCombatAction,
+} from "./zoneSelection.js";
 
 import patchNote from "../patchNote.json";
 
@@ -1213,19 +1218,61 @@ function showElement(element) {
 
 // #region Zones
 
-function initZones() {
-    let zoneSelect = document.getElementById("selectZone");
+function populateZoneSelect(preferredZoneHrid = document.getElementById("selectZone")?.value) {
+    const zoneSelect = document.getElementById("selectZone");
+    const allowSoloToggle = document.getElementById("allowSoloZoneToggle");
+    const zones = getSelectableCombatZones(actionDetailMap, allowSoloToggle?.checked === true);
 
-    // TOOD dungeon wave spawns
-    let gameZones = Object.values(actionDetailMap)
-        .filter((action) => action.type == "/action_types/combat" && action.category != "/action_categories/combat/dungeons")
-        .sort((a, b) => a.sortIndex - b.sortIndex);
-
-    for (const zone of Object.values(gameZones)) {
-        let opt = new Option(zone.name, zone.hrid);
-        opt.setAttribute("data-i18n", "actionNames." + zone.hrid);
-        zoneSelect.add(opt);
+    zoneSelect.replaceChildren();
+    for (const zone of zones) {
+        const option = new Option(zone.name, zone.hrid);
+        option.setAttribute("data-i18n", "actionNames." + zone.hrid);
+        zoneSelect.add(option);
     }
+
+    if (preferredZoneHrid && zones.some((zone) => zone.hrid === preferredZoneHrid)) {
+        zoneSelect.value = preferredZoneHrid;
+    }
+
+    if (i18next.isInitialized) {
+        zoneSelect.querySelectorAll("option[data-i18n]").forEach((option) => {
+            option.textContent = i18next.t(option.getAttribute("data-i18n"));
+        });
+    }
+
+    return zoneSelect.value;
+}
+
+function setSimulationZoneSelection(zoneHrid, { revealSolo = true } = {}) {
+    const zoneSelect = document.getElementById("selectZone");
+    const allowSoloToggle = document.getElementById("allowSoloZoneToggle");
+    const action = actionDetailMap[zoneHrid];
+
+    if (revealSolo && isSingleMonsterCombatAction(action) && !allowSoloToggle.checked) {
+        allowSoloToggle.checked = true;
+        localStorage.setItem(ALLOW_SOLO_ZONE_STORAGE_KEY, "true");
+        populateZoneSelect(zoneHrid);
+    } else if (![...zoneSelect.options].some((option) => option.value === zoneHrid)) {
+        populateZoneSelect(zoneHrid);
+    }
+
+    if ([...zoneSelect.options].some((option) => option.value === zoneHrid)) {
+        zoneSelect.value = zoneHrid;
+        return true;
+    }
+    return false;
+}
+
+function initZones() {
+    const zoneSelect = document.getElementById("selectZone");
+    const allowSoloToggle = document.getElementById("allowSoloZoneToggle");
+    allowSoloToggle.checked = localStorage.getItem(ALLOW_SOLO_ZONE_STORAGE_KEY) === "true";
+    populateZoneSelect();
+    allowSoloToggle.addEventListener("change", () => {
+        const preferredZoneHrid = zoneSelect.value;
+        localStorage.setItem(ALLOW_SOLO_ZONE_STORAGE_KEY, String(allowSoloToggle.checked));
+        populateZoneSelect(preferredZoneHrid);
+    });
 
 
     let zoneCheckBox = document.getElementById("zoneCheckBox");
@@ -3130,10 +3177,11 @@ function restoreSimulationHistoryTarget(record) {
         document.getElementById("selectLabyrinth").value = record.mapHrid;
         document.getElementById("inputRoomLevel").value = record.difficulty;
     } else {
-        const targetSelect = document.getElementById(
-            record.mapType === "dungeon" ? "selectDungeon" : "selectZone",
-        );
-        targetSelect.value = record.mapHrid;
+        if (record.mapType === "dungeon") {
+            document.getElementById("selectDungeon").value = record.mapHrid;
+        } else {
+            setSimulationZoneSelection(record.mapHrid);
+        }
         document.getElementById("selectDifficulty").value = record.difficulty;
     }
 }
@@ -6994,8 +7042,7 @@ function doSoloImport() {
     refreshAchievementStatics();
 
     if ("zone" in importSet) {
-        let zoneSelect = document.getElementById("selectZone");
-        zoneSelect.value = importSet["zone"];
+        setSimulationZoneSelection(importSet["zone"]);
     }
 
     if ("simulationTime" in importSet) {
