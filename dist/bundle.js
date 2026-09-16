@@ -3458,25 +3458,32 @@ function getSimulationHistoryStorageSummary(records = []) {
 __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   SIMULATION_PLAN_DEFAULT_TARGET_QUANTITY: () => (/* binding */ SIMULATION_PLAN_DEFAULT_TARGET_QUANTITY),
+/* harmony export */   SIMULATION_PLAN_LEGACY_STORAGE_KEYS: () => (/* binding */ SIMULATION_PLAN_LEGACY_STORAGE_KEYS),
 /* harmony export */   SIMULATION_PLAN_MAPS: () => (/* binding */ SIMULATION_PLAN_MAPS),
 /* harmony export */   SIMULATION_PLAN_SCHEMA_VERSION: () => (/* binding */ SIMULATION_PLAN_SCHEMA_VERSION),
 /* harmony export */   SIMULATION_PLAN_SKILLS: () => (/* binding */ SIMULATION_PLAN_SKILLS),
 /* harmony export */   SIMULATION_PLAN_STORAGE_KEY: () => (/* binding */ SIMULATION_PLAN_STORAGE_KEY),
+/* harmony export */   SIMULATION_PLAN_TARGETS: () => (/* binding */ SIMULATION_PLAN_TARGETS),
 /* harmony export */   calculateSimulationPlan: () => (/* binding */ calculateSimulationPlan),
 /* harmony export */   calculateSimulationPlanStep: () => (/* binding */ calculateSimulationPlanStep),
 /* harmony export */   compareSimulationPlanMapKeys: () => (/* binding */ compareSimulationPlanMapKeys),
+/* harmony export */   createSimulationPlanHistorySource: () => (/* binding */ createSimulationPlanHistorySource),
 /* harmony export */   createSimulationPlanStep: () => (/* binding */ createSimulationPlanStep),
 /* harmony export */   getDungeonChestExpectations: () => (/* binding */ getDungeonChestExpectations),
 /* harmony export */   getSimulationPlanMapDefinition: () => (/* binding */ getSimulationPlanMapDefinition),
 /* harmony export */   getSimulationPlanMapOrder: () => (/* binding */ getSimulationPlanMapOrder),
-/* harmony export */   isSimulationPlanEligibleRecord: () => (/* binding */ isSimulationPlanEligibleRecord),
-/* harmony export */   normalizeSimulationPlans: () => (/* binding */ normalizeSimulationPlans)
+/* harmony export */   getSimulationPlanTargetDefinition: () => (/* binding */ getSimulationPlanTargetDefinition),
+/* harmony export */   normalizeSimulationPlans: () => (/* binding */ normalizeSimulationPlans),
+/* harmony export */   setSimulationPlanStepHistorySource: () => (/* binding */ setSimulationPlanStepHistorySource)
 /* harmony export */ });
 /* harmony import */ var _experienceLevelCalculator_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./experienceLevelCalculator.js */ "./src/experienceLevelCalculator.js");
 
 
-const SIMULATION_PLAN_SCHEMA_VERSION = 1;
-const SIMULATION_PLAN_STORAGE_KEY = "mwiCombatSimulatorPlans_v1";
+const SIMULATION_PLAN_SCHEMA_VERSION = 2;
+const SIMULATION_PLAN_STORAGE_KEY = "mwiCombatSimulatorPlans_v2";
+const SIMULATION_PLAN_LEGACY_STORAGE_KEYS = Object.freeze([
+    "mwiCombatSimulatorPlans_v1",
+]);
 const SIMULATION_PLAN_DEFAULT_TARGET_QUANTITY = 200;
 const SIMULATION_PLAN_SKILLS = Object.freeze([
     "stamina",
@@ -3489,89 +3496,197 @@ const SIMULATION_PLAN_SKILLS = Object.freeze([
 ]);
 
 const SIMULATION_PLAN_MAPS = Object.freeze([
-    {
-        code: "图1",
-        mapKey: "zone:/actions/combat/smelly_planet",
-        targetItemHrid: "/items/blue_key_fragment",
-    },
-    {
-        code: "图2",
-        mapKey: "zone:/actions/combat/swamp_planet",
-        targetItemHrid: "/items/green_key_fragment",
-    },
+    { code: "图1", mapKey: "zone:/actions/combat/smelly_planet" },
+    { code: "图2", mapKey: "zone:/actions/combat/swamp_planet" },
     {
         code: "图3",
         mapKey: "zone:/actions/combat/aqua_planet",
-        targetItemHrid: "/items/blue_key_fragment",
+        fragmentItemHrid: "/items/blue_key_fragment",
     },
     {
         code: "图4",
         mapKey: "zone:/actions/combat/jungle_planet",
-        targetItemHrid: "/items/green_key_fragment",
+        fragmentItemHrid: "/items/green_key_fragment",
     },
     {
         code: "图5",
         mapKey: "zone:/actions/combat/gobo_planet",
-        targetItemHrid: "/items/purple_key_fragment",
+        fragmentItemHrid: "/items/purple_key_fragment",
     },
     {
         code: "图6",
         mapKey: "zone:/actions/combat/planet_of_the_eyes",
-        targetItemHrid: "/items/white_key_fragment",
+        fragmentItemHrid: "/items/white_key_fragment",
     },
     {
         code: "图7",
         mapKey: "zone:/actions/combat/sorcerers_tower",
-        targetItemHrid: "/items/orange_key_fragment",
+        fragmentItemHrid: "/items/orange_key_fragment",
     },
     {
         code: "图8",
         mapKey: "zone:/actions/combat/bear_with_it",
-        targetItemHrid: "/items/brown_key_fragment",
+        fragmentItemHrid: "/items/brown_key_fragment",
     },
     {
         code: "图9",
         mapKey: "zone:/actions/combat/golem_cave",
-        targetItemHrid: "/items/stone_key_fragment",
+        fragmentItemHrid: "/items/stone_key_fragment",
     },
     {
         code: "图10",
         mapKey: "zone:/actions/combat/twilight_zone",
-        targetItemHrid: "/items/dark_key_fragment",
+        fragmentItemHrid: "/items/dark_key_fragment",
     },
     {
         code: "图11",
         mapKey: "zone:/actions/combat/infernal_abyss",
-        targetItemHrid: "/items/burning_key_fragment",
+        fragmentItemHrid: "/items/burning_key_fragment",
     },
-    {
-        code: "D1",
-        mapKey: "dungeon:/actions/combat/chimerical_den",
-        targetItemHrid: "/items/chimerical_chest",
-        refinementItemHrid: "/items/chimerical_refinement_chest",
-    },
-    {
-        code: "D2",
-        mapKey: "dungeon:/actions/combat/sinister_circus",
-        targetItemHrid: "/items/sinister_chest",
-        refinementItemHrid: "/items/sinister_refinement_chest",
-    },
-    {
-        code: "D3",
-        mapKey: "dungeon:/actions/combat/enchanted_fortress",
-        targetItemHrid: "/items/enchanted_chest",
-        refinementItemHrid: "/items/enchanted_refinement_chest",
-    },
-    {
-        code: "D4",
-        mapKey: "dungeon:/actions/combat/pirate_cove",
-        targetItemHrid: "/items/pirate_chest",
-        refinementItemHrid: "/items/pirate_refinement_chest",
-    },
-].map((definition, index) => Object.freeze({ ...definition, order: index })));
+    { code: "D1", mapKey: "dungeon:/actions/combat/chimerical_den" },
+    { code: "D2", mapKey: "dungeon:/actions/combat/sinister_circus" },
+    { code: "D3", mapKey: "dungeon:/actions/combat/enchanted_fortress" },
+    { code: "D4", mapKey: "dungeon:/actions/combat/pirate_cove" },
+].map((definition, index) => Object.freeze({
+    ...definition,
+    order: index,
+    mapType: definition.mapKey.split(":", 1)[0],
+    mapHrid: definition.mapKey.slice(definition.mapKey.indexOf(":") + 1),
+})));
 
 const MAP_DEFINITION_BY_KEY = new Map(
     SIMULATION_PLAN_MAPS.map((definition) => [definition.mapKey, definition]),
+);
+
+const FRAGMENT_TARGETS = SIMULATION_PLAN_MAPS
+    .filter((definition) => definition.fragmentItemHrid)
+    .map((definition) => ({
+        id: definition.fragmentItemHrid,
+        type: "fragment",
+        code: definition.code,
+        itemHrid: definition.fragmentItemHrid,
+        sources: [{
+            mapKey: definition.mapKey,
+            itemHrid: definition.fragmentItemHrid,
+            quantityPerTarget: 1,
+        }],
+    }));
+
+const KEY_TARGETS = [
+    {
+        id: "/items/chimerical_chest_key",
+        type: "key",
+        code: "D1",
+        itemHrid: "/items/chimerical_chest_key",
+        sourceMapKeys: [
+            "zone:/actions/combat/aqua_planet",
+            "zone:/actions/combat/jungle_planet",
+            "zone:/actions/combat/gobo_planet",
+            "zone:/actions/combat/planet_of_the_eyes",
+        ],
+    },
+    {
+        id: "/items/sinister_chest_key",
+        type: "key",
+        code: "D2",
+        itemHrid: "/items/sinister_chest_key",
+        sourceMapKeys: [
+            "zone:/actions/combat/gobo_planet",
+            "zone:/actions/combat/sorcerers_tower",
+            "zone:/actions/combat/bear_with_it",
+            "zone:/actions/combat/twilight_zone",
+        ],
+    },
+    {
+        id: "/items/enchanted_chest_key",
+        type: "key",
+        code: "D3",
+        itemHrid: "/items/enchanted_chest_key",
+        sourceMapKeys: [
+            "zone:/actions/combat/sorcerers_tower",
+            "zone:/actions/combat/bear_with_it",
+            "zone:/actions/combat/golem_cave",
+            "zone:/actions/combat/infernal_abyss",
+        ],
+    },
+    {
+        id: "/items/pirate_chest_key",
+        type: "key",
+        code: "D4",
+        itemHrid: "/items/pirate_chest_key",
+        sourceMapKeys: [
+            "zone:/actions/combat/planet_of_the_eyes",
+            "zone:/actions/combat/golem_cave",
+            "zone:/actions/combat/twilight_zone",
+            "zone:/actions/combat/infernal_abyss",
+        ],
+    },
+].map((definition) => ({
+    ...definition,
+    sources: definition.sourceMapKeys.map((mapKey) => ({
+        mapKey,
+        itemHrid: MAP_DEFINITION_BY_KEY.get(mapKey).fragmentItemHrid,
+        quantityPerTarget: 0.9,
+    })),
+}));
+
+const DUNGEON_TARGETS = [
+    {
+        id: "/items/chimerical_chest",
+        type: "dungeon",
+        code: "D1",
+        itemHrid: "/items/chimerical_chest",
+        refinementItemHrid: "/items/chimerical_refinement_chest",
+        keyItemHrid: "/items/chimerical_chest_key",
+        mapKey: "dungeon:/actions/combat/chimerical_den",
+    },
+    {
+        id: "/items/sinister_chest",
+        type: "dungeon",
+        code: "D2",
+        itemHrid: "/items/sinister_chest",
+        refinementItemHrid: "/items/sinister_refinement_chest",
+        keyItemHrid: "/items/sinister_chest_key",
+        mapKey: "dungeon:/actions/combat/sinister_circus",
+    },
+    {
+        id: "/items/enchanted_chest",
+        type: "dungeon",
+        code: "D3",
+        itemHrid: "/items/enchanted_chest",
+        refinementItemHrid: "/items/enchanted_refinement_chest",
+        keyItemHrid: "/items/enchanted_chest_key",
+        mapKey: "dungeon:/actions/combat/enchanted_fortress",
+    },
+    {
+        id: "/items/pirate_chest",
+        type: "dungeon",
+        code: "D4",
+        itemHrid: "/items/pirate_chest",
+        refinementItemHrid: "/items/pirate_refinement_chest",
+        keyItemHrid: "/items/pirate_chest_key",
+        mapKey: "dungeon:/actions/combat/pirate_cove",
+    },
+].map((definition) => ({
+    ...definition,
+    sources: [{
+        mapKey: definition.mapKey,
+        itemHrid: definition.itemHrid,
+        quantityPerTarget: 1,
+    }],
+}));
+
+const SIMULATION_PLAN_TARGETS = Object.freeze([
+    ...FRAGMENT_TARGETS,
+    ...KEY_TARGETS,
+    ...DUNGEON_TARGETS,
+].map((definition) => Object.freeze({
+    ...definition,
+    sources: Object.freeze(definition.sources.map((source) => Object.freeze({ ...source }))),
+})));
+
+const TARGET_DEFINITION_BY_ID = new Map(
+    SIMULATION_PLAN_TARGETS.map((definition) => [definition.id, definition]),
 );
 
 function toFiniteNumber(value, fallback = 0) {
@@ -3598,6 +3713,9 @@ function addRateMap(target, source, multiplier = 1) {
         target[key] = roundNumber(
             toFiniteNumber(target[key]) + toFiniteNumber(value) * multiplier,
         );
+        if (Math.abs(target[key]) < 1e-8) {
+            delete target[key];
+        }
     }
 }
 
@@ -3613,23 +3731,49 @@ function normalizePlayerIdentity(name, slot) {
     return normalizedName || `slot:${slot}`;
 }
 
-function createStepId() {
+function createId(prefix) {
     if (globalThis.crypto?.randomUUID) {
         return globalThis.crypto.randomUUID();
     }
-    return `plan-step-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function getIdentitySet(players) {
+    return new Set((players ?? []).map((player) => player.identity));
+}
+
+function identitySetsEqual(left, right) {
+    return left.size === right.size && [...left].every((identity) => right.has(identity));
+}
+
+function getOrCreatePlayerSummary(playerMap, player) {
+    let summary = playerMap.get(player.identity);
+    if (!summary) {
+        summary = {
+            identity: player.identity,
+            name: player.name,
+            startingLevels: normalizeStartingLevels(player.startingLevels),
+            experienceGained: {},
+            consumablesUsed: {},
+            expectedDrops: {},
+            requiredKeys: {},
+            stepCount: 0,
+        };
+        playerMap.set(player.identity, summary);
+    }
+    return summary;
 }
 
 function getSimulationPlanMapDefinition(mapKey) {
     return MAP_DEFINITION_BY_KEY.get(String(mapKey ?? "")) ?? null;
 }
 
-function getSimulationPlanMapOrder(mapKey) {
-    return getSimulationPlanMapDefinition(mapKey)?.order ?? Number.POSITIVE_INFINITY;
+function getSimulationPlanTargetDefinition(targetId) {
+    return TARGET_DEFINITION_BY_ID.get(String(targetId ?? "")) ?? null;
 }
 
-function isSimulationPlanEligibleRecord(record) {
-    return Boolean(record && getSimulationPlanMapDefinition(record.mapKey));
+function getSimulationPlanMapOrder(mapKey) {
+    return getSimulationPlanMapDefinition(mapKey)?.order ?? Number.POSITIVE_INFINITY;
 }
 
 function compareSimulationPlanMapKeys(leftMapKey, rightMapKey) {
@@ -3649,104 +3793,127 @@ function compareSimulationPlanMapKeys(leftMapKey, rightMapKey) {
 
 function getDungeonChestExpectations(difficulty) {
     const normalizedDifficulty = Math.max(0, Math.trunc(toFiniteNumber(difficulty)));
+    const regularChestPerCompletion = 4 / 3;
+    const refinementPerRegularChest = normalizedDifficulty >= 2
+        ? 1
+        : normalizedDifficulty >= 1
+            ? 0.33
+            : 0;
     return {
-        chestPerCompletion: 4 / 3,
-        refinementChestPerCompletion: normalizedDifficulty >= 2
-            ? 1
-            : normalizedDifficulty >= 1
-                ? 1 / 3
-                : 0,
+        regularChestPerCompletion,
+        refinementPerRegularChest,
+        refinementChestPerCompletion: regularChestPerCompletion * refinementPerRegularChest,
     };
 }
 
-function createSimulationPlanStep(
-    record,
-    {
-        id = createStepId(),
-        targetQuantity = SIMULATION_PLAN_DEFAULT_TARGET_QUANTITY,
-        startingLevelsBySlot = {},
-    } = {},
-) {
-    const definition = getSimulationPlanMapDefinition(record?.mapKey);
-    if (!definition) {
+function createSimulationPlanHistorySource(record, { startingLevelsBySlot = {} } = {}) {
+    const mapDefinition = getSimulationPlanMapDefinition(record?.mapKey);
+    if (!mapDefinition) {
         throw new Error("This history map is not supported by simulation plans.");
     }
 
     const isDungeon = record.mapType === "dungeon";
     const dungeonDrops = getDungeonChestExpectations(record.difficulty);
     const completionsPerHour = Math.max(0, toFiniteNumber(record.encountersPerHour));
-    const players = (record.players ?? []).map((player) => {
-        const targetRatePerHour = isDungeon
-            ? completionsPerHour * dungeonDrops.chestPerCompletion
-            : toFiniteNumber(player.expectedDropsPerHour?.[definition.targetItemHrid]);
-        const extraDropsPerHour = {};
-        if (
-            isDungeon
-            && definition.refinementItemHrid
-            && dungeonDrops.refinementChestPerCompletion > 0
-        ) {
-            extraDropsPerHour[definition.refinementItemHrid] = roundNumber(
-                completionsPerHour * dungeonDrops.refinementChestPerCompletion,
-            );
-        }
+    const dungeonTarget = DUNGEON_TARGETS.find((target) => target.mapKey === record.mapKey);
+    const itemHrid = isDungeon ? dungeonTarget?.itemHrid : mapDefinition.fragmentItemHrid;
 
-        return {
+    if (!itemHrid) {
+        throw new Error("This history map cannot produce a plan target.");
+    }
+
+    return {
+        recordId: String(record.id ?? ""),
+        sourceCreatedAt: String(record.createdAt ?? ""),
+        mapKey: mapDefinition.mapKey,
+        mapType: String(record.mapType ?? mapDefinition.mapType),
+        mapHrid: String(record.mapHrid ?? mapDefinition.mapHrid),
+        difficulty: Math.max(0, Math.trunc(toFiniteNumber(record.difficulty))),
+        itemHrid,
+        refinementPerRegularChest: isDungeon
+            ? dungeonDrops.refinementPerRegularChest
+            : 0,
+        players: (record.players ?? []).map((player) => ({
             identity: normalizePlayerIdentity(player.name, player.slot),
             slot: String(player.slot ?? ""),
             name: String(player.name ?? player.playerKey ?? "").trim(),
             loadoutName: String(player.loadoutName ?? "").trim(),
             startingLevels: normalizeStartingLevels(startingLevelsBySlot[player.slot]),
-            targetRatePerHour: roundNumber(Math.max(0, targetRatePerHour)),
-            extraDropsPerHour,
+            itemRatePerHour: roundNumber(Math.max(
+                0,
+                isDungeon
+                    ? completionsPerHour * dungeonDrops.regularChestPerCompletion
+                    : toFiniteNumber(player.expectedDropsPerHour?.[itemHrid]),
+            )),
             experiencePerHour: normalizeRateMap(player.experiencePerHour),
             consumablesPerHour: normalizeRateMap(player.consumablesPerHour),
-        };
-    });
-
-    return {
-        schemaVersion: SIMULATION_PLAN_SCHEMA_VERSION,
-        id,
-        sourceRecordId: String(record.id ?? ""),
-        sourceCreatedAt: String(record.createdAt ?? ""),
-        mapKey: definition.mapKey,
-        mapType: String(record.mapType ?? ""),
-        mapHrid: String(record.mapHrid ?? ""),
-        difficulty: Math.max(0, Math.trunc(toFiniteNumber(record.difficulty))),
-        targetItemHrid: definition.targetItemHrid,
-        refinementItemHrid: definition.refinementItemHrid ?? "",
-        targetQuantity: Math.max(0, toFiniteNumber(targetQuantity)),
-        players,
+        })),
     };
 }
 
-function calculateSimulationPlanStep(step) {
-    const targetQuantity = Math.max(0, toFiniteNumber(step?.targetQuantity));
-    const players = step?.players ?? [];
-    const missingRatePlayers = players.filter(
-        (player) => toFiniteNumber(player.targetRatePerHour) <= 0,
+function createSimulationPlanStep(
+    targetId,
+    {
+        id = createId("plan-step"),
+        targetQuantity = SIMULATION_PLAN_DEFAULT_TARGET_QUANTITY,
+    } = {},
+) {
+    const definition = getSimulationPlanTargetDefinition(targetId);
+    if (!definition) {
+        throw new Error("This target is not supported by simulation plans.");
+    }
+    return {
+        schemaVersion: SIMULATION_PLAN_SCHEMA_VERSION,
+        id,
+        targetId: definition.id,
+        targetQuantity: Math.max(0, toFiniteNumber(targetQuantity)),
+        sources: definition.sources.map((source) => ({
+            ...source,
+            historyRecord: null,
+        })),
+    };
+}
+
+function setSimulationPlanStepHistorySource(step, mapKey, historySource) {
+    const source = step?.sources?.find((entry) => entry.mapKey === mapKey);
+    if (!source) {
+        throw new Error("This map is not required by the selected target.");
+    }
+    if (historySource && historySource.mapKey !== mapKey) {
+        throw new Error("The selected history record belongs to a different map.");
+    }
+    source.historyRecord = historySource ?? null;
+    return step;
+}
+
+function calculateSimulationPlanSource(source, targetQuantity) {
+    const requiredQuantity = roundNumber(
+        Math.max(0, targetQuantity) * Math.max(0, toFiniteNumber(source.quantityPerTarget)),
     );
-    const durationHours = players.length > 0 && missingRatePlayers.length === 0
+    const historyRecord = source.historyRecord;
+    const players = historyRecord?.players ?? [];
+    const missingRatePlayers = players.filter(
+        (player) => toFiniteNumber(player.itemRatePerHour) <= 0,
+    );
+    const selected = Boolean(historyRecord);
+    const durationHours = selected && players.length > 0 && missingRatePlayers.length === 0
         ? Math.max(...players.map(
-            (player) => targetQuantity / toFiniteNumber(player.targetRatePerHour),
+            (player) => requiredQuantity / toFiniteNumber(player.itemRatePerHour),
         ))
         : Number.POSITIVE_INFINITY;
 
     return {
-        ...step,
-        targetQuantity,
-        durationHours,
+        ...source,
+        requiredQuantity,
+        selected,
         valid: Number.isFinite(durationHours),
+        durationHours,
         missingRatePlayers: missingRatePlayers.map((player) => player.name),
         players: players.map((player) => ({
             ...player,
-            targetAmount: Number.isFinite(durationHours)
-                ? roundNumber(toFiniteNumber(player.targetRatePerHour) * durationHours)
+            gatheredAmount: Number.isFinite(durationHours)
+                ? roundNumber(toFiniteNumber(player.itemRatePerHour) * durationHours)
                 : 0,
-            extraDrops: Number.isFinite(durationHours)
-                ? Object.fromEntries(Object.entries(player.extraDropsPerHour ?? {}).map(
-                    ([itemHrid, rate]) => [itemHrid, roundNumber(rate * durationHours)],
-                ))
-                : {},
             experienceGained: Number.isFinite(durationHours)
                 ? Object.fromEntries(Object.entries(player.experiencePerHour ?? {}).map(
                     ([skill, rate]) => [skill, roundNumber(rate * durationHours)],
@@ -3758,6 +3925,95 @@ function calculateSimulationPlanStep(step) {
                 ))
                 : {},
         })),
+    };
+}
+
+function calculateSimulationPlanStep(step) {
+    const definition = getSimulationPlanTargetDefinition(step?.targetId);
+    const targetQuantity = Math.max(0, toFiniteNumber(step?.targetQuantity));
+    if (!definition) {
+        return {
+            ...step,
+            targetQuantity,
+            valid: false,
+            invalidReason: "unsupportedTarget",
+            durationHours: Number.POSITIVE_INFINITY,
+            sources: [],
+            players: [],
+        };
+    }
+
+    const sources = (step.sources ?? []).map((source) => (
+        calculateSimulationPlanSource(source, targetQuantity)
+    ));
+    const allSourcesValid = sources.length === definition.sources.length
+        && sources.every((source) => source.valid);
+    const sourceIdentitySets = sources.map((source) => getIdentitySet(source.players));
+    const teamsMatch = definition.type !== "key"
+        || sourceIdentitySets.length === 0
+        || sourceIdentitySets.every((set) => identitySetsEqual(set, sourceIdentitySets[0]));
+    const valid = allSourcesValid && teamsMatch;
+    const durationHours = valid
+        ? roundNumber(sources.reduce((total, source) => total + source.durationHours, 0))
+        : Number.POSITIVE_INFINITY;
+    const playerMap = new Map();
+
+    if (valid) {
+        for (const source of sources) {
+            for (const player of source.players) {
+                const summary = getOrCreatePlayerSummary(playerMap, player);
+                addRateMap(summary.experienceGained, player.experienceGained);
+                addRateMap(summary.consumablesUsed, player.consumablesUsed);
+                addRateMap(summary.expectedDrops, {
+                    [source.itemHrid]: player.gatheredAmount,
+                });
+
+                if (definition.type === "dungeon") {
+                    const refinementAmount = roundNumber(
+                        player.gatheredAmount
+                            * toFiniteNumber(source.historyRecord.refinementPerRegularChest),
+                    );
+                    addRateMap(summary.expectedDrops, {
+                        [definition.refinementItemHrid]: refinementAmount,
+                    });
+                    addRateMap(summary.requiredKeys, {
+                        [definition.keyItemHrid]: player.gatheredAmount + refinementAmount,
+                    });
+                }
+            }
+        }
+
+        if (definition.type === "key") {
+            for (const summary of playerMap.values()) {
+                addRateMap(summary.expectedDrops, {
+                    [definition.itemHrid]: targetQuantity,
+                });
+                for (const source of sources) {
+                    addRateMap(summary.expectedDrops, {
+                        [source.itemHrid]: -source.requiredQuantity,
+                    });
+                }
+            }
+        }
+    }
+
+    for (const summary of playerMap.values()) {
+        summary.stepCount = 1;
+    }
+
+    return {
+        ...step,
+        targetQuantity,
+        targetDefinition: definition,
+        valid,
+        invalidReason: !allSourcesValid
+            ? "missingHistoryOrRate"
+            : !teamsMatch
+                ? "teamMismatch"
+                : "",
+        durationHours,
+        sources,
+        players: [...playerMap.values()],
     };
 }
 
@@ -3774,26 +4030,12 @@ function calculateSimulationPlan(plan) {
             continue;
         }
         for (const player of step.players) {
-            let summary = playerMap.get(player.identity);
-            if (!summary) {
-                summary = {
-                    identity: player.identity,
-                    name: player.name,
-                    startingLevels: normalizeStartingLevels(player.startingLevels),
-                    experienceGained: {},
-                    consumablesUsed: {},
-                    expectedDrops: {},
-                    stepCount: 0,
-                };
-                playerMap.set(player.identity, summary);
-            }
+            const summary = getOrCreatePlayerSummary(playerMap, player);
             summary.stepCount += 1;
             addRateMap(summary.experienceGained, player.experienceGained);
             addRateMap(summary.consumablesUsed, player.consumablesUsed);
-            addRateMap(summary.expectedDrops, {
-                [step.targetItemHrid]: player.targetAmount,
-                ...player.extraDrops,
-            });
+            addRateMap(summary.expectedDrops, player.expectedDrops);
+            addRateMap(summary.requiredKeys, player.requiredKeys);
         }
     }
 
@@ -3809,8 +4051,10 @@ function calculateSimulationPlan(plan) {
     }));
 
     const consumablesUsed = {};
+    const requiredKeys = {};
     for (const player of players) {
         addRateMap(consumablesUsed, player.consumablesUsed);
+        addRateMap(requiredKeys, player.requiredKeys);
     }
 
     return {
@@ -3819,6 +4063,46 @@ function calculateSimulationPlan(plan) {
         steps,
         players,
         consumablesUsed,
+        requiredKeys,
+    };
+}
+
+function normalizeHistorySource(value, expectedMapKey) {
+    if (!value || typeof value !== "object" || value.mapKey !== expectedMapKey) {
+        return null;
+    }
+    return {
+        ...value,
+        players: Array.isArray(value.players) ? value.players : [],
+    };
+}
+
+function normalizeStep(value) {
+    const definition = getSimulationPlanTargetDefinition(value?.targetId);
+    if (
+        !definition
+        || value?.schemaVersion !== SIMULATION_PLAN_SCHEMA_VERSION
+        || !value.id
+    ) {
+        return null;
+    }
+    return {
+        schemaVersion: SIMULATION_PLAN_SCHEMA_VERSION,
+        id: String(value.id),
+        targetId: definition.id,
+        targetQuantity: Math.max(0, toFiniteNumber(value.targetQuantity)),
+        sources: definition.sources.map((requiredSource) => {
+            const savedSource = value.sources?.find(
+                (source) => source?.mapKey === requiredSource.mapKey,
+            );
+            return {
+                ...requiredSource,
+                historyRecord: normalizeHistorySource(
+                    savedSource?.historyRecord,
+                    requiredSource.mapKey,
+                ),
+            };
+        }),
     };
 }
 
@@ -3834,10 +4118,7 @@ function normalizeSimulationPlans(value) {
             createdAt: String(plan.createdAt ?? ""),
             updatedAt: String(plan.updatedAt ?? ""),
             steps: Array.isArray(plan.steps)
-                ? plan.steps.filter((step) => (
-                    step?.schemaVersion === SIMULATION_PLAN_SCHEMA_VERSION
-                    && getSimulationPlanMapDefinition(step.mapKey)
-                ))
+                ? plan.steps.map(normalizeStep).filter(Boolean)
                 : [],
         }))
         .filter((plan) => plan.id && plan.name);
@@ -4284,7 +4565,7 @@ function compareTeamPresetWithCurrent(
   \************************/
 /***/ ((module) => {
 
-module.exports = /*#__PURE__*/JSON.parse('{"2026年9月16日":["新增计划模拟：可将图1至图11和D1至D4的历史记录组合统计总耗时、消耗品、经验与最终等级","计划模拟会自动关联钥匙碎片；地下城按每次4/3普通宝箱、T1额外1/3精炼宝箱、T2额外1精炼宝箱计算","模拟历史的地图选择按图1至图11、D1至D4排序，单怪物记录不提供加入计划操作","模拟结果的每小时经验下方新增升级模拟，可按目标等级估算时间或按经过天数反推技能等级","配装比对忽略游戏任务徽章使用的 Trinket 槽位","移除模拟配置中的队伍预设，并自动清理浏览器内保存的旧预设","模拟历史现在会压缩保存完整队伍快照与各角色配装名","模拟历史新增导入按钮，可一键恢复当时的全队配置、地图和难度","配装比对改为直接按当前角色与配装名匹配服务器现有配装，手写配置自动跳过","历史记录中的战斗或完成次数每小时缩写为 eph；旧格式历史记录会自动清理"],"2026年9月15日":["调整站位时保持玩家1至玩家5槽位固定，仅在槽位之间移动角色与完整配装数据","配装比对改为按角色身份匹配，单纯交换站位不再被识别为整套配装变化","加载旧队伍预设时自动将原站位顺序转换到固定槽位","模拟历史详情改为横向角色标签页，点击角色即可切换查看","模拟历史对比改为横向角色标签页，全队共同掉落只保留一份"],"2026年9月11日":["优化历史掉落数量显示：小数按数值范围保留精度，大额数量取整，超过10万的金币使用M缩写","提高黑暗模式下历史比较增减数值的绿色与红色亮度"],"2026年9月10日":["模拟历史比较改为左右分栏，战斗指标与资源消耗在左、期望掉落在右","历史比较中的期望掉落改为24小时产量，并优先显示金币、钥匙碎片、护符和精华","全队共同掉落只显示一份，角色间确有差异的掉落单独列出","历史比较中的掉落数量达到1时最多显示两位小数，小于1时保留更多精度"],"2026年8月29日":["玩家标签支持拖动调整队伍站位，贯穿攻击会按标签从左到右的顺序处理","玩家站位会保存在当前浏览器中，并在加载队伍预设时恢复","新增按地图自动保存的模拟历史，不同难度记录会归入同一地图","模拟历史支持查看全队每名角色的主要指标、消耗品与期望掉落","支持选择同地图两条历史记录，按角色比较战斗表现与资源变化"],"2026年8月28日":["支持从私有配装数据导入每名角色实际生效的公会神龛战斗增益","房屋面板新增五种公会战斗神龛等级显示与模拟调整","逐怪物伤害与承伤明细改为默认折叠显示","钥匙碎片时间成本移至期望掉落上方，并新增每日碎片产量","钥匙碎片总耗时支持使用角色专业等级及游戏当前生效的专业增益精确计算","房屋面板改为房屋与公会神龛左右分栏显示","移除价格设置、市场价格获取与期望利润相关功能"],"2026年5月5日":["更新装备数据和本地化名称"],"2026年4月7日":["增加字段显示迷宫尝试次数和迷宫成功率"],"2026年3月5日":["优化狂怒相关的模拟性能"],"2026年3月3日":["支持迷宫封印对应的个人增益"],"2026年2月24日":["更新迷宫补丁的数据","新增支持迷宫单体/批量模拟"],"2026年2月1日":["修正战斗等级计算的精度","修正地下城完成或失败后重新进入战斗的时间间隔 by wangchyan","修正诅咒和削弱的持续时间 by wangchyan","修正诅咒和狂怒的触发逻辑 by wangchyan","修正地下城团灭重置机制的部分逻辑 by wangchyan","修复守护光环和速度光环部分增益未正确受对应等级加强的异常 by wangchyan","修复无敌技能未正确影响韧性数值的缺陷 by wangchyan","修复初次进入战斗时未能优先吃喝的异常 by wangchyan","战斗时长相关的统计现在仅计算已完成的战斗，不再包含当前未结束的战斗 by wangchyan"],"2026年1月11日":["修复trigger错误计算已阵亡单位的问题 by wangchyan"],"2025年12月31日":["实验性功能新增HP/MP可视化图表 by wangchyan","修复防御伤害未正确受damge加成的异常 by wangchyan","修复守护光环的治疗加成效果未生效的异常 by wangchyan","修复快速治疗等技能未正确选择最低%生命为目标的错误 by wangchyan"],"2025年12月30日":["地下城增加最短完成时间记录"],"2025年12月24日":["修复技能释放选择的缺陷，之前可能存在异常缺蓝等情况"],"2025年12月18日":["支持成就系统及对应buff效果","地下城怪物的掉落不再生效"],"2025年12月6日":["修复游戏更新后技能在无trigger情况下由[]变为null时造成的异常"],"2025年11月7日":["兼容支持从CN镜像站调用API获取价格"],"2025年10月14日":["修复怪物攻击间隔数值未能适配攻击等级的问题"],"2025年9月17日":["修复暴击光环的trigger缺陷"],"2025年9月9日":["复活时不再错误的清空所有buff","团灭日志增加反伤、荆棘和DOT伤害记录"],"2025年8月21日":["增加单挑战斗批量模拟和对应怪物选项","增加MooPass和社区buff的选项及对应功能","精炼装备数值加强","秘法主教属性削弱","init_client_info_v1.20250819.0.json游戏数据更新"],"2025年8月20日":["修复经验和掉落计算在极端情况下的可能异常"],"2025年8月19日":["合并Test和Temp分支的rework内容","init_client_info_v1.20250818.0.json游戏数据更新"],"2025年8月18日":["修复贯穿技能可能对相同目标造成重复伤害的问题","修复团灭日志在黑夜模式下的显示异常","战斗等级公式更新","钟乳石魔像的荆棘数值调整","init_client_info_v1.20250626.0_0817.json游戏数据更新"],"2025年8月16日":["增加停止模拟按钮 by BKN46","增加技能顺序调整按钮 by BKN46","增加团灭日志 by TruthLight","怪物属性更新","奥术反射更名为报应","init_client_info_v1.20250626.0_0815.json游戏数据更新"],"2025年8月14日":["怪物属性更新","远程和法师装备属性调整","反伤计算上限调整","修复战斗间隔释放技能的异常","修复技能释放判断逻辑的异常","法力值耗尽比例更加准确","调整远程经验的15%和魔法经验的12%映射到攻击经验","init_client_info_v1.20250626.0_0813.json游戏数据更新"],"2025年8月11日":["怪物属性更新","近战和物理技能施法时间更新","盾击和重锤数值调整","双手盾防御经验加成调整","init_client_info_v1.20250626.0_0811.json游戏数据更新"],"2025年8月8日":["实现组队等级差过大时对掉落和经验的惩罚","实现怪物经验随狂暴进度百分比增加","暴击光环数值调整","增加战斗等级数值显示","增加等级差距惩罚数值显示","init_client_info_v1.20250626.0_0807.json游戏数据更新"],"2025年8月7日":["修复组队战斗时一些重复物品掉落数量异常的缺陷 by contr4l","init_client_info_v1.20250626.0_0806.json游戏数据更新"],"2025年8月3日":["怪物狂暴机制及对应trigger生效","精炼装备更新，护符数值调整，守护光环增加闪避率","init_client_info_v1.20250626.0_0802.json游戏数据更新","狂怒层数修正为5层","招架结算机制调整"],"2025年7月31日":["物品数据和怪物属性更新","尖刺外壳和奥术反射重做","强化数值更新","删除异常trigger","狮鹫盾的虚弱重做","君王剑招架对队友生效","狂怒特效最大层数修正为6层","涟漪特效增加10MP恢复","反伤正确显示其命中率","反伤机制调整","同步双手盾属性和反伤荆棘技能数值的调整"],"2025年7月22日":["暴击光环受远程等级加成","光环基础数值和等级加成调整"],"2025年7月17日":["批量模拟支持勾选星球","经验分配比例调整至30%+70%","光环及对应trigger，并按对应技能等级百分比加成","水火自然默认调整为元素光环","init_client_info_v1.20250626.0_0717.json游戏数据更新"],"2025年7月11日":["怪物经验和技能等级公式更新","闪避和抗性计算公式更新","力量更替为近战以及对应的兼容","init_client_info_v1.20250626.0_0711.json游戏数据更新"],"2025年7月10日":["修复贯穿技能由敌人释放时可能多次击中相同目标的缺陷"],"2025年7月9日":["掉落和掉率调整","经验调整","疫病射击和破甲之刺调整","怪物自动恢复移除","疫病射击trigger调整","获取价格使用官方API"],"2025年7月7日":["怪物属性缩放和地图多难度","法师技能调整和装备上\'技能伤害\'词缀生效","攻击等级和房屋等级对施法速度的影响生效","物品调整","精准重做以攻击等级计算","TEST 远程魔法经验的10%映射到攻击经验！","经验重做和护符装备"]}');
+module.exports = /*#__PURE__*/JSON.parse('{"2026年9月16日":["计划模拟改为先添加目标物品，再为每张相关地图选择对应的历史记录","支持图3至图11的钥匙碎片与D1至D4完整宝箱钥匙目标；每把完整钥匙按四种碎片各0.9个计算","地下城每次按4/3普通宝箱计算；精炼宝箱为普通宝箱数量的T1 33%或T2 100%，并统计开箱所需钥匙","模拟历史的地图选择按图1至图11、D1至D4排序，其余单怪物记录排在后面","模拟结果的每小时经验下方新增升级模拟，可按目标等级估算时间或按经过天数反推技能等级","配装比对忽略游戏任务徽章使用的 Trinket 槽位","移除模拟配置中的队伍预设，并自动清理浏览器内保存的旧预设","模拟历史现在会压缩保存完整队伍快照与各角色配装名","模拟历史新增导入按钮，可一键恢复当时的全队配置、地图和难度","配装比对改为直接按当前角色与配装名匹配服务器现有配装，手写配置自动跳过","历史记录中的战斗或完成次数每小时缩写为 eph；旧格式历史记录会自动清理"],"2026年9月15日":["调整站位时保持玩家1至玩家5槽位固定，仅在槽位之间移动角色与完整配装数据","配装比对改为按角色身份匹配，单纯交换站位不再被识别为整套配装变化","加载旧队伍预设时自动将原站位顺序转换到固定槽位","模拟历史详情改为横向角色标签页，点击角色即可切换查看","模拟历史对比改为横向角色标签页，全队共同掉落只保留一份"],"2026年9月11日":["优化历史掉落数量显示：小数按数值范围保留精度，大额数量取整，超过10万的金币使用M缩写","提高黑暗模式下历史比较增减数值的绿色与红色亮度"],"2026年9月10日":["模拟历史比较改为左右分栏，战斗指标与资源消耗在左、期望掉落在右","历史比较中的期望掉落改为24小时产量，并优先显示金币、钥匙碎片、护符和精华","全队共同掉落只显示一份，角色间确有差异的掉落单独列出","历史比较中的掉落数量达到1时最多显示两位小数，小于1时保留更多精度"],"2026年8月29日":["玩家标签支持拖动调整队伍站位，贯穿攻击会按标签从左到右的顺序处理","玩家站位会保存在当前浏览器中，并在加载队伍预设时恢复","新增按地图自动保存的模拟历史，不同难度记录会归入同一地图","模拟历史支持查看全队每名角色的主要指标、消耗品与期望掉落","支持选择同地图两条历史记录，按角色比较战斗表现与资源变化"],"2026年8月28日":["支持从私有配装数据导入每名角色实际生效的公会神龛战斗增益","房屋面板新增五种公会战斗神龛等级显示与模拟调整","逐怪物伤害与承伤明细改为默认折叠显示","钥匙碎片时间成本移至期望掉落上方，并新增每日碎片产量","钥匙碎片总耗时支持使用角色专业等级及游戏当前生效的专业增益精确计算","房屋面板改为房屋与公会神龛左右分栏显示","移除价格设置、市场价格获取与期望利润相关功能"],"2026年5月5日":["更新装备数据和本地化名称"],"2026年4月7日":["增加字段显示迷宫尝试次数和迷宫成功率"],"2026年3月5日":["优化狂怒相关的模拟性能"],"2026年3月3日":["支持迷宫封印对应的个人增益"],"2026年2月24日":["更新迷宫补丁的数据","新增支持迷宫单体/批量模拟"],"2026年2月1日":["修正战斗等级计算的精度","修正地下城完成或失败后重新进入战斗的时间间隔 by wangchyan","修正诅咒和削弱的持续时间 by wangchyan","修正诅咒和狂怒的触发逻辑 by wangchyan","修正地下城团灭重置机制的部分逻辑 by wangchyan","修复守护光环和速度光环部分增益未正确受对应等级加强的异常 by wangchyan","修复无敌技能未正确影响韧性数值的缺陷 by wangchyan","修复初次进入战斗时未能优先吃喝的异常 by wangchyan","战斗时长相关的统计现在仅计算已完成的战斗，不再包含当前未结束的战斗 by wangchyan"],"2026年1月11日":["修复trigger错误计算已阵亡单位的问题 by wangchyan"],"2025年12月31日":["实验性功能新增HP/MP可视化图表 by wangchyan","修复防御伤害未正确受damge加成的异常 by wangchyan","修复守护光环的治疗加成效果未生效的异常 by wangchyan","修复快速治疗等技能未正确选择最低%生命为目标的错误 by wangchyan"],"2025年12月30日":["地下城增加最短完成时间记录"],"2025年12月24日":["修复技能释放选择的缺陷，之前可能存在异常缺蓝等情况"],"2025年12月18日":["支持成就系统及对应buff效果","地下城怪物的掉落不再生效"],"2025年12月6日":["修复游戏更新后技能在无trigger情况下由[]变为null时造成的异常"],"2025年11月7日":["兼容支持从CN镜像站调用API获取价格"],"2025年10月14日":["修复怪物攻击间隔数值未能适配攻击等级的问题"],"2025年9月17日":["修复暴击光环的trigger缺陷"],"2025年9月9日":["复活时不再错误的清空所有buff","团灭日志增加反伤、荆棘和DOT伤害记录"],"2025年8月21日":["增加单挑战斗批量模拟和对应怪物选项","增加MooPass和社区buff的选项及对应功能","精炼装备数值加强","秘法主教属性削弱","init_client_info_v1.20250819.0.json游戏数据更新"],"2025年8月20日":["修复经验和掉落计算在极端情况下的可能异常"],"2025年8月19日":["合并Test和Temp分支的rework内容","init_client_info_v1.20250818.0.json游戏数据更新"],"2025年8月18日":["修复贯穿技能可能对相同目标造成重复伤害的问题","修复团灭日志在黑夜模式下的显示异常","战斗等级公式更新","钟乳石魔像的荆棘数值调整","init_client_info_v1.20250626.0_0817.json游戏数据更新"],"2025年8月16日":["增加停止模拟按钮 by BKN46","增加技能顺序调整按钮 by BKN46","增加团灭日志 by TruthLight","怪物属性更新","奥术反射更名为报应","init_client_info_v1.20250626.0_0815.json游戏数据更新"],"2025年8月14日":["怪物属性更新","远程和法师装备属性调整","反伤计算上限调整","修复战斗间隔释放技能的异常","修复技能释放判断逻辑的异常","法力值耗尽比例更加准确","调整远程经验的15%和魔法经验的12%映射到攻击经验","init_client_info_v1.20250626.0_0813.json游戏数据更新"],"2025年8月11日":["怪物属性更新","近战和物理技能施法时间更新","盾击和重锤数值调整","双手盾防御经验加成调整","init_client_info_v1.20250626.0_0811.json游戏数据更新"],"2025年8月8日":["实现组队等级差过大时对掉落和经验的惩罚","实现怪物经验随狂暴进度百分比增加","暴击光环数值调整","增加战斗等级数值显示","增加等级差距惩罚数值显示","init_client_info_v1.20250626.0_0807.json游戏数据更新"],"2025年8月7日":["修复组队战斗时一些重复物品掉落数量异常的缺陷 by contr4l","init_client_info_v1.20250626.0_0806.json游戏数据更新"],"2025年8月3日":["怪物狂暴机制及对应trigger生效","精炼装备更新，护符数值调整，守护光环增加闪避率","init_client_info_v1.20250626.0_0802.json游戏数据更新","狂怒层数修正为5层","招架结算机制调整"],"2025年7月31日":["物品数据和怪物属性更新","尖刺外壳和奥术反射重做","强化数值更新","删除异常trigger","狮鹫盾的虚弱重做","君王剑招架对队友生效","狂怒特效最大层数修正为6层","涟漪特效增加10MP恢复","反伤正确显示其命中率","反伤机制调整","同步双手盾属性和反伤荆棘技能数值的调整"],"2025年7月22日":["暴击光环受远程等级加成","光环基础数值和等级加成调整"],"2025年7月17日":["批量模拟支持勾选星球","经验分配比例调整至30%+70%","光环及对应trigger，并按对应技能等级百分比加成","水火自然默认调整为元素光环","init_client_info_v1.20250626.0_0717.json游戏数据更新"],"2025年7月11日":["怪物经验和技能等级公式更新","闪避和抗性计算公式更新","力量更替为近战以及对应的兼容","init_client_info_v1.20250626.0_0711.json游戏数据更新"],"2025年7月10日":["修复贯穿技能由敌人释放时可能多次击中相同目标的缺陷"],"2025年7月9日":["掉落和掉率调整","经验调整","疫病射击和破甲之刺调整","怪物自动恢复移除","疫病射击trigger调整","获取价格使用官方API"],"2025年7月7日":["怪物属性缩放和地图多难度","法师技能调整和装备上\'技能伤害\'词缀生效","攻击等级和房屋等级对施法速度的影响生效","物品调整","精准重做以攻击等级计算","TEST 远程魔法经验的10%映射到攻击经验！","经验重做和护符装备"]}');
 
 /***/ }),
 
@@ -6818,15 +7099,6 @@ function renderSimulationHistoryRecordRows(records) {
 
         const actionCell = document.createElement("td");
         actionCell.className = "text-nowrap";
-        if ((0,_simulationPlan_js__WEBPACK_IMPORTED_MODULE_25__.isSimulationPlanEligibleRecord)(record)) {
-            const addToPlanButton = document.createElement("button");
-            addToPlanButton.type = "button";
-            addToPlanButton.className = "btn btn-success btn-sm me-2";
-            addToPlanButton.dataset.historyAction = "add-plan";
-            addToPlanButton.dataset.recordId = record.id;
-            addToPlanButton.textContent = getSimulationHistoryText("addToPlan", "Add to Plan");
-            actionCell.appendChild(addToPlanButton);
-        }
         const importButton = document.createElement("button");
         importButton.type = "button";
         importButton.className = "btn btn-primary btn-sm me-2";
@@ -7612,16 +7884,6 @@ async function handleSimulationHistoryRecordAction(event) {
         return;
     }
 
-    if (button.dataset.historyAction === "add-plan") {
-        button.disabled = true;
-        try {
-            await addHistoryRecordToSimulationPlan(record);
-        } finally {
-            button.disabled = false;
-        }
-        return;
-    }
-
     if (button.dataset.historyAction === "import") {
         if (!confirm(getSimulationHistoryText(
             "importConfirm",
@@ -7976,6 +8238,7 @@ function persistSimulationPlans() {
 
 function loadSimulationPlans() {
     try {
+        _simulationPlan_js__WEBPACK_IMPORTED_MODULE_25__.SIMULATION_PLAN_LEGACY_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
         const storedValue = localStorage.getItem(_simulationPlan_js__WEBPACK_IMPORTED_MODULE_25__.SIMULATION_PLAN_STORAGE_KEY);
         const parsed = storedValue ? JSON.parse(storedValue) : null;
         simulationPlans = (0,_simulationPlan_js__WEBPACK_IMPORTED_MODULE_25__.normalizeSimulationPlans)(Array.isArray(parsed) ? parsed : parsed?.plans);
@@ -8032,9 +8295,9 @@ function formatSimulationPlanDuration(hours) {
     );
 }
 
-function formatSimulationPlanRate(step) {
-    const rates = (step.players ?? [])
-        .map((player) => Number(player.targetRatePerHour))
+function formatSimulationPlanRate(source) {
+    const rates = (source.historyRecord?.players ?? [])
+        .map((player) => Number(player.itemRatePerHour))
         .filter((rate) => Number.isFinite(rate) && rate > 0);
     if (rates.length === 0) {
         return "—";
@@ -8078,52 +8341,59 @@ function extractSimulationPlanStartingLevels(snapshot, record) {
     return levelsBySlot;
 }
 
-async function addHistoryRecordToSimulationPlan(record) {
-    if (!(0,_simulationPlan_js__WEBPACK_IMPORTED_MODULE_25__.isSimulationPlanEligibleRecord)(record)) {
-        setSimulationHistoryStatus(
-            getSimulationPlanText(
-                "addUnsupported",
-                "Only full-map records for Maps 1–11 and Dungeons D1–D4 can be added.",
-            ),
-            "warning",
-        );
+function getSimulationPlanTargetLabel(definition) {
+    return `${definition.code} · ${getSimulationHistoryItemName(definition.itemHrid)}`;
+}
+
+function renderSimulationPlanTargetSelector() {
+    const select = document.getElementById("selectSimulationPlanTarget");
+    if (!select) {
         return;
     }
+    const previousValue = select.value;
+    select.replaceChildren();
+    const groups = [
+        ["fragment", getSimulationPlanText("fragmentTargets", "Key Fragments")],
+        ["key", getSimulationPlanText("keyTargets", "Complete Chest Keys")],
+        ["dungeon", getSimulationPlanText("dungeonTargets", "Dungeon Chests")],
+    ];
+    for (const [type, label] of groups) {
+        const group = document.createElement("optgroup");
+        group.label = label;
+        _simulationPlan_js__WEBPACK_IMPORTED_MODULE_25__.SIMULATION_PLAN_TARGETS
+            .filter((definition) => definition.type === type)
+            .forEach((definition) => group.appendChild(new Option(
+                getSimulationPlanTargetLabel(definition),
+                definition.id,
+            )));
+        select.appendChild(group);
+    }
+    if (_simulationPlan_js__WEBPACK_IMPORTED_MODULE_25__.SIMULATION_PLAN_TARGETS.some((definition) => definition.id === previousValue)) {
+        select.value = previousValue;
+    }
+}
 
+async function refreshSimulationPlanHistoryRecords() {
     try {
-        const snapshot = await (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.decodeSimulationHistorySnapshot)(record.teamSnapshot);
-        const plan = ensureActiveSimulationPlan();
-        const step = (0,_simulationPlan_js__WEBPACK_IMPORTED_MODULE_25__.createSimulationPlanStep)(record, {
-            targetQuantity: _simulationPlan_js__WEBPACK_IMPORTED_MODULE_25__.SIMULATION_PLAN_DEFAULT_TARGET_QUANTITY,
-            startingLevelsBySlot: extractSimulationPlanStartingLevels(snapshot, record),
-        });
-        plan.steps.push(step);
-        plan.updatedAt = new Date().toISOString();
-        persistSimulationPlans();
-        const message = getSimulationPlanText(
-            "addSuccess",
-            "Added {{map}} {{difficulty}} to '{{plan}}'.",
-            {
-                map: getSimulationPlanMapLabel(record),
-                difficulty: getSimulationHistoryDifficulty(record),
-                plan: plan.name,
-            },
-        );
-        setSimulationHistoryStatus(message, "success");
-        setSimulationPlanStatus(message, "success");
-        if (document.getElementById("simulationPlanModal")?.classList.contains("show")) {
-            renderSimulationPlan();
-        }
+        simulationHistoryRecords = await (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.loadSimulationHistoryRecords)();
+        return true;
     } catch (error) {
-        console.warn("Unable to add history record to simulation plan.", error);
-        setSimulationHistoryStatus(
+        console.warn("Unable to refresh simulation history for plans.", error);
+        setSimulationPlanStatus(
             getSimulationPlanText(
-                "addError",
-                "The team levels in this history record could not be read.",
+                "historyLoadError",
+                "Simulation history could not be loaded for record selection.",
             ),
             "danger",
         );
+        return false;
     }
+}
+
+function getSimulationPlanRecordsForMap(mapKey) {
+    return simulationHistoryRecords
+        .filter((record) => record.mapKey === mapKey)
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
 function renderSimulationPlanSelector(plan) {
@@ -8146,31 +8416,100 @@ function createSimulationPlanActionButton({ action, label, className, disabled =
     return button;
 }
 
+function createSimulationPlanHistorySourceControl(step, source, sourceResult) {
+    const container = document.createElement("div");
+    container.className = "simulation-plan-source border rounded p-2 mb-2";
+    const mapDefinition = (0,_simulationPlan_js__WEBPACK_IMPORTED_MODULE_25__.getSimulationPlanMapDefinition)(source.mapKey);
+    const heading = document.createElement("div");
+    heading.className = "d-flex flex-wrap justify-content-between gap-2 mb-1";
+    const mapName = document.createElement("strong");
+    mapName.textContent = getSimulationPlanMapLabel(mapDefinition);
+    const requirement = document.createElement("span");
+    requirement.className = "small text-secondary";
+    requirement.textContent = getSimulationPlanText(
+        "requiredSourceQuantity",
+        "Need {{quantity}} {{item}}",
+        {
+            quantity: formatSimulationHistoryNumber(sourceResult.requiredQuantity, 2),
+            item: getSimulationHistoryItemName(source.itemHrid),
+        },
+    );
+    heading.append(mapName, requirement);
+
+    const select = document.createElement("select");
+    select.className = "form-select form-select-sm";
+    select.dataset.planAction = "history-source";
+    select.dataset.stepId = step.id;
+    select.dataset.mapKey = source.mapKey;
+    select.add(new Option(
+        getSimulationPlanText("selectHistoryRecord", "Select a history record"),
+        "",
+    ));
+    const records = getSimulationPlanRecordsForMap(source.mapKey);
+    records.forEach((record) => select.add(new Option(
+        getSimulationHistoryRecordOptionText(record),
+        record.id,
+    )));
+
+    const selectedRecordId = source.historyRecord?.recordId ?? "";
+    if (selectedRecordId && !records.some((record) => record.id === selectedRecordId)) {
+        const savedLabel = getSimulationPlanText(
+            "savedHistoryRecord",
+            "{{date}} · saved record",
+            { date: formatSimulationHistoryDate(source.historyRecord.sourceCreatedAt) },
+        );
+        select.add(new Option(savedLabel, selectedRecordId));
+    }
+    select.value = selectedRecordId;
+
+    const details = document.createElement("div");
+    details.className = "small mt-1";
+    if (sourceResult.valid) {
+        details.className += " text-secondary";
+        details.textContent = getSimulationPlanText(
+            "sourceCalculation",
+            "{{rate}} · {{time}}",
+            {
+                rate: formatSimulationPlanRate(source),
+                time: formatSimulationPlanDuration(sourceResult.durationHours),
+            },
+        );
+    } else if (records.length === 0) {
+        details.className += " text-warning";
+        details.textContent = getSimulationPlanText(
+            "noMatchingHistory",
+            "There is no history record for this map yet.",
+        );
+    } else if (source.historyRecord) {
+        details.className += " text-danger";
+        details.textContent = getSimulationPlanText(
+            "missingDropRate",
+            "The selected record has no usable target drop rate.",
+        );
+    } else {
+        details.className += " text-secondary";
+        details.textContent = getSimulationPlanText(
+            "historyRequired",
+            "Choose the history record used for this map.",
+        );
+    }
+
+    container.append(heading, select, details);
+    return container;
+}
+
 function renderSimulationPlanSteps(plan, calculation) {
     const rows = document.getElementById("simulationPlanStepRows");
     rows.replaceChildren();
     plan.steps.forEach((step, index) => {
         const stepResult = calculation.steps[index] ?? (0,_simulationPlan_js__WEBPACK_IMPORTED_MODULE_25__.calculateSimulationPlanStep)(step);
+        const targetDefinition = (0,_simulationPlan_js__WEBPACK_IMPORTED_MODULE_25__.getSimulationPlanTargetDefinition)(step.targetId);
         const row = document.createElement("tr");
         row.dataset.stepId = step.id;
         row.appendChild(createSimulationHistoryCell(String(index + 1)));
 
-        const mapCell = createSimulationHistoryCell(
-            `${getSimulationPlanMapLabel(step)} · ${getSimulationHistoryDifficulty(step)}`,
-            "simulation-plan-map-name",
-        );
-        row.appendChild(mapCell);
-
-        const sourceCell = createSimulationHistoryCell(
-            formatSimulationHistoryDate(step.sourceCreatedAt),
-        );
-        sourceCell.title = (step.players ?? [])
-            .map((player) => `${player.name}${player.loadoutName ? ` - ${player.loadoutName}` : ""}`)
-            .join("\n");
-        row.appendChild(sourceCell);
-
         row.appendChild(createSimulationHistoryCell(
-            getSimulationHistoryItemName(step.targetItemHrid),
+            getSimulationPlanTargetLabel(targetDefinition),
             "simulation-plan-target-name",
         ));
 
@@ -8186,13 +8525,22 @@ function renderSimulationPlanSteps(plan, calculation) {
         quantityCell.appendChild(quantityInput);
         row.appendChild(quantityCell);
 
-        row.appendChild(createSimulationHistoryCell(
-            formatSimulationPlanRate(step),
-            "text-end text-nowrap",
-        ));
+        const sourcesCell = document.createElement("td");
+        sourcesCell.className = "simulation-plan-sources";
+        step.sources.forEach((source, sourceIndex) => {
+            const sourceResult = stepResult.sources[sourceIndex]
+                ?? (0,_simulationPlan_js__WEBPACK_IMPORTED_MODULE_25__.calculateSimulationPlanStep)(step).sources[sourceIndex];
+            sourcesCell.appendChild(createSimulationPlanHistorySourceControl(
+                step,
+                source,
+                sourceResult,
+            ));
+        });
+        row.appendChild(sourcesCell);
+
         row.appendChild(createSimulationHistoryCell(
             formatSimulationPlanDuration(stepResult.durationHours),
-            "text-end text-nowrap",
+            `text-end text-nowrap${stepResult.valid ? "" : " text-warning"}`,
         ));
 
         const actionCell = document.createElement("td");
@@ -8328,13 +8676,17 @@ function createSimulationPlanPlayerSummary(player, index, groupId) {
             entries: Object.entries(player.consumablesUsed ?? {}).sort((a, b) => b[1] - a[1]),
         },
         {
-            title: getSimulationPlanText("drops", "Target and Bonus Drops"),
+            title: getSimulationPlanText("drops", "Expected Items"),
             entries: Object.entries(player.expectedDrops ?? {}).sort((a, b) => b[1] - a[1]),
+        },
+        {
+            title: getSimulationPlanText("requiredKeys", "Keys Required to Open Chests"),
+            entries: Object.entries(player.requiredKeys ?? {}).sort((a, b) => b[1] - a[1]),
         },
     ];
     for (const section of sections) {
         const column = document.createElement("section");
-        column.className = "col-md-6";
+        column.className = "col-lg-4";
         const heading = document.createElement("h6");
         heading.textContent = section.title;
         column.append(
@@ -8397,9 +8749,16 @@ function renderSimulationPlanSummary(plan, calculation) {
     warning.classList.toggle("d-none", invalidSteps.length === 0);
     warning.textContent = invalidSteps.length > 0
         ? getSimulationPlanText(
-            "invalidRate",
-            "These steps have no target drop rate and cannot be calculated: {{steps}}",
-            { steps: invalidSteps.map(getSimulationPlanMapLabel).join("、") },
+            "invalidSteps",
+            "Complete the history selections for these targets: {{steps}}",
+            {
+                steps: invalidSteps.map((step) => {
+                    const label = getSimulationPlanTargetLabel(step.targetDefinition);
+                    return step.invalidReason === "teamMismatch"
+                        ? `${label} (${getSimulationPlanText("teamMismatch", "teams do not match")})`
+                        : label;
+                }).join("、"),
+            },
         )
         : "";
 
@@ -8408,6 +8767,13 @@ function renderSimulationPlanSummary(plan, calculation) {
     const consumablesContainer = document.getElementById("simulationPlanTotalConsumables");
     consumablesContainer.replaceChildren(createSimulationPlanSimpleTable(
         totalConsumables,
+        getSimulationHistoryItemName,
+    ));
+    const totalRequiredKeys = Object.entries(calculation.requiredKeys ?? {})
+        .sort((left, right) => right[1] - left[1]);
+    const requiredKeysContainer = document.getElementById("simulationPlanTotalRequiredKeys");
+    requiredKeysContainer.replaceChildren(createSimulationPlanSimpleTable(
+        totalRequiredKeys,
         getSimulationHistoryItemName,
     ));
     renderSimulationPlanPlayerSummaries(calculation.players);
@@ -8420,6 +8786,32 @@ function renderSimulationPlan() {
     renderSimulationPlanSteps(plan, calculation);
     renderSimulationPlanSummary(plan, calculation);
     updateSimulationPlanStepCount();
+}
+
+function addSimulationPlanTarget() {
+    const targetId = document.getElementById("selectSimulationPlanTarget")?.value;
+    const quantity = Number(document.getElementById("inputSimulationPlanTargetQuantity")?.value);
+    const definition = (0,_simulationPlan_js__WEBPACK_IMPORTED_MODULE_25__.getSimulationPlanTargetDefinition)(targetId);
+    if (!definition || !Number.isFinite(quantity) || quantity < 0) {
+        setSimulationPlanStatus(
+            getSimulationPlanText("invalidTarget", "Choose a target and enter a valid quantity."),
+            "warning",
+        );
+        return;
+    }
+    const plan = ensureActiveSimulationPlan();
+    plan.steps.push((0,_simulationPlan_js__WEBPACK_IMPORTED_MODULE_25__.createSimulationPlanStep)(targetId, { targetQuantity: quantity }));
+    plan.updatedAt = new Date().toISOString();
+    persistSimulationPlans();
+    renderSimulationPlan();
+    setSimulationPlanStatus(
+        getSimulationPlanText(
+            "targetAdded",
+            "Added {{target}}. Select its history record below.",
+            { target: getSimulationPlanTargetLabel(definition) },
+        ),
+        "success",
+    );
 }
 
 function createNewSimulationPlan() {
@@ -8477,7 +8869,7 @@ function renameActiveSimulationPlan() {
     setSimulationPlanStatus();
 }
 
-function handleSimulationPlanStepAction(event) {
+async function handleSimulationPlanStepAction(event) {
     const control = event.target.closest("[data-plan-action]");
     if (!control) {
         return;
@@ -8495,6 +8887,51 @@ function handleSimulationPlanStepAction(event) {
             return;
         }
         plan.steps[stepIndex].targetQuantity = quantity;
+    } else if (action === "history-source") {
+        const step = plan.steps[stepIndex];
+        const mapKey = control.dataset.mapKey;
+        if (!control.value) {
+            (0,_simulationPlan_js__WEBPACK_IMPORTED_MODULE_25__.setSimulationPlanStepHistorySource)(step, mapKey, null);
+        } else {
+            const record = simulationHistoryRecords.find(
+                (entry) => entry.id === control.value && entry.mapKey === mapKey,
+            );
+            if (!record) {
+                setSimulationPlanStatus(
+                    getSimulationPlanText(
+                        "historyMissing",
+                        "That history record is no longer available.",
+                    ),
+                    "danger",
+                );
+                renderSimulationPlan();
+                return;
+            }
+            control.disabled = true;
+            try {
+                const snapshot = await (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.decodeSimulationHistorySnapshot)(record.teamSnapshot);
+                (0,_simulationPlan_js__WEBPACK_IMPORTED_MODULE_25__.setSimulationPlanStepHistorySource)(
+                    step,
+                    mapKey,
+                    (0,_simulationPlan_js__WEBPACK_IMPORTED_MODULE_25__.createSimulationPlanHistorySource)(record, {
+                        startingLevelsBySlot: extractSimulationPlanStartingLevels(snapshot, record),
+                    }),
+                );
+            } catch (error) {
+                console.warn("Unable to use the selected history record in a plan.", error);
+                setSimulationPlanStatus(
+                    getSimulationPlanText(
+                        "historyReadError",
+                        "The selected history record could not be read.",
+                    ),
+                    "danger",
+                );
+                renderSimulationPlan();
+                return;
+            } finally {
+                control.disabled = false;
+            }
+        }
     } else if (action === "remove") {
         plan.steps.splice(stepIndex, 1);
     } else if (action === "up" && stepIndex > 0) {
@@ -8514,13 +8951,21 @@ function handleSimulationPlanStepAction(event) {
     plan.updatedAt = new Date().toISOString();
     persistSimulationPlans();
     renderSimulationPlan();
+    if (action === "history-source") {
+        setSimulationPlanStatus();
+    }
 }
 
 function initSimulationPlans() {
     loadSimulationPlans();
-    document.getElementById("simulationPlanModal")?.addEventListener("show.bs.modal", () => {
+    renderSimulationPlanTargetSelector();
+    document.getElementById("simulationPlanModal")?.addEventListener("show.bs.modal", async () => {
         setSimulationPlanStatus();
+        renderSimulationPlanTargetSelector();
         renderSimulationPlan();
+        if (await refreshSimulationPlanHistoryRecords()) {
+            renderSimulationPlan();
+        }
     });
     document.getElementById("selectSimulationPlan")?.addEventListener("change", (event) => {
         activeSimulationPlanId = event.target.value;
@@ -8540,17 +8985,22 @@ function initSimulationPlans() {
         "click",
         deleteActiveSimulationPlan,
     );
+    document.getElementById("buttonAddSimulationPlanTarget")?.addEventListener(
+        "click",
+        addSimulationPlanTarget,
+    );
     document.getElementById("simulationPlanStepRows")?.addEventListener(
         "click",
-        handleSimulationPlanStepAction,
+        (event) => void handleSimulationPlanStepAction(event),
     );
     document.getElementById("simulationPlanStepRows")?.addEventListener(
         "change",
-        handleSimulationPlanStepAction,
+        (event) => void handleSimulationPlanStepAction(event),
     );
 
     if (typeof i18next?.on === "function") {
         i18next.on("languageChanged", () => {
+            renderSimulationPlanTargetSelector();
             if (document.getElementById("simulationPlanModal")?.classList.contains("show")) {
                 renderSimulationPlan();
             }

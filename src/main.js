@@ -60,16 +60,20 @@ import {
 } from "./playerFormation.js";
 import {
     SIMULATION_PLAN_DEFAULT_TARGET_QUANTITY,
+    SIMULATION_PLAN_LEGACY_STORAGE_KEYS,
     SIMULATION_PLAN_SCHEMA_VERSION,
     SIMULATION_PLAN_SKILLS,
     SIMULATION_PLAN_STORAGE_KEY,
+    SIMULATION_PLAN_TARGETS,
     calculateSimulationPlan,
     calculateSimulationPlanStep,
     compareSimulationPlanMapKeys,
+    createSimulationPlanHistorySource,
     createSimulationPlanStep,
     getSimulationPlanMapDefinition,
-    isSimulationPlanEligibleRecord,
+    getSimulationPlanTargetDefinition,
     normalizeSimulationPlans,
+    setSimulationPlanStepHistorySource,
 } from "./simulationPlan.js";
 
 import patchNote from "../patchNote.json";
@@ -2274,15 +2278,6 @@ function renderSimulationHistoryRecordRows(records) {
 
         const actionCell = document.createElement("td");
         actionCell.className = "text-nowrap";
-        if (isSimulationPlanEligibleRecord(record)) {
-            const addToPlanButton = document.createElement("button");
-            addToPlanButton.type = "button";
-            addToPlanButton.className = "btn btn-success btn-sm me-2";
-            addToPlanButton.dataset.historyAction = "add-plan";
-            addToPlanButton.dataset.recordId = record.id;
-            addToPlanButton.textContent = getSimulationHistoryText("addToPlan", "Add to Plan");
-            actionCell.appendChild(addToPlanButton);
-        }
         const importButton = document.createElement("button");
         importButton.type = "button";
         importButton.className = "btn btn-primary btn-sm me-2";
@@ -3068,16 +3063,6 @@ async function handleSimulationHistoryRecordAction(event) {
         return;
     }
 
-    if (button.dataset.historyAction === "add-plan") {
-        button.disabled = true;
-        try {
-            await addHistoryRecordToSimulationPlan(record);
-        } finally {
-            button.disabled = false;
-        }
-        return;
-    }
-
     if (button.dataset.historyAction === "import") {
         if (!confirm(getSimulationHistoryText(
             "importConfirm",
@@ -3432,6 +3417,7 @@ function persistSimulationPlans() {
 
 function loadSimulationPlans() {
     try {
+        SIMULATION_PLAN_LEGACY_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
         const storedValue = localStorage.getItem(SIMULATION_PLAN_STORAGE_KEY);
         const parsed = storedValue ? JSON.parse(storedValue) : null;
         simulationPlans = normalizeSimulationPlans(Array.isArray(parsed) ? parsed : parsed?.plans);
@@ -3488,9 +3474,9 @@ function formatSimulationPlanDuration(hours) {
     );
 }
 
-function formatSimulationPlanRate(step) {
-    const rates = (step.players ?? [])
-        .map((player) => Number(player.targetRatePerHour))
+function formatSimulationPlanRate(source) {
+    const rates = (source.historyRecord?.players ?? [])
+        .map((player) => Number(player.itemRatePerHour))
         .filter((rate) => Number.isFinite(rate) && rate > 0);
     if (rates.length === 0) {
         return "—";
@@ -3534,52 +3520,59 @@ function extractSimulationPlanStartingLevels(snapshot, record) {
     return levelsBySlot;
 }
 
-async function addHistoryRecordToSimulationPlan(record) {
-    if (!isSimulationPlanEligibleRecord(record)) {
-        setSimulationHistoryStatus(
-            getSimulationPlanText(
-                "addUnsupported",
-                "Only full-map records for Maps 1–11 and Dungeons D1–D4 can be added.",
-            ),
-            "warning",
-        );
+function getSimulationPlanTargetLabel(definition) {
+    return `${definition.code} · ${getSimulationHistoryItemName(definition.itemHrid)}`;
+}
+
+function renderSimulationPlanTargetSelector() {
+    const select = document.getElementById("selectSimulationPlanTarget");
+    if (!select) {
         return;
     }
+    const previousValue = select.value;
+    select.replaceChildren();
+    const groups = [
+        ["fragment", getSimulationPlanText("fragmentTargets", "Key Fragments")],
+        ["key", getSimulationPlanText("keyTargets", "Complete Chest Keys")],
+        ["dungeon", getSimulationPlanText("dungeonTargets", "Dungeon Chests")],
+    ];
+    for (const [type, label] of groups) {
+        const group = document.createElement("optgroup");
+        group.label = label;
+        SIMULATION_PLAN_TARGETS
+            .filter((definition) => definition.type === type)
+            .forEach((definition) => group.appendChild(new Option(
+                getSimulationPlanTargetLabel(definition),
+                definition.id,
+            )));
+        select.appendChild(group);
+    }
+    if (SIMULATION_PLAN_TARGETS.some((definition) => definition.id === previousValue)) {
+        select.value = previousValue;
+    }
+}
 
+async function refreshSimulationPlanHistoryRecords() {
     try {
-        const snapshot = await decodeSimulationHistorySnapshot(record.teamSnapshot);
-        const plan = ensureActiveSimulationPlan();
-        const step = createSimulationPlanStep(record, {
-            targetQuantity: SIMULATION_PLAN_DEFAULT_TARGET_QUANTITY,
-            startingLevelsBySlot: extractSimulationPlanStartingLevels(snapshot, record),
-        });
-        plan.steps.push(step);
-        plan.updatedAt = new Date().toISOString();
-        persistSimulationPlans();
-        const message = getSimulationPlanText(
-            "addSuccess",
-            "Added {{map}} {{difficulty}} to '{{plan}}'.",
-            {
-                map: getSimulationPlanMapLabel(record),
-                difficulty: getSimulationHistoryDifficulty(record),
-                plan: plan.name,
-            },
-        );
-        setSimulationHistoryStatus(message, "success");
-        setSimulationPlanStatus(message, "success");
-        if (document.getElementById("simulationPlanModal")?.classList.contains("show")) {
-            renderSimulationPlan();
-        }
+        simulationHistoryRecords = await loadSimulationHistoryRecords();
+        return true;
     } catch (error) {
-        console.warn("Unable to add history record to simulation plan.", error);
-        setSimulationHistoryStatus(
+        console.warn("Unable to refresh simulation history for plans.", error);
+        setSimulationPlanStatus(
             getSimulationPlanText(
-                "addError",
-                "The team levels in this history record could not be read.",
+                "historyLoadError",
+                "Simulation history could not be loaded for record selection.",
             ),
             "danger",
         );
+        return false;
     }
+}
+
+function getSimulationPlanRecordsForMap(mapKey) {
+    return simulationHistoryRecords
+        .filter((record) => record.mapKey === mapKey)
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
 function renderSimulationPlanSelector(plan) {
@@ -3602,31 +3595,100 @@ function createSimulationPlanActionButton({ action, label, className, disabled =
     return button;
 }
 
+function createSimulationPlanHistorySourceControl(step, source, sourceResult) {
+    const container = document.createElement("div");
+    container.className = "simulation-plan-source border rounded p-2 mb-2";
+    const mapDefinition = getSimulationPlanMapDefinition(source.mapKey);
+    const heading = document.createElement("div");
+    heading.className = "d-flex flex-wrap justify-content-between gap-2 mb-1";
+    const mapName = document.createElement("strong");
+    mapName.textContent = getSimulationPlanMapLabel(mapDefinition);
+    const requirement = document.createElement("span");
+    requirement.className = "small text-secondary";
+    requirement.textContent = getSimulationPlanText(
+        "requiredSourceQuantity",
+        "Need {{quantity}} {{item}}",
+        {
+            quantity: formatSimulationHistoryNumber(sourceResult.requiredQuantity, 2),
+            item: getSimulationHistoryItemName(source.itemHrid),
+        },
+    );
+    heading.append(mapName, requirement);
+
+    const select = document.createElement("select");
+    select.className = "form-select form-select-sm";
+    select.dataset.planAction = "history-source";
+    select.dataset.stepId = step.id;
+    select.dataset.mapKey = source.mapKey;
+    select.add(new Option(
+        getSimulationPlanText("selectHistoryRecord", "Select a history record"),
+        "",
+    ));
+    const records = getSimulationPlanRecordsForMap(source.mapKey);
+    records.forEach((record) => select.add(new Option(
+        getSimulationHistoryRecordOptionText(record),
+        record.id,
+    )));
+
+    const selectedRecordId = source.historyRecord?.recordId ?? "";
+    if (selectedRecordId && !records.some((record) => record.id === selectedRecordId)) {
+        const savedLabel = getSimulationPlanText(
+            "savedHistoryRecord",
+            "{{date}} · saved record",
+            { date: formatSimulationHistoryDate(source.historyRecord.sourceCreatedAt) },
+        );
+        select.add(new Option(savedLabel, selectedRecordId));
+    }
+    select.value = selectedRecordId;
+
+    const details = document.createElement("div");
+    details.className = "small mt-1";
+    if (sourceResult.valid) {
+        details.className += " text-secondary";
+        details.textContent = getSimulationPlanText(
+            "sourceCalculation",
+            "{{rate}} · {{time}}",
+            {
+                rate: formatSimulationPlanRate(source),
+                time: formatSimulationPlanDuration(sourceResult.durationHours),
+            },
+        );
+    } else if (records.length === 0) {
+        details.className += " text-warning";
+        details.textContent = getSimulationPlanText(
+            "noMatchingHistory",
+            "There is no history record for this map yet.",
+        );
+    } else if (source.historyRecord) {
+        details.className += " text-danger";
+        details.textContent = getSimulationPlanText(
+            "missingDropRate",
+            "The selected record has no usable target drop rate.",
+        );
+    } else {
+        details.className += " text-secondary";
+        details.textContent = getSimulationPlanText(
+            "historyRequired",
+            "Choose the history record used for this map.",
+        );
+    }
+
+    container.append(heading, select, details);
+    return container;
+}
+
 function renderSimulationPlanSteps(plan, calculation) {
     const rows = document.getElementById("simulationPlanStepRows");
     rows.replaceChildren();
     plan.steps.forEach((step, index) => {
         const stepResult = calculation.steps[index] ?? calculateSimulationPlanStep(step);
+        const targetDefinition = getSimulationPlanTargetDefinition(step.targetId);
         const row = document.createElement("tr");
         row.dataset.stepId = step.id;
         row.appendChild(createSimulationHistoryCell(String(index + 1)));
 
-        const mapCell = createSimulationHistoryCell(
-            `${getSimulationPlanMapLabel(step)} · ${getSimulationHistoryDifficulty(step)}`,
-            "simulation-plan-map-name",
-        );
-        row.appendChild(mapCell);
-
-        const sourceCell = createSimulationHistoryCell(
-            formatSimulationHistoryDate(step.sourceCreatedAt),
-        );
-        sourceCell.title = (step.players ?? [])
-            .map((player) => `${player.name}${player.loadoutName ? ` - ${player.loadoutName}` : ""}`)
-            .join("\n");
-        row.appendChild(sourceCell);
-
         row.appendChild(createSimulationHistoryCell(
-            getSimulationHistoryItemName(step.targetItemHrid),
+            getSimulationPlanTargetLabel(targetDefinition),
             "simulation-plan-target-name",
         ));
 
@@ -3642,13 +3704,22 @@ function renderSimulationPlanSteps(plan, calculation) {
         quantityCell.appendChild(quantityInput);
         row.appendChild(quantityCell);
 
-        row.appendChild(createSimulationHistoryCell(
-            formatSimulationPlanRate(step),
-            "text-end text-nowrap",
-        ));
+        const sourcesCell = document.createElement("td");
+        sourcesCell.className = "simulation-plan-sources";
+        step.sources.forEach((source, sourceIndex) => {
+            const sourceResult = stepResult.sources[sourceIndex]
+                ?? calculateSimulationPlanStep(step).sources[sourceIndex];
+            sourcesCell.appendChild(createSimulationPlanHistorySourceControl(
+                step,
+                source,
+                sourceResult,
+            ));
+        });
+        row.appendChild(sourcesCell);
+
         row.appendChild(createSimulationHistoryCell(
             formatSimulationPlanDuration(stepResult.durationHours),
-            "text-end text-nowrap",
+            `text-end text-nowrap${stepResult.valid ? "" : " text-warning"}`,
         ));
 
         const actionCell = document.createElement("td");
@@ -3784,13 +3855,17 @@ function createSimulationPlanPlayerSummary(player, index, groupId) {
             entries: Object.entries(player.consumablesUsed ?? {}).sort((a, b) => b[1] - a[1]),
         },
         {
-            title: getSimulationPlanText("drops", "Target and Bonus Drops"),
+            title: getSimulationPlanText("drops", "Expected Items"),
             entries: Object.entries(player.expectedDrops ?? {}).sort((a, b) => b[1] - a[1]),
+        },
+        {
+            title: getSimulationPlanText("requiredKeys", "Keys Required to Open Chests"),
+            entries: Object.entries(player.requiredKeys ?? {}).sort((a, b) => b[1] - a[1]),
         },
     ];
     for (const section of sections) {
         const column = document.createElement("section");
-        column.className = "col-md-6";
+        column.className = "col-lg-4";
         const heading = document.createElement("h6");
         heading.textContent = section.title;
         column.append(
@@ -3853,9 +3928,16 @@ function renderSimulationPlanSummary(plan, calculation) {
     warning.classList.toggle("d-none", invalidSteps.length === 0);
     warning.textContent = invalidSteps.length > 0
         ? getSimulationPlanText(
-            "invalidRate",
-            "These steps have no target drop rate and cannot be calculated: {{steps}}",
-            { steps: invalidSteps.map(getSimulationPlanMapLabel).join("、") },
+            "invalidSteps",
+            "Complete the history selections for these targets: {{steps}}",
+            {
+                steps: invalidSteps.map((step) => {
+                    const label = getSimulationPlanTargetLabel(step.targetDefinition);
+                    return step.invalidReason === "teamMismatch"
+                        ? `${label} (${getSimulationPlanText("teamMismatch", "teams do not match")})`
+                        : label;
+                }).join("、"),
+            },
         )
         : "";
 
@@ -3864,6 +3946,13 @@ function renderSimulationPlanSummary(plan, calculation) {
     const consumablesContainer = document.getElementById("simulationPlanTotalConsumables");
     consumablesContainer.replaceChildren(createSimulationPlanSimpleTable(
         totalConsumables,
+        getSimulationHistoryItemName,
+    ));
+    const totalRequiredKeys = Object.entries(calculation.requiredKeys ?? {})
+        .sort((left, right) => right[1] - left[1]);
+    const requiredKeysContainer = document.getElementById("simulationPlanTotalRequiredKeys");
+    requiredKeysContainer.replaceChildren(createSimulationPlanSimpleTable(
+        totalRequiredKeys,
         getSimulationHistoryItemName,
     ));
     renderSimulationPlanPlayerSummaries(calculation.players);
@@ -3876,6 +3965,32 @@ function renderSimulationPlan() {
     renderSimulationPlanSteps(plan, calculation);
     renderSimulationPlanSummary(plan, calculation);
     updateSimulationPlanStepCount();
+}
+
+function addSimulationPlanTarget() {
+    const targetId = document.getElementById("selectSimulationPlanTarget")?.value;
+    const quantity = Number(document.getElementById("inputSimulationPlanTargetQuantity")?.value);
+    const definition = getSimulationPlanTargetDefinition(targetId);
+    if (!definition || !Number.isFinite(quantity) || quantity < 0) {
+        setSimulationPlanStatus(
+            getSimulationPlanText("invalidTarget", "Choose a target and enter a valid quantity."),
+            "warning",
+        );
+        return;
+    }
+    const plan = ensureActiveSimulationPlan();
+    plan.steps.push(createSimulationPlanStep(targetId, { targetQuantity: quantity }));
+    plan.updatedAt = new Date().toISOString();
+    persistSimulationPlans();
+    renderSimulationPlan();
+    setSimulationPlanStatus(
+        getSimulationPlanText(
+            "targetAdded",
+            "Added {{target}}. Select its history record below.",
+            { target: getSimulationPlanTargetLabel(definition) },
+        ),
+        "success",
+    );
 }
 
 function createNewSimulationPlan() {
@@ -3933,7 +4048,7 @@ function renameActiveSimulationPlan() {
     setSimulationPlanStatus();
 }
 
-function handleSimulationPlanStepAction(event) {
+async function handleSimulationPlanStepAction(event) {
     const control = event.target.closest("[data-plan-action]");
     if (!control) {
         return;
@@ -3951,6 +4066,51 @@ function handleSimulationPlanStepAction(event) {
             return;
         }
         plan.steps[stepIndex].targetQuantity = quantity;
+    } else if (action === "history-source") {
+        const step = plan.steps[stepIndex];
+        const mapKey = control.dataset.mapKey;
+        if (!control.value) {
+            setSimulationPlanStepHistorySource(step, mapKey, null);
+        } else {
+            const record = simulationHistoryRecords.find(
+                (entry) => entry.id === control.value && entry.mapKey === mapKey,
+            );
+            if (!record) {
+                setSimulationPlanStatus(
+                    getSimulationPlanText(
+                        "historyMissing",
+                        "That history record is no longer available.",
+                    ),
+                    "danger",
+                );
+                renderSimulationPlan();
+                return;
+            }
+            control.disabled = true;
+            try {
+                const snapshot = await decodeSimulationHistorySnapshot(record.teamSnapshot);
+                setSimulationPlanStepHistorySource(
+                    step,
+                    mapKey,
+                    createSimulationPlanHistorySource(record, {
+                        startingLevelsBySlot: extractSimulationPlanStartingLevels(snapshot, record),
+                    }),
+                );
+            } catch (error) {
+                console.warn("Unable to use the selected history record in a plan.", error);
+                setSimulationPlanStatus(
+                    getSimulationPlanText(
+                        "historyReadError",
+                        "The selected history record could not be read.",
+                    ),
+                    "danger",
+                );
+                renderSimulationPlan();
+                return;
+            } finally {
+                control.disabled = false;
+            }
+        }
     } else if (action === "remove") {
         plan.steps.splice(stepIndex, 1);
     } else if (action === "up" && stepIndex > 0) {
@@ -3970,13 +4130,21 @@ function handleSimulationPlanStepAction(event) {
     plan.updatedAt = new Date().toISOString();
     persistSimulationPlans();
     renderSimulationPlan();
+    if (action === "history-source") {
+        setSimulationPlanStatus();
+    }
 }
 
 function initSimulationPlans() {
     loadSimulationPlans();
-    document.getElementById("simulationPlanModal")?.addEventListener("show.bs.modal", () => {
+    renderSimulationPlanTargetSelector();
+    document.getElementById("simulationPlanModal")?.addEventListener("show.bs.modal", async () => {
         setSimulationPlanStatus();
+        renderSimulationPlanTargetSelector();
         renderSimulationPlan();
+        if (await refreshSimulationPlanHistoryRecords()) {
+            renderSimulationPlan();
+        }
     });
     document.getElementById("selectSimulationPlan")?.addEventListener("change", (event) => {
         activeSimulationPlanId = event.target.value;
@@ -3996,17 +4164,22 @@ function initSimulationPlans() {
         "click",
         deleteActiveSimulationPlan,
     );
+    document.getElementById("buttonAddSimulationPlanTarget")?.addEventListener(
+        "click",
+        addSimulationPlanTarget,
+    );
     document.getElementById("simulationPlanStepRows")?.addEventListener(
         "click",
-        handleSimulationPlanStepAction,
+        (event) => void handleSimulationPlanStepAction(event),
     );
     document.getElementById("simulationPlanStepRows")?.addEventListener(
         "change",
-        handleSimulationPlanStepAction,
+        (event) => void handleSimulationPlanStepAction(event),
     );
 
     if (typeof i18next?.on === "function") {
         i18next.on("languageChanged", () => {
+            renderSimulationPlanTargetSelector();
             if (document.getElementById("simulationPlanModal")?.classList.contains("show")) {
                 renderSimulationPlan();
             }
