@@ -3474,7 +3474,8 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */   getSimulationPlanMapOrder: () => (/* binding */ getSimulationPlanMapOrder),
 /* harmony export */   getSimulationPlanTargetDefinition: () => (/* binding */ getSimulationPlanTargetDefinition),
 /* harmony export */   normalizeSimulationPlans: () => (/* binding */ normalizeSimulationPlans),
-/* harmony export */   setSimulationPlanStepHistorySource: () => (/* binding */ setSimulationPlanStepHistorySource)
+/* harmony export */   setSimulationPlanStepHistorySource: () => (/* binding */ setSimulationPlanStepHistorySource),
+/* harmony export */   shouldHandleSimulationPlanControlEvent: () => (/* binding */ shouldHandleSimulationPlanControlEvent)
 /* harmony export */ });
 /* harmony import */ var _experienceLevelCalculator_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./experienceLevelCalculator.js */ "./src/experienceLevelCalculator.js");
 
@@ -3485,6 +3486,16 @@ const SIMULATION_PLAN_LEGACY_STORAGE_KEYS = Object.freeze([
     "mwiCombatSimulatorPlans_v1",
 ]);
 const SIMULATION_PLAN_DEFAULT_TARGET_QUANTITY = 200;
+function shouldHandleSimulationPlanControlEvent(eventType, action) {
+    if (eventType === "click") {
+        return action === "up" || action === "down" || action === "remove";
+    }
+    if (eventType === "change") {
+        return action === "quantity" || action === "history-source";
+    }
+    return false;
+}
+
 const SIMULATION_PLAN_SKILLS = Object.freeze([
     "stamina",
     "intelligence",
@@ -4610,7 +4621,7 @@ function getSelectableCombatZones(actionMap, allowSolo = false) {
   \************************/
 /***/ ((module) => {
 
-module.exports = /*#__PURE__*/JSON.parse('{"2026年9月16日":["模拟配置的区域选择新增“允许单刷”；默认只显示图1至图11，并记住当前浏览器的勾选状态","计划模拟改为先添加目标物品，再为每张相关地图选择对应的历史记录","支持图3至图11的钥匙碎片与D1至D4完整宝箱钥匙目标；每把完整钥匙按四种碎片各0.9个计算","地下城每次按4/3普通宝箱计算；精炼宝箱为普通宝箱数量的T1 33%或T2 100%，并统计开箱所需钥匙","模拟历史的地图选择按图1至图11、D1至D4排序，其余单怪物记录排在后面","模拟结果的每小时经验下方新增升级模拟，可按目标等级估算时间或按经过天数反推技能等级","配装比对忽略游戏任务徽章使用的 Trinket 槽位","移除模拟配置中的队伍预设，并自动清理浏览器内保存的旧预设","模拟历史现在会压缩保存完整队伍快照与各角色配装名","模拟历史新增导入按钮，可一键恢复当时的全队配置、地图和难度","配装比对改为直接按当前角色与配装名匹配服务器现有配装，手写配置自动跳过","历史记录中的战斗或完成次数每小时缩写为 eph；旧格式历史记录会自动清理"],"2026年9月15日":["调整站位时保持玩家1至玩家5槽位固定，仅在槽位之间移动角色与完整配装数据","配装比对改为按角色身份匹配，单纯交换站位不再被识别为整套配装变化","加载旧队伍预设时自动将原站位顺序转换到固定槽位","模拟历史详情改为横向角色标签页，点击角色即可切换查看","模拟历史对比改为横向角色标签页，全队共同掉落只保留一份"],"2026年9月11日":["优化历史掉落数量显示：小数按数值范围保留精度，大额数量取整，超过10万的金币使用M缩写","提高黑暗模式下历史比较增减数值的绿色与红色亮度"],"2026年9月10日":["模拟历史比较改为左右分栏，战斗指标与资源消耗在左、期望掉落在右","历史比较中的期望掉落改为24小时产量，并优先显示金币、钥匙碎片、护符和精华","全队共同掉落只显示一份，角色间确有差异的掉落单独列出","历史比较中的掉落数量达到1时最多显示两位小数，小于1时保留更多精度"],"2026年8月29日":["玩家标签支持拖动调整队伍站位，贯穿攻击会按标签从左到右的顺序处理","玩家站位会保存在当前浏览器中，并在加载队伍预设时恢复","新增按地图自动保存的模拟历史，不同难度记录会归入同一地图","模拟历史支持查看全队每名角色的主要指标、消耗品与期望掉落","支持选择同地图两条历史记录，按角色比较战斗表现与资源变化"],"2026年8月28日":["支持从私有配装数据导入每名角色实际生效的公会神龛战斗增益","房屋面板新增五种公会战斗神龛等级显示与模拟调整","逐怪物伤害与承伤明细改为默认折叠显示","钥匙碎片时间成本移至期望掉落上方，并新增每日碎片产量","钥匙碎片总耗时支持使用角色专业等级及游戏当前生效的专业增益精确计算","房屋面板改为房屋与公会神龛左右分栏显示","移除价格设置、市场价格获取与期望利润相关功能"],"2026年5月5日":["更新装备数据和本地化名称"],"2026年4月7日":["增加字段显示迷宫尝试次数和迷宫成功率"],"2026年3月5日":["优化狂怒相关的模拟性能"],"2026年3月3日":["支持迷宫封印对应的个人增益"],"2026年2月24日":["更新迷宫补丁的数据","新增支持迷宫单体/批量模拟"],"2026年2月1日":["修正战斗等级计算的精度","修正地下城完成或失败后重新进入战斗的时间间隔 by wangchyan","修正诅咒和削弱的持续时间 by wangchyan","修正诅咒和狂怒的触发逻辑 by wangchyan","修正地下城团灭重置机制的部分逻辑 by wangchyan","修复守护光环和速度光环部分增益未正确受对应等级加强的异常 by wangchyan","修复无敌技能未正确影响韧性数值的缺陷 by wangchyan","修复初次进入战斗时未能优先吃喝的异常 by wangchyan","战斗时长相关的统计现在仅计算已完成的战斗，不再包含当前未结束的战斗 by wangchyan"],"2026年1月11日":["修复trigger错误计算已阵亡单位的问题 by wangchyan"],"2025年12月31日":["实验性功能新增HP/MP可视化图表 by wangchyan","修复防御伤害未正确受damge加成的异常 by wangchyan","修复守护光环的治疗加成效果未生效的异常 by wangchyan","修复快速治疗等技能未正确选择最低%生命为目标的错误 by wangchyan"],"2025年12月30日":["地下城增加最短完成时间记录"],"2025年12月24日":["修复技能释放选择的缺陷，之前可能存在异常缺蓝等情况"],"2025年12月18日":["支持成就系统及对应buff效果","地下城怪物的掉落不再生效"],"2025年12月6日":["修复游戏更新后技能在无trigger情况下由[]变为null时造成的异常"],"2025年11月7日":["兼容支持从CN镜像站调用API获取价格"],"2025年10月14日":["修复怪物攻击间隔数值未能适配攻击等级的问题"],"2025年9月17日":["修复暴击光环的trigger缺陷"],"2025年9月9日":["复活时不再错误的清空所有buff","团灭日志增加反伤、荆棘和DOT伤害记录"],"2025年8月21日":["增加单挑战斗批量模拟和对应怪物选项","增加MooPass和社区buff的选项及对应功能","精炼装备数值加强","秘法主教属性削弱","init_client_info_v1.20250819.0.json游戏数据更新"],"2025年8月20日":["修复经验和掉落计算在极端情况下的可能异常"],"2025年8月19日":["合并Test和Temp分支的rework内容","init_client_info_v1.20250818.0.json游戏数据更新"],"2025年8月18日":["修复贯穿技能可能对相同目标造成重复伤害的问题","修复团灭日志在黑夜模式下的显示异常","战斗等级公式更新","钟乳石魔像的荆棘数值调整","init_client_info_v1.20250626.0_0817.json游戏数据更新"],"2025年8月16日":["增加停止模拟按钮 by BKN46","增加技能顺序调整按钮 by BKN46","增加团灭日志 by TruthLight","怪物属性更新","奥术反射更名为报应","init_client_info_v1.20250626.0_0815.json游戏数据更新"],"2025年8月14日":["怪物属性更新","远程和法师装备属性调整","反伤计算上限调整","修复战斗间隔释放技能的异常","修复技能释放判断逻辑的异常","法力值耗尽比例更加准确","调整远程经验的15%和魔法经验的12%映射到攻击经验","init_client_info_v1.20250626.0_0813.json游戏数据更新"],"2025年8月11日":["怪物属性更新","近战和物理技能施法时间更新","盾击和重锤数值调整","双手盾防御经验加成调整","init_client_info_v1.20250626.0_0811.json游戏数据更新"],"2025年8月8日":["实现组队等级差过大时对掉落和经验的惩罚","实现怪物经验随狂暴进度百分比增加","暴击光环数值调整","增加战斗等级数值显示","增加等级差距惩罚数值显示","init_client_info_v1.20250626.0_0807.json游戏数据更新"],"2025年8月7日":["修复组队战斗时一些重复物品掉落数量异常的缺陷 by contr4l","init_client_info_v1.20250626.0_0806.json游戏数据更新"],"2025年8月3日":["怪物狂暴机制及对应trigger生效","精炼装备更新，护符数值调整，守护光环增加闪避率","init_client_info_v1.20250626.0_0802.json游戏数据更新","狂怒层数修正为5层","招架结算机制调整"],"2025年7月31日":["物品数据和怪物属性更新","尖刺外壳和奥术反射重做","强化数值更新","删除异常trigger","狮鹫盾的虚弱重做","君王剑招架对队友生效","狂怒特效最大层数修正为6层","涟漪特效增加10MP恢复","反伤正确显示其命中率","反伤机制调整","同步双手盾属性和反伤荆棘技能数值的调整"],"2025年7月22日":["暴击光环受远程等级加成","光环基础数值和等级加成调整"],"2025年7月17日":["批量模拟支持勾选星球","经验分配比例调整至30%+70%","光环及对应trigger，并按对应技能等级百分比加成","水火自然默认调整为元素光环","init_client_info_v1.20250626.0_0717.json游戏数据更新"],"2025年7月11日":["怪物经验和技能等级公式更新","闪避和抗性计算公式更新","力量更替为近战以及对应的兼容","init_client_info_v1.20250626.0_0711.json游戏数据更新"],"2025年7月10日":["修复贯穿技能由敌人释放时可能多次击中相同目标的缺陷"],"2025年7月9日":["掉落和掉率调整","经验调整","疫病射击和破甲之刺调整","怪物自动恢复移除","疫病射击trigger调整","获取价格使用官方API"],"2025年7月7日":["怪物属性缩放和地图多难度","法师技能调整和装备上\'技能伤害\'词缀生效","攻击等级和房屋等级对施法速度的影响生效","物品调整","精准重做以攻击等级计算","TEST 远程魔法经验的10%映射到攻击经验！","经验重做和护符装备"]}');
+module.exports = /*#__PURE__*/JSON.parse('{"2026年9月17日":["修复计划步骤数量输入框失焦、历史记录下拉框自动关闭，以及上移、下移、移除按钮无效的问题"],"2026年9月16日":["模拟配置的区域选择新增“允许单刷”；默认只显示图1至图11，并记住当前浏览器的勾选状态","计划模拟改为先添加目标物品，再为每张相关地图选择对应的历史记录","支持图3至图11的钥匙碎片与D1至D4完整宝箱钥匙目标；每把完整钥匙按四种碎片各0.9个计算","地下城每次按4/3普通宝箱计算；精炼宝箱为普通宝箱数量的T1 33%或T2 100%，并统计开箱所需钥匙","模拟历史的地图选择按图1至图11、D1至D4排序，其余单怪物记录排在后面","模拟结果的每小时经验下方新增升级模拟，可按目标等级估算时间或按经过天数反推技能等级","配装比对忽略游戏任务徽章使用的 Trinket 槽位","移除模拟配置中的队伍预设，并自动清理浏览器内保存的旧预设","模拟历史现在会压缩保存完整队伍快照与各角色配装名","模拟历史新增导入按钮，可一键恢复当时的全队配置、地图和难度","配装比对改为直接按当前角色与配装名匹配服务器现有配装，手写配置自动跳过","历史记录中的战斗或完成次数每小时缩写为 eph；旧格式历史记录会自动清理"],"2026年9月15日":["调整站位时保持玩家1至玩家5槽位固定，仅在槽位之间移动角色与完整配装数据","配装比对改为按角色身份匹配，单纯交换站位不再被识别为整套配装变化","加载旧队伍预设时自动将原站位顺序转换到固定槽位","模拟历史详情改为横向角色标签页，点击角色即可切换查看","模拟历史对比改为横向角色标签页，全队共同掉落只保留一份"],"2026年9月11日":["优化历史掉落数量显示：小数按数值范围保留精度，大额数量取整，超过10万的金币使用M缩写","提高黑暗模式下历史比较增减数值的绿色与红色亮度"],"2026年9月10日":["模拟历史比较改为左右分栏，战斗指标与资源消耗在左、期望掉落在右","历史比较中的期望掉落改为24小时产量，并优先显示金币、钥匙碎片、护符和精华","全队共同掉落只显示一份，角色间确有差异的掉落单独列出","历史比较中的掉落数量达到1时最多显示两位小数，小于1时保留更多精度"],"2026年8月29日":["玩家标签支持拖动调整队伍站位，贯穿攻击会按标签从左到右的顺序处理","玩家站位会保存在当前浏览器中，并在加载队伍预设时恢复","新增按地图自动保存的模拟历史，不同难度记录会归入同一地图","模拟历史支持查看全队每名角色的主要指标、消耗品与期望掉落","支持选择同地图两条历史记录，按角色比较战斗表现与资源变化"],"2026年8月28日":["支持从私有配装数据导入每名角色实际生效的公会神龛战斗增益","房屋面板新增五种公会战斗神龛等级显示与模拟调整","逐怪物伤害与承伤明细改为默认折叠显示","钥匙碎片时间成本移至期望掉落上方，并新增每日碎片产量","钥匙碎片总耗时支持使用角色专业等级及游戏当前生效的专业增益精确计算","房屋面板改为房屋与公会神龛左右分栏显示","移除价格设置、市场价格获取与期望利润相关功能"],"2026年5月5日":["更新装备数据和本地化名称"],"2026年4月7日":["增加字段显示迷宫尝试次数和迷宫成功率"],"2026年3月5日":["优化狂怒相关的模拟性能"],"2026年3月3日":["支持迷宫封印对应的个人增益"],"2026年2月24日":["更新迷宫补丁的数据","新增支持迷宫单体/批量模拟"],"2026年2月1日":["修正战斗等级计算的精度","修正地下城完成或失败后重新进入战斗的时间间隔 by wangchyan","修正诅咒和削弱的持续时间 by wangchyan","修正诅咒和狂怒的触发逻辑 by wangchyan","修正地下城团灭重置机制的部分逻辑 by wangchyan","修复守护光环和速度光环部分增益未正确受对应等级加强的异常 by wangchyan","修复无敌技能未正确影响韧性数值的缺陷 by wangchyan","修复初次进入战斗时未能优先吃喝的异常 by wangchyan","战斗时长相关的统计现在仅计算已完成的战斗，不再包含当前未结束的战斗 by wangchyan"],"2026年1月11日":["修复trigger错误计算已阵亡单位的问题 by wangchyan"],"2025年12月31日":["实验性功能新增HP/MP可视化图表 by wangchyan","修复防御伤害未正确受damge加成的异常 by wangchyan","修复守护光环的治疗加成效果未生效的异常 by wangchyan","修复快速治疗等技能未正确选择最低%生命为目标的错误 by wangchyan"],"2025年12月30日":["地下城增加最短完成时间记录"],"2025年12月24日":["修复技能释放选择的缺陷，之前可能存在异常缺蓝等情况"],"2025年12月18日":["支持成就系统及对应buff效果","地下城怪物的掉落不再生效"],"2025年12月6日":["修复游戏更新后技能在无trigger情况下由[]变为null时造成的异常"],"2025年11月7日":["兼容支持从CN镜像站调用API获取价格"],"2025年10月14日":["修复怪物攻击间隔数值未能适配攻击等级的问题"],"2025年9月17日":["修复暴击光环的trigger缺陷"],"2025年9月9日":["复活时不再错误的清空所有buff","团灭日志增加反伤、荆棘和DOT伤害记录"],"2025年8月21日":["增加单挑战斗批量模拟和对应怪物选项","增加MooPass和社区buff的选项及对应功能","精炼装备数值加强","秘法主教属性削弱","init_client_info_v1.20250819.0.json游戏数据更新"],"2025年8月20日":["修复经验和掉落计算在极端情况下的可能异常"],"2025年8月19日":["合并Test和Temp分支的rework内容","init_client_info_v1.20250818.0.json游戏数据更新"],"2025年8月18日":["修复贯穿技能可能对相同目标造成重复伤害的问题","修复团灭日志在黑夜模式下的显示异常","战斗等级公式更新","钟乳石魔像的荆棘数值调整","init_client_info_v1.20250626.0_0817.json游戏数据更新"],"2025年8月16日":["增加停止模拟按钮 by BKN46","增加技能顺序调整按钮 by BKN46","增加团灭日志 by TruthLight","怪物属性更新","奥术反射更名为报应","init_client_info_v1.20250626.0_0815.json游戏数据更新"],"2025年8月14日":["怪物属性更新","远程和法师装备属性调整","反伤计算上限调整","修复战斗间隔释放技能的异常","修复技能释放判断逻辑的异常","法力值耗尽比例更加准确","调整远程经验的15%和魔法经验的12%映射到攻击经验","init_client_info_v1.20250626.0_0813.json游戏数据更新"],"2025年8月11日":["怪物属性更新","近战和物理技能施法时间更新","盾击和重锤数值调整","双手盾防御经验加成调整","init_client_info_v1.20250626.0_0811.json游戏数据更新"],"2025年8月8日":["实现组队等级差过大时对掉落和经验的惩罚","实现怪物经验随狂暴进度百分比增加","暴击光环数值调整","增加战斗等级数值显示","增加等级差距惩罚数值显示","init_client_info_v1.20250626.0_0807.json游戏数据更新"],"2025年8月7日":["修复组队战斗时一些重复物品掉落数量异常的缺陷 by contr4l","init_client_info_v1.20250626.0_0806.json游戏数据更新"],"2025年8月3日":["怪物狂暴机制及对应trigger生效","精炼装备更新，护符数值调整，守护光环增加闪避率","init_client_info_v1.20250626.0_0802.json游戏数据更新","狂怒层数修正为5层","招架结算机制调整"],"2025年7月31日":["物品数据和怪物属性更新","尖刺外壳和奥术反射重做","强化数值更新","删除异常trigger","狮鹫盾的虚弱重做","君王剑招架对队友生效","狂怒特效最大层数修正为6层","涟漪特效增加10MP恢复","反伤正确显示其命中率","反伤机制调整","同步双手盾属性和反伤荆棘技能数值的调整"],"2025年7月22日":["暴击光环受远程等级加成","光环基础数值和等级加成调整"],"2025年7月17日":["批量模拟支持勾选星球","经验分配比例调整至30%+70%","光环及对应trigger，并按对应技能等级百分比加成","水火自然默认调整为元素光环","init_client_info_v1.20250626.0_0717.json游戏数据更新"],"2025年7月11日":["怪物经验和技能等级公式更新","闪避和抗性计算公式更新","力量更替为近战以及对应的兼容","init_client_info_v1.20250626.0_0711.json游戏数据更新"],"2025年7月10日":["修复贯穿技能由敌人释放时可能多次击中相同目标的缺陷"],"2025年7月9日":["掉落和掉率调整","经验调整","疫病射击和破甲之刺调整","怪物自动恢复移除","疫病射击trigger调整","获取价格使用官方API"],"2025年7月7日":["怪物属性缩放和地图多难度","法师技能调整和装备上\'技能伤害\'词缀生效","攻击等级和房屋等级对施法速度的影响生效","物品调整","精准重做以攻击等级计算","TEST 远程魔法经验的10%映射到攻击经验！","经验重做和护符装备"]}');
 
 /***/ }),
 
@@ -8496,19 +8507,29 @@ function renderSimulationPlanSelector(plan) {
     document.getElementById("buttonDeleteSimulationPlan").disabled = simulationPlans.length === 0;
 }
 
-function createSimulationPlanActionButton({ action, label, className, disabled = false }) {
+function createSimulationPlanActionButton({
+    action,
+    stepId,
+    label,
+    className,
+    disabled = false,
+    title = "",
+}) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = className;
     button.dataset.planAction = action;
+    button.dataset.stepId = stepId;
     button.textContent = label;
     button.disabled = disabled;
+    button.title = title;
     return button;
 }
 
 function createSimulationPlanHistorySourceControl(step, source, sourceResult) {
     const container = document.createElement("div");
     container.className = "simulation-plan-source border rounded p-2 mb-2";
+    container.dataset.mapKey = source.mapKey;
     const mapDefinition = (0,_simulationPlan_js__WEBPACK_IMPORTED_MODULE_25__.getSimulationPlanMapDefinition)(source.mapKey);
     const heading = document.createElement("div");
     heading.className = "d-flex flex-wrap justify-content-between gap-2 mb-1";
@@ -8516,14 +8537,7 @@ function createSimulationPlanHistorySourceControl(step, source, sourceResult) {
     mapName.textContent = getSimulationPlanMapLabel(mapDefinition);
     const requirement = document.createElement("span");
     requirement.className = "small text-secondary";
-    requirement.textContent = getSimulationPlanText(
-        "requiredSourceQuantity",
-        "Need {{quantity}} {{item}}",
-        {
-            quantity: formatSimulationHistoryNumber(sourceResult.requiredQuantity, 2),
-            item: getSimulationHistoryItemName(source.itemHrid),
-        },
-    );
+    requirement.dataset.planRole = "required-source-quantity";
     heading.append(mapName, requirement);
 
     const select = document.createElement("select");
@@ -8553,6 +8567,25 @@ function createSimulationPlanHistorySourceControl(step, source, sourceResult) {
     select.value = selectedRecordId;
 
     const details = document.createElement("div");
+    details.dataset.planRole = "source-calculation";
+    container.append(heading, select, details);
+    updateSimulationPlanHistorySourceControl(container, source, sourceResult);
+    return container;
+}
+
+function updateSimulationPlanHistorySourceControl(container, source, sourceResult) {
+    const requirement = container.querySelector('[data-plan-role="required-source-quantity"]');
+    requirement.textContent = getSimulationPlanText(
+        "requiredSourceQuantity",
+        "Need {{quantity}} {{item}}",
+        {
+            quantity: formatSimulationHistoryNumber(sourceResult.requiredQuantity, 2),
+            item: getSimulationHistoryItemName(source.itemHrid),
+        },
+    );
+
+    const records = getSimulationPlanRecordsForMap(source.mapKey);
+    const details = container.querySelector('[data-plan-role="source-calculation"]');
     details.className = "small mt-1";
     if (sourceResult.valid) {
         details.className += " text-secondary";
@@ -8583,9 +8616,29 @@ function createSimulationPlanHistorySourceControl(step, source, sourceResult) {
             "Choose the history record used for this map.",
         );
     }
+}
 
-    container.append(heading, select, details);
-    return container;
+function updateSimulationPlanStepRow(step, stepResult) {
+    const row = [...document.querySelectorAll("#simulationPlanStepRows tr[data-step-id]")]
+        .find((candidate) => candidate.dataset.stepId === step.id);
+    if (!row) {
+        return;
+    }
+
+    const sourceControls = [...row.querySelectorAll(".simulation-plan-source[data-map-key]")];
+    step.sources.forEach((source, sourceIndex) => {
+        const control = sourceControls.find((candidate) => candidate.dataset.mapKey === source.mapKey);
+        const sourceResult = stepResult.sources[sourceIndex];
+        if (control && sourceResult) {
+            updateSimulationPlanHistorySourceControl(control, source, sourceResult);
+        }
+    });
+
+    const durationCell = row.querySelector('[data-plan-role="estimated-time"]');
+    if (durationCell) {
+        durationCell.className = `text-end text-nowrap${stepResult.valid ? "" : " text-warning"}`;
+        durationCell.textContent = formatSimulationPlanDuration(stepResult.durationHours);
+    }
 }
 
 function renderSimulationPlanSteps(plan, calculation) {
@@ -8628,40 +8681,39 @@ function renderSimulationPlanSteps(plan, calculation) {
         });
         row.appendChild(sourcesCell);
 
-        row.appendChild(createSimulationHistoryCell(
+        const durationCell = createSimulationHistoryCell(
             formatSimulationPlanDuration(stepResult.durationHours),
             `text-end text-nowrap${stepResult.valid ? "" : " text-warning"}`,
-        ));
+        );
+        durationCell.dataset.planRole = "estimated-time";
+        row.appendChild(durationCell);
 
         const actionCell = document.createElement("td");
         actionCell.className = "text-nowrap";
         actionCell.append(
             createSimulationPlanActionButton({
                 action: "up",
+                stepId: step.id,
                 label: "↑",
                 className: "btn btn-outline-secondary btn-sm me-1",
                 disabled: index === 0,
+                title: getSimulationPlanText("moveUp", "Move Up"),
             }),
             createSimulationPlanActionButton({
                 action: "down",
+                stepId: step.id,
                 label: "↓",
                 className: "btn btn-outline-secondary btn-sm me-1",
                 disabled: index === plan.steps.length - 1,
+                title: getSimulationPlanText("moveDown", "Move Down"),
             }),
             createSimulationPlanActionButton({
                 action: "remove",
+                stepId: step.id,
                 label: getSimulationPlanText("remove", "Remove"),
                 className: "btn btn-outline-danger btn-sm",
             }),
         );
-        row.querySelectorAll("button[data-plan-action]").forEach((button) => {
-            button.dataset.stepId = step.id;
-            if (button.dataset.planAction === "up") {
-                button.title = getSimulationPlanText("moveUp", "Move Up");
-            } else if (button.dataset.planAction === "down") {
-                button.title = getSimulationPlanText("moveDown", "Move Down");
-            }
-        });
         row.appendChild(actionCell);
         rows.appendChild(row);
     });
@@ -8964,19 +9016,28 @@ async function handleSimulationPlanStepAction(event) {
     if (!control) {
         return;
     }
+    const action = control.dataset.planAction;
+    if (!(0,_simulationPlan_js__WEBPACK_IMPORTED_MODULE_25__.shouldHandleSimulationPlanControlEvent)(event.type, action)) {
+        return;
+    }
     const plan = getActiveSimulationPlan();
     const stepIndex = plan?.steps?.findIndex((step) => step.id === control.dataset.stepId) ?? -1;
     if (!plan || stepIndex < 0) {
         return;
     }
 
-    const action = control.dataset.planAction;
     if (action === "quantity") {
         const quantity = Number(control.value);
         if (!Number.isFinite(quantity) || quantity < 0) {
             return;
         }
         plan.steps[stepIndex].targetQuantity = quantity;
+        plan.updatedAt = new Date().toISOString();
+        persistSimulationPlans();
+        const calculation = (0,_simulationPlan_js__WEBPACK_IMPORTED_MODULE_25__.calculateSimulationPlan)(plan);
+        updateSimulationPlanStepRow(plan.steps[stepIndex], calculation.steps[stepIndex]);
+        renderSimulationPlanSummary(plan, calculation);
+        return;
     } else if (action === "history-source") {
         const step = plan.steps[stepIndex];
         const mapKey = control.dataset.mapKey;

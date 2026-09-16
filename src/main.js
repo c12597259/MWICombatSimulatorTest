@@ -74,6 +74,7 @@ import {
     getSimulationPlanTargetDefinition,
     normalizeSimulationPlans,
     setSimulationPlanStepHistorySource,
+    shouldHandleSimulationPlanControlEvent,
 } from "./simulationPlan.js";
 import {
     ALLOW_SOLO_ZONE_STORAGE_KEY,
@@ -3633,19 +3634,29 @@ function renderSimulationPlanSelector(plan) {
     document.getElementById("buttonDeleteSimulationPlan").disabled = simulationPlans.length === 0;
 }
 
-function createSimulationPlanActionButton({ action, label, className, disabled = false }) {
+function createSimulationPlanActionButton({
+    action,
+    stepId,
+    label,
+    className,
+    disabled = false,
+    title = "",
+}) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = className;
     button.dataset.planAction = action;
+    button.dataset.stepId = stepId;
     button.textContent = label;
     button.disabled = disabled;
+    button.title = title;
     return button;
 }
 
 function createSimulationPlanHistorySourceControl(step, source, sourceResult) {
     const container = document.createElement("div");
     container.className = "simulation-plan-source border rounded p-2 mb-2";
+    container.dataset.mapKey = source.mapKey;
     const mapDefinition = getSimulationPlanMapDefinition(source.mapKey);
     const heading = document.createElement("div");
     heading.className = "d-flex flex-wrap justify-content-between gap-2 mb-1";
@@ -3653,14 +3664,7 @@ function createSimulationPlanHistorySourceControl(step, source, sourceResult) {
     mapName.textContent = getSimulationPlanMapLabel(mapDefinition);
     const requirement = document.createElement("span");
     requirement.className = "small text-secondary";
-    requirement.textContent = getSimulationPlanText(
-        "requiredSourceQuantity",
-        "Need {{quantity}} {{item}}",
-        {
-            quantity: formatSimulationHistoryNumber(sourceResult.requiredQuantity, 2),
-            item: getSimulationHistoryItemName(source.itemHrid),
-        },
-    );
+    requirement.dataset.planRole = "required-source-quantity";
     heading.append(mapName, requirement);
 
     const select = document.createElement("select");
@@ -3690,6 +3694,25 @@ function createSimulationPlanHistorySourceControl(step, source, sourceResult) {
     select.value = selectedRecordId;
 
     const details = document.createElement("div");
+    details.dataset.planRole = "source-calculation";
+    container.append(heading, select, details);
+    updateSimulationPlanHistorySourceControl(container, source, sourceResult);
+    return container;
+}
+
+function updateSimulationPlanHistorySourceControl(container, source, sourceResult) {
+    const requirement = container.querySelector('[data-plan-role="required-source-quantity"]');
+    requirement.textContent = getSimulationPlanText(
+        "requiredSourceQuantity",
+        "Need {{quantity}} {{item}}",
+        {
+            quantity: formatSimulationHistoryNumber(sourceResult.requiredQuantity, 2),
+            item: getSimulationHistoryItemName(source.itemHrid),
+        },
+    );
+
+    const records = getSimulationPlanRecordsForMap(source.mapKey);
+    const details = container.querySelector('[data-plan-role="source-calculation"]');
     details.className = "small mt-1";
     if (sourceResult.valid) {
         details.className += " text-secondary";
@@ -3720,9 +3743,29 @@ function createSimulationPlanHistorySourceControl(step, source, sourceResult) {
             "Choose the history record used for this map.",
         );
     }
+}
 
-    container.append(heading, select, details);
-    return container;
+function updateSimulationPlanStepRow(step, stepResult) {
+    const row = [...document.querySelectorAll("#simulationPlanStepRows tr[data-step-id]")]
+        .find((candidate) => candidate.dataset.stepId === step.id);
+    if (!row) {
+        return;
+    }
+
+    const sourceControls = [...row.querySelectorAll(".simulation-plan-source[data-map-key]")];
+    step.sources.forEach((source, sourceIndex) => {
+        const control = sourceControls.find((candidate) => candidate.dataset.mapKey === source.mapKey);
+        const sourceResult = stepResult.sources[sourceIndex];
+        if (control && sourceResult) {
+            updateSimulationPlanHistorySourceControl(control, source, sourceResult);
+        }
+    });
+
+    const durationCell = row.querySelector('[data-plan-role="estimated-time"]');
+    if (durationCell) {
+        durationCell.className = `text-end text-nowrap${stepResult.valid ? "" : " text-warning"}`;
+        durationCell.textContent = formatSimulationPlanDuration(stepResult.durationHours);
+    }
 }
 
 function renderSimulationPlanSteps(plan, calculation) {
@@ -3765,40 +3808,39 @@ function renderSimulationPlanSteps(plan, calculation) {
         });
         row.appendChild(sourcesCell);
 
-        row.appendChild(createSimulationHistoryCell(
+        const durationCell = createSimulationHistoryCell(
             formatSimulationPlanDuration(stepResult.durationHours),
             `text-end text-nowrap${stepResult.valid ? "" : " text-warning"}`,
-        ));
+        );
+        durationCell.dataset.planRole = "estimated-time";
+        row.appendChild(durationCell);
 
         const actionCell = document.createElement("td");
         actionCell.className = "text-nowrap";
         actionCell.append(
             createSimulationPlanActionButton({
                 action: "up",
+                stepId: step.id,
                 label: "↑",
                 className: "btn btn-outline-secondary btn-sm me-1",
                 disabled: index === 0,
+                title: getSimulationPlanText("moveUp", "Move Up"),
             }),
             createSimulationPlanActionButton({
                 action: "down",
+                stepId: step.id,
                 label: "↓",
                 className: "btn btn-outline-secondary btn-sm me-1",
                 disabled: index === plan.steps.length - 1,
+                title: getSimulationPlanText("moveDown", "Move Down"),
             }),
             createSimulationPlanActionButton({
                 action: "remove",
+                stepId: step.id,
                 label: getSimulationPlanText("remove", "Remove"),
                 className: "btn btn-outline-danger btn-sm",
             }),
         );
-        row.querySelectorAll("button[data-plan-action]").forEach((button) => {
-            button.dataset.stepId = step.id;
-            if (button.dataset.planAction === "up") {
-                button.title = getSimulationPlanText("moveUp", "Move Up");
-            } else if (button.dataset.planAction === "down") {
-                button.title = getSimulationPlanText("moveDown", "Move Down");
-            }
-        });
         row.appendChild(actionCell);
         rows.appendChild(row);
     });
@@ -4101,19 +4143,28 @@ async function handleSimulationPlanStepAction(event) {
     if (!control) {
         return;
     }
+    const action = control.dataset.planAction;
+    if (!shouldHandleSimulationPlanControlEvent(event.type, action)) {
+        return;
+    }
     const plan = getActiveSimulationPlan();
     const stepIndex = plan?.steps?.findIndex((step) => step.id === control.dataset.stepId) ?? -1;
     if (!plan || stepIndex < 0) {
         return;
     }
 
-    const action = control.dataset.planAction;
     if (action === "quantity") {
         const quantity = Number(control.value);
         if (!Number.isFinite(quantity) || quantity < 0) {
             return;
         }
         plan.steps[stepIndex].targetQuantity = quantity;
+        plan.updatedAt = new Date().toISOString();
+        persistSimulationPlans();
+        const calculation = calculateSimulationPlan(plan);
+        updateSimulationPlanStepRow(plan.steps[stepIndex], calculation.steps[stepIndex]);
+        renderSimulationPlanSummary(plan, calculation);
+        return;
     } else if (action === "history-source") {
         const step = plan.steps[stepIndex];
         const mapKey = control.dataset.mapKey;

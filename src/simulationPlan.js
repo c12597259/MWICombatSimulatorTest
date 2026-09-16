@@ -6,6 +6,16 @@ export const SIMULATION_PLAN_LEGACY_STORAGE_KEYS = Object.freeze([
     "mwiCombatSimulatorPlans_v1",
 ]);
 export const SIMULATION_PLAN_DEFAULT_TARGET_QUANTITY = 200;
+export function shouldHandleSimulationPlanControlEvent(eventType, action) {
+    if (eventType === "click") {
+        return action === "up" || action === "down" || action === "remove";
+    }
+    if (eventType === "change") {
+        return action === "quantity" || action === "history-source";
+    }
+    return false;
+}
+
 export const SIMULATION_PLAN_SKILLS = Object.freeze([
     "stamina",
     "intelligence",

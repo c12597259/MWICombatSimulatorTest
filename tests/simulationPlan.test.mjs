@@ -24,6 +24,7 @@ const {
     getSimulationPlanTargetDefinition,
     normalizeSimulationPlans,
     setSimulationPlanStepHistorySource,
+    shouldHandleSimulationPlanControlEvent,
 } = await import(planModuleUrl);
 
 const MAPS = {
@@ -39,6 +40,17 @@ const FRAGMENTS = {
     [MAPS.purple]: "/items/purple_key_fragment",
     [MAPS.white]: "/items/white_key_fragment",
 };
+
+test("routes plan controls only through their intended DOM event", () => {
+    assert.equal(shouldHandleSimulationPlanControlEvent("click", "quantity"), false);
+    assert.equal(shouldHandleSimulationPlanControlEvent("click", "history-source"), false);
+    assert.equal(shouldHandleSimulationPlanControlEvent("change", "quantity"), true);
+    assert.equal(shouldHandleSimulationPlanControlEvent("change", "history-source"), true);
+    assert.equal(shouldHandleSimulationPlanControlEvent("click", "up"), true);
+    assert.equal(shouldHandleSimulationPlanControlEvent("click", "down"), true);
+    assert.equal(shouldHandleSimulationPlanControlEvent("click", "remove"), true);
+    assert.equal(shouldHandleSimulationPlanControlEvent("change", "remove"), false);
+});
 
 function createZoneRecord(mapKey = MAPS.blue, rates = [4, 2]) {
     const itemHrid = FRAGMENTS[mapKey];
