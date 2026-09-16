@@ -50,6 +50,15 @@ function normalizeEquipmentLocation(itemLocationHrid) {
     return location;
 }
 
+function isIgnoredEquipmentLocation(locationHrid) {
+    const locationName = String(locationHrid || "")
+        .split("/")
+        .filter(Boolean)
+        .pop()
+        ?.toLocaleLowerCase();
+    return locationName === "trinket";
+}
+
 function normalizeEquipment(playerData) {
     const equipmentMap = new Map();
     const equipment = Array.isArray(playerData?.player?.equipment)
@@ -61,7 +70,7 @@ function normalizeEquipment(playerData) {
             continue;
         }
         const locationHrid = normalizeEquipmentLocation(item.itemLocationHrid);
-        if (!locationHrid) {
+        if (!locationHrid || isIgnoredEquipmentLocation(locationHrid)) {
             continue;
         }
         equipmentMap.set(locationHrid, {

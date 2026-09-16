@@ -70,6 +70,22 @@ test("detects level, equipment replacement, and enhancement changes", () => {
     );
 });
 
+test("ignores the game-only trinket slot when comparing simulator loadouts", () => {
+    const baseline = createPlayerData({
+        player: {
+            ...createPlayerData().player,
+            equipment: [{
+                itemLocationHrid: "/item_locations/trinket",
+                itemHrid: "/items/quest_badge",
+                enhancementLevel: 0,
+            }],
+        },
+    });
+    const current = createPlayerData();
+
+    assert.deepEqual(comparePlayerLoadouts(baseline, current), []);
+});
+
 test("reports ability slot order, ability level, food, and drink changes", () => {
     const baseline = createPlayerData({
         abilities: [
