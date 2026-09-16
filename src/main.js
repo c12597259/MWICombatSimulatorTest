@@ -18,6 +18,12 @@ import achievementTierMap from "./combatsimulator/data/achievementTierDetailMap.
 import achievementDetailMap from "./combatsimulator/data/achievementDetailMap.json"
 import { calculateFragmentTimeCosts } from "./fragmentTimeCost.js";
 import {
+    MAX_SKILL_LEVEL,
+    MIN_SKILL_LEVEL,
+    calculateLevelAfterDuration,
+    calculateTimeToLevel,
+} from "./experienceLevelCalculator.js";
+import {
     GUILD_COMBAT_SHRINE_DETAILS,
     normalizeGuildCombatShrineLevel,
     normalizeGuildCombatShrineLevels,
@@ -79,6 +85,17 @@ let currentSimResults = {};
 let pendingSimulationHistoryContext = null;
 let simulationHistoryRecords = [];
 let simulationHistoryPlayerTabSequence = 0;
+let experienceLevelCalculatorContext = null;
+
+const EXPERIENCE_LEVEL_SKILLS = Object.freeze([
+    "stamina",
+    "intelligence",
+    "attack",
+    "melee",
+    "defense",
+    "ranged",
+    "magic",
+]);
 
 let currentPlayerTabId = '1';
 const pendingImporterLoadoutNames = new Map();
@@ -3646,6 +3663,273 @@ function showDeaths(simResult, playerToDisplay) {
     resultDiv.replaceChildren(deathRow);
 }
 
+function interpolateExperienceLevelText(fallback, values = {}) {
+    return Object.entries(values).reduce(
+        (text, [key, value]) => text.replaceAll(`{{${key}}}`, String(value)),
+        fallback,
+    );
+}
+
+function getExperienceLevelText(key, fallback, values = {}) {
+    const translationKey = `common:simulationResults.levelCalculator.${key}`;
+    try {
+        const translated = i18next.t(translationKey, values);
+        if (typeof translated === "string" && translated !== translationKey) {
+            return translated;
+        }
+    } catch {
+        // Fall back to English while translations are still initializing.
+    }
+    return interpolateExperienceLevelText(fallback, values);
+}
+
+function getExperienceSkillName(skill) {
+    const translationKey = `leaderboardCategoryNames.${skill}`;
+    const fallback = skill.charAt(0).toUpperCase() + skill.slice(1);
+    try {
+        const translated = i18next.t(translationKey);
+        if (typeof translated === "string" && translated !== translationKey) {
+            return translated;
+        }
+    } catch {
+        // Fall back to the readable skill key.
+    }
+    return fallback;
+}
+
+function formatExperienceLevelNumber(value, maximumFractionDigits = 0) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) {
+        return "—";
+    }
+    return new Intl.NumberFormat(i18next?.language || undefined, {
+        maximumFractionDigits,
+    }).format(number);
+}
+
+function formatExperienceLevelDuration(hours) {
+    if (!Number.isFinite(hours)) {
+        return getExperienceLevelText("noRate", "No experience gain");
+    }
+    if (hours <= 0) {
+        return getExperienceLevelText("alreadyReached", "Already reached");
+    }
+    if (hours >= 24) {
+        let days = Math.floor(hours / 24);
+        let remainingHours = Math.round((hours - days * 24) * 10) / 10;
+        if (remainingHours >= 24) {
+            days += 1;
+            remainingHours = 0;
+        }
+        return getExperienceLevelText(
+            "durationDaysHours",
+            "{{days}} days {{hours}} hours",
+            {
+                days: formatExperienceLevelNumber(days),
+                hours: formatExperienceLevelNumber(remainingHours, 1),
+            },
+        );
+    }
+
+    const roundedMinutes = Math.max(1, Math.ceil(hours * 60));
+    if (roundedMinutes < 60) {
+        return getExperienceLevelText(
+            "durationMinutes",
+            "{{minutes}} minutes",
+            { minutes: formatExperienceLevelNumber(roundedMinutes) },
+        );
+    }
+    return getExperienceLevelText(
+        "durationHoursMinutes",
+        "{{hours}} hours {{minutes}} minutes",
+        {
+            hours: formatExperienceLevelNumber(Math.floor(roundedMinutes / 60)),
+            minutes: formatExperienceLevelNumber(roundedMinutes % 60),
+        },
+    );
+}
+
+function clampExperienceLevel(value) {
+    return Math.min(
+        MAX_SKILL_LEVEL,
+        Math.max(MIN_SKILL_LEVEL, Math.trunc(Number(value) || MIN_SKILL_LEVEL)),
+    );
+}
+
+function getConfiguredExperienceSkillLevel(playerNumber, skill) {
+    if (String(currentPlayerTabId) === String(playerNumber)) {
+        const visibleInputValue = document.getElementById(`inputLevel_${skill}`)?.value;
+        if (visibleInputValue !== undefined && visibleInputValue !== "") {
+            return clampExperienceLevel(visibleInputValue);
+        }
+    }
+
+    try {
+        const playerState = JSON.parse(playerDataMap[String(playerNumber)] || "{}");
+        return clampExperienceLevel(playerState?.player?.[`${skill}Level`]);
+    } catch {
+        return MIN_SKILL_LEVEL;
+    }
+}
+
+function clearExperienceLevelCalculatorResults() {
+    [
+        "experienceLevelCalculatorRate",
+        "experienceTargetRequired",
+        "experienceTargetTime",
+        "experienceDurationGained",
+        "experienceDurationLevel",
+        "experienceDurationProgress",
+        "experienceDurationRemaining",
+    ].forEach((id) => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.textContent = "—";
+        }
+    });
+}
+
+function renderExperienceLevelCalculator() {
+    const context = experienceLevelCalculatorContext;
+    const skill = document.getElementById("selectExperienceLevelSkill")?.value;
+    const rate = context?.rates?.[skill];
+    const currentLevelValue = Number(document.getElementById("inputExperienceCurrentLevel")?.value);
+    const targetLevelValue = Number(document.getElementById("inputExperienceTargetLevel")?.value);
+    const daysValue = Number(document.getElementById("inputExperienceDays")?.value);
+
+    if (
+        !context
+        || !skill
+        || !Number.isFinite(rate)
+        || rate <= 0
+        || !Number.isFinite(currentLevelValue)
+        || !Number.isFinite(targetLevelValue)
+        || !Number.isFinite(daysValue)
+        || daysValue < 0
+    ) {
+        clearExperienceLevelCalculatorResults();
+        return;
+    }
+
+    const currentLevel = clampExperienceLevel(currentLevelValue);
+    const targetLevel = clampExperienceLevel(targetLevelValue);
+    const targetResult = calculateTimeToLevel({
+        currentLevel,
+        targetLevel,
+        experiencePerHour: rate,
+    });
+    const durationResult = calculateLevelAfterDuration({
+        currentLevel,
+        days: daysValue,
+        experiencePerHour: rate,
+    });
+
+    document.getElementById("experienceLevelCalculatorRate").textContent = formatExperienceLevelNumber(rate);
+    document.getElementById("experienceTargetRequired").textContent = formatExperienceLevelNumber(
+        targetResult.requiredExperience,
+    );
+    document.getElementById("experienceTargetTime").textContent = formatExperienceLevelDuration(
+        targetResult.hours,
+    );
+    document.getElementById("experienceDurationGained").textContent = formatExperienceLevelNumber(
+        durationResult.gainedExperience,
+    );
+    document.getElementById("experienceDurationLevel").textContent = `Lv. ${durationResult.level}`;
+    document.getElementById("experienceDurationProgress").textContent = `${formatExperienceLevelNumber(
+        durationResult.levelProgress * 100,
+        2,
+    )}%`;
+    document.getElementById("experienceDurationRemaining").textContent = durationResult.atMaximumLevel
+        ? getExperienceLevelText("maxLevel", "Highest level in the experience table reached")
+        : formatExperienceLevelNumber(durationResult.experienceToNextLevel);
+}
+
+function selectExperienceLevelCalculatorSkill({ resetTarget = true } = {}) {
+    const context = experienceLevelCalculatorContext;
+    const skill = document.getElementById("selectExperienceLevelSkill")?.value;
+    if (!context || !skill) {
+        clearExperienceLevelCalculatorResults();
+        return;
+    }
+
+    const currentLevel = getConfiguredExperienceSkillLevel(context.playerNumber, skill);
+    const currentLevelInput = document.getElementById("inputExperienceCurrentLevel");
+    currentLevelInput.value = String(currentLevel);
+    if (resetTarget) {
+        document.getElementById("inputExperienceTargetLevel").value = String(
+            Math.min(MAX_SKILL_LEVEL, currentLevel + 1),
+        );
+    }
+    renderExperienceLevelCalculator();
+}
+
+function populateExperienceLevelSkillSelect(preferredSkill) {
+    const select = document.getElementById("selectExperienceLevelSkill");
+    const skills = EXPERIENCE_LEVEL_SKILLS.filter(
+        (skill) => (experienceLevelCalculatorContext?.rates?.[skill] ?? 0) > 0,
+    );
+    select.replaceChildren(...skills.map((skill) => {
+        const option = new Option(getExperienceSkillName(skill), skill);
+        option.setAttribute("data-i18n", `leaderboardCategoryNames.${skill}`);
+        return option;
+    }));
+    if (preferredSkill && skills.includes(preferredSkill)) {
+        select.value = preferredSkill;
+    }
+    return skills;
+}
+
+function openExperienceLevelCalculator() {
+    const emptyState = document.getElementById("experienceLevelCalculatorEmpty");
+    const content = document.getElementById("experienceLevelCalculatorContent");
+    const skills = populateExperienceLevelSkillSelect();
+    const hasExperience = skills.length > 0;
+    emptyState.classList.toggle("d-none", hasExperience);
+    content.classList.toggle("d-none", !hasExperience);
+
+    if (experienceLevelCalculatorContext) {
+        document.getElementById("experienceLevelCalculatorPlayer").textContent =
+            experienceLevelCalculatorContext.playerName;
+    }
+    if (hasExperience) {
+        selectExperienceLevelCalculatorSkill();
+    } else {
+        clearExperienceLevelCalculatorResults();
+    }
+
+    bootstrap.Modal.getOrCreateInstance(
+        document.getElementById("experienceLevelCalculatorModal"),
+    ).show();
+}
+
+function initExperienceLevelCalculator() {
+    document.getElementById("buttonExperienceLevelCalculator")?.addEventListener(
+        "click",
+        openExperienceLevelCalculator,
+    );
+    document.getElementById("selectExperienceLevelSkill")?.addEventListener(
+        "change",
+        () => selectExperienceLevelCalculatorSkill(),
+    );
+    [
+        "inputExperienceCurrentLevel",
+        "inputExperienceTargetLevel",
+        "inputExperienceDays",
+    ].forEach((id) => {
+        document.getElementById(id)?.addEventListener("input", renderExperienceLevelCalculator);
+    });
+
+    if (typeof i18next !== "undefined" && typeof i18next.on === "function") {
+        i18next.on("languageChanged", () => {
+            const selectedSkill = document.getElementById("selectExperienceLevelSkill")?.value;
+            if (experienceLevelCalculatorContext) {
+                populateExperienceLevelSkillSelect(selectedSkill);
+                renderExperienceLevelCalculator();
+            }
+        });
+    }
+}
+
 function showExperienceGained(simResult, playerToDisplay) {
     let resultDiv = document.getElementById("simulationResultExperienceGain");
     let newChildren = [];
@@ -3661,17 +3945,30 @@ function showExperienceGained(simResult, playerToDisplay) {
     totalRow.firstElementChild.setAttribute("data-i18n", "common:total");
     newChildren.push(totalRow);
 
+    const rates = {};
     ["Stamina", "Intelligence", "Attack", "Melee", "Defense", "Ranged", "Magic"].forEach((skill) => {
-        let experience = simResult.experienceGained[playerToDisplay]?.[skill.toLowerCase()] ?? 0;
+        const skillKey = skill.toLowerCase();
+        let experience = simResult.experienceGained[playerToDisplay]?.[skillKey] ?? 0;
         if (experience == 0) {
             return;
         }
-        let experiencePerHour = (experience / hoursSimulated).toFixed(0);
+        const rawExperiencePerHour = experience / hoursSimulated;
+        rates[skillKey] = rawExperiencePerHour;
+        let experiencePerHour = rawExperiencePerHour.toFixed(0);
         let experienceRow = createRow(["col-md-6", "col-md-6 text-end"], [skill, experiencePerHour]);
-        experienceRow.firstElementChild.setAttribute("data-i18n", "leaderboardCategoryNames." + skill.toLowerCase());
+        experienceRow.firstElementChild.setAttribute("data-i18n", "leaderboardCategoryNames." + skillKey);
         newChildren.push(experienceRow);
     });
 
+    const playerNumber = playerToDisplay.replace("player", "");
+    experienceLevelCalculatorContext = {
+        playerNumber,
+        playerName: document.getElementById(`${playerToDisplay}-tab`)?.textContent?.trim()
+            || `Player ${playerNumber}`,
+        rates,
+    };
+    document.getElementById("buttonExperienceLevelCalculator").disabled =
+        Object.keys(rates).length === 0;
     resultDiv.replaceChildren(...newChildren);
 }
 
@@ -7117,6 +7414,7 @@ initDungeons();
 initLabyrinth();
 initTriggerModal();
 initSimulationControls();
+initExperienceLevelCalculator();
 initSimulationHistory();
 initEquipmentSetsModal();
 initErrorHandling();

@@ -136,6 +136,15 @@
             color: #c8c8c8 !important;
         }
 
+        body.dark-mode #experienceLevelCalculatorModal .text-secondary,
+        body.dark-mode #experienceLevelCalculatorModal .form-text {
+            color: #c8c8c8 !important;
+        }
+
+        body.dark-mode #experienceLevelCalculatorModal .border {
+            border-color: #666 !important;
+        }
+
         body.dark-mode #buttonSimulationResultDamageDetails {
             color: #f0f0f0;
             border-color: #aaa;
@@ -1245,6 +1254,11 @@
                             <b data-i18n="common:simulationResults.xpPerHour">XP per hour</b>
                         </div>
                         <div id="simulationResultExperienceGain" class="mb-2"></div>
+                        <div class="d-grid mb-3">
+                            <button type="button" class="btn btn-sm btn-outline-primary"
+                                id="buttonExperienceLevelCalculator" disabled
+                                data-i18n="common:simulationResults.levelCalculator.open">Level Calculator</button>
+                        </div>
                         <div class="row" id="simulationHpSpentHeading">
                             <b data-i18n="common:simulationResults.hpSpentPerHour">HP Spent per hour</b>
                         </div>
@@ -2181,6 +2195,91 @@
             </div>
         </div>
         <!-- #endregion -->
+    </div>
+    <div class="modal" id="experienceLevelCalculatorModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" data-i18n="common:simulationResults.levelCalculator.title">Level Calculator</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small text-secondary" data-i18n="common:simulationResults.levelCalculator.description">
+                        Estimate level progress using this simulation's experience rate.
+                    </p>
+                    <div id="experienceLevelCalculatorEmpty" class="alert alert-warning d-none"
+                        data-i18n="common:simulationResults.levelCalculator.noExperience">
+                        This simulation has no skill experience available for calculation.
+                    </div>
+                    <div id="experienceLevelCalculatorContent">
+                        <div class="row g-3 align-items-end mb-4">
+                            <div class="col-md-3">
+                                <label class="form-label" data-i18n="common:simulationResults.levelCalculator.player">Player</label>
+                                <div id="experienceLevelCalculatorPlayer" class="fw-semibold pb-2"></div>
+                            </div>
+                            <div class="col-md-3">
+                                <label for="selectExperienceLevelSkill" class="form-label"
+                                    data-i18n="common:simulationResults.levelCalculator.skill">Skill</label>
+                                <select id="selectExperienceLevelSkill" class="form-select"></select>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label" data-i18n="common:simulationResults.levelCalculator.experiencePerHour">Experience per Hour</label>
+                                <div id="experienceLevelCalculatorRate" class="fw-semibold pb-2"></div>
+                            </div>
+                            <div class="col-md-3">
+                                <label for="inputExperienceCurrentLevel" class="form-label"
+                                    data-i18n="common:simulationResults.levelCalculator.currentLevel">Current Level</label>
+                                <input type="number" id="inputExperienceCurrentLevel" class="form-control"
+                                    value="1" min="1" max="200" step="1" />
+                            </div>
+                        </div>
+                        <div class="form-text mb-3" data-i18n="common:simulationResults.levelCalculator.currentLevelHint">
+                            The estimate starts at 0% progress into the current level.
+                        </div>
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <section class="border rounded p-3 h-100">
+                                    <h6 data-i18n="common:simulationResults.levelCalculator.targetMode">Estimate Time to Target Level</h6>
+                                    <label for="inputExperienceTargetLevel" class="form-label"
+                                        data-i18n="common:simulationResults.levelCalculator.targetLevel">Target Level</label>
+                                    <input type="number" id="inputExperienceTargetLevel" class="form-control mb-3"
+                                        value="2" min="1" max="200" step="1" />
+                                    <dl class="row mb-0" aria-live="polite">
+                                        <dt class="col-6" data-i18n="common:simulationResults.levelCalculator.requiredExperience">Required Experience</dt>
+                                        <dd class="col-6 text-end" id="experienceTargetRequired"></dd>
+                                        <dt class="col-6" data-i18n="common:simulationResults.levelCalculator.estimatedTime">Estimated Time</dt>
+                                        <dd class="col-6 text-end fw-semibold" id="experienceTargetTime"></dd>
+                                    </dl>
+                                </section>
+                            </div>
+                            <div class="col-md-6">
+                                <section class="border rounded p-3 h-100">
+                                    <h6 data-i18n="common:simulationResults.levelCalculator.durationMode">Estimate Level After Time</h6>
+                                    <label for="inputExperienceDays" class="form-label"
+                                        data-i18n="common:simulationResults.levelCalculator.days">Days</label>
+                                    <input type="number" id="inputExperienceDays" class="form-control mb-3"
+                                        value="30" min="0" step="0.1" />
+                                    <dl class="row mb-0" aria-live="polite">
+                                        <dt class="col-6" data-i18n="common:simulationResults.levelCalculator.gainedExperience">Experience Gained</dt>
+                                        <dd class="col-6 text-end" id="experienceDurationGained"></dd>
+                                        <dt class="col-6" data-i18n="common:simulationResults.levelCalculator.estimatedLevel">Estimated Level</dt>
+                                        <dd class="col-6 text-end fw-semibold" id="experienceDurationLevel"></dd>
+                                        <dt class="col-6" data-i18n="common:simulationResults.levelCalculator.levelProgress">Level Progress</dt>
+                                        <dd class="col-6 text-end" id="experienceDurationProgress"></dd>
+                                        <dt class="col-6" data-i18n="common:simulationResults.levelCalculator.nextLevelRemaining">Until Next Level</dt>
+                                        <dd class="col-6 text-end" id="experienceDurationRemaining"></dd>
+                                    </dl>
+                                </section>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"
+                        data-i18n="common:controls.close">Close</button>
+                </div>
+            </div>
+        </div>
     </div>
     <div class="modal" id="teamPresetComparisonModal" tabindex="-1">
         <div class="modal-dialog modal-xl modal-dialog-scrollable">

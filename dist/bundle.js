@@ -1574,6 +1574,152 @@ class Trigger {
 
 /***/ }),
 
+/***/ "./src/experienceLevelCalculator.js":
+/*!******************************************!*\
+  !*** ./src/experienceLevelCalculator.js ***!
+  \******************************************/
+/***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
+
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   EXPERIENCE_TOTAL_BY_LEVEL: () => (/* binding */ EXPERIENCE_TOTAL_BY_LEVEL),
+/* harmony export */   MAX_SKILL_LEVEL: () => (/* binding */ MAX_SKILL_LEVEL),
+/* harmony export */   MIN_SKILL_LEVEL: () => (/* binding */ MIN_SKILL_LEVEL),
+/* harmony export */   calculateLevelAfterDuration: () => (/* binding */ calculateLevelAfterDuration),
+/* harmony export */   calculateTimeToLevel: () => (/* binding */ calculateTimeToLevel),
+/* harmony export */   getTotalExperienceForLevel: () => (/* binding */ getTotalExperienceForLevel)
+/* harmony export */ });
+const MIN_SKILL_LEVEL = 1;
+const MAX_SKILL_LEVEL = 200;
+
+// Cumulative experience required to have reached each level. Index 0 is level 1.
+const EXPERIENCE_TOTAL_BY_LEVEL = Object.freeze([
+    0, 33, 76, 132, 202, 286, 386, 503, 637, 791,
+    964, 1159, 1377, 1620, 1891, 2192, 2525, 2893, 3300, 3750,
+    4247, 4795, 5400, 6068, 6805, 7618, 8517, 9508, 10604, 11814,
+    13151, 14629, 16262, 18068, 20064, 22271, 24712, 27411, 30396, 33697,
+    37346, 41381, 45842, 50773, 56222, 62243, 68895, 76242, 84355, 93311,
+    103195, 114100, 126127, 139390, 154009, 170118, 187863, 207403, 228914, 252584,
+    278623, 307256, 338731, 373318, 411311, 453030, 498824, 549074, 604193, 664632,
+    730881, 803472, 882985, 970050, 1065351, 1169633, 1283701, 1408433, 1544780, 1693774,
+    1856536, 2034279, 2228321, 2440088, 2671127, 2923113, 3197861, 3497335, 3823663, 4179145,
+    4566274, 4987741, 5446463, 5945587, 6488521, 7078945, 7720834, 8418485, 9176537, 10000000,
+    11404976, 12904567, 14514400, 16242080, 18095702, 20083886, 22215808, 24501230, 26950540, 29574787,
+    32385721, 35395838, 38618420, 42067584, 45758332, 49706603, 53929328, 58444489, 63271179, 68429670,
+    73941479, 79829440, 86117783, 92832214, 100000000, 114406130, 130118394, 147319656, 166147618, 186752428,
+    209297771, 233962072, 260939787, 290442814, 322702028, 357968938, 396517495, 438646053, 484679494, 534971538,
+    589907252, 649905763, 715423218, 786955977, 865044093, 950275074, 1043287971, 1144777804, 1255500373, 1376277458,
+    1508002470, 1651646566, 1808265285, 1979005730, 2165114358, 2367945418, 2588970089, 2829786381, 3092129857, 3377885250,
+    3689099031, 4027993033, 4396979184, 4798675471, 5235923207, 5711805728, 6229668624, 6793141628, 7406162301, 8073001662,
+    8798291902, 9587056372, 10444742007, 11377254401, 12390995728, 13492905745, 14690506120, 15991948361, 17406065609, 18942428633,
+    20611406335, 22424231139, 24393069640, 26531098945, 28852589138, 31372992363, 34109039054, 37078841860, 40302007875, 43799759843,
+    47595067021, 51712786465, 56179815564, 61025256696, 66280594953, 71979889960, 78159982881, 84860719814, 92125192822, 100000000000,
+]);
+
+function normalizeLevel(value) {
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) {
+        throw new TypeError("Skill level must be a finite number.");
+    }
+    return Math.min(MAX_SKILL_LEVEL, Math.max(MIN_SKILL_LEVEL, Math.trunc(numericValue)));
+}
+
+function normalizeNonNegativeNumber(value, label) {
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue) || numericValue < 0) {
+        throw new RangeError(`${label} must be a non-negative finite number.`);
+    }
+    return numericValue;
+}
+
+function getTotalExperienceForLevel(level) {
+    return EXPERIENCE_TOTAL_BY_LEVEL[normalizeLevel(level) - 1];
+}
+
+function calculateTimeToLevel({ currentLevel, targetLevel, experiencePerHour }) {
+    const normalizedCurrentLevel = normalizeLevel(currentLevel);
+    const normalizedTargetLevel = normalizeLevel(targetLevel);
+    const normalizedRate = normalizeNonNegativeNumber(experiencePerHour, "Experience per hour");
+    const requiredExperience = Math.max(
+        0,
+        getTotalExperienceForLevel(normalizedTargetLevel)
+            - getTotalExperienceForLevel(normalizedCurrentLevel),
+    );
+
+    return {
+        currentLevel: normalizedCurrentLevel,
+        targetLevel: normalizedTargetLevel,
+        requiredExperience,
+        hours: requiredExperience === 0
+            ? 0
+            : normalizedRate > 0
+                ? requiredExperience / normalizedRate
+                : Number.POSITIVE_INFINITY,
+    };
+}
+
+function findLevelForTotalExperience(totalExperience) {
+    let low = 0;
+    let high = EXPERIENCE_TOTAL_BY_LEVEL.length - 1;
+    let resultIndex = 0;
+
+    while (low <= high) {
+        const middle = Math.floor((low + high) / 2);
+        if (EXPERIENCE_TOTAL_BY_LEVEL[middle] <= totalExperience) {
+            resultIndex = middle;
+            low = middle + 1;
+        } else {
+            high = middle - 1;
+        }
+    }
+
+    return resultIndex + 1;
+}
+
+function calculateLevelAfterDuration({ currentLevel, days, experiencePerHour }) {
+    const normalizedCurrentLevel = normalizeLevel(currentLevel);
+    const normalizedDays = normalizeNonNegativeNumber(days, "Days");
+    const normalizedRate = normalizeNonNegativeNumber(experiencePerHour, "Experience per hour");
+    const startingExperience = getTotalExperienceForLevel(normalizedCurrentLevel);
+    const gainedExperience = normalizedDays * 24 * normalizedRate;
+    const totalExperience = startingExperience + gainedExperience;
+    const level = findLevelForTotalExperience(totalExperience);
+    const atMaximumLevel = level >= MAX_SKILL_LEVEL;
+    const currentLevelExperience = getTotalExperienceForLevel(level);
+    const nextLevelExperience = atMaximumLevel
+        ? currentLevelExperience
+        : getTotalExperienceForLevel(level + 1);
+    const experienceIntoLevel = atMaximumLevel
+        ? 0
+        : totalExperience - currentLevelExperience;
+    const experienceToNextLevel = atMaximumLevel
+        ? 0
+        : Math.max(0, nextLevelExperience - totalExperience);
+    const levelProgress = atMaximumLevel
+        ? 1
+        : Math.min(1, Math.max(
+            0,
+            experienceIntoLevel / (nextLevelExperience - currentLevelExperience),
+        ));
+
+    return {
+        currentLevel: normalizedCurrentLevel,
+        days: normalizedDays,
+        experiencePerHour: normalizedRate,
+        startingExperience,
+        gainedExperience,
+        totalExperience,
+        level,
+        levelProgress,
+        experienceIntoLevel,
+        experienceToNextLevel,
+        atMaximumLevel,
+    };
+}
+
+
+/***/ }),
+
 /***/ "./src/fragmentTimeCost.js":
 /*!*********************************!*\
   !*** ./src/fragmentTimeCost.js ***!
@@ -3726,7 +3872,7 @@ function compareTeamPresetWithCurrent(
   \************************/
 /***/ ((module) => {
 
-module.exports = /*#__PURE__*/JSON.parse('{"2026年9月16日":["配装比对忽略游戏任务徽章使用的 Trinket 槽位","移除模拟配置中的队伍预设，并自动清理浏览器内保存的旧预设","模拟历史现在会压缩保存完整队伍快照与各角色配装名","模拟历史新增导入按钮，可一键恢复当时的全队配置、地图和难度","配装比对改为直接按当前角色与配装名匹配服务器现有配装，手写配置自动跳过","历史记录中的战斗或完成次数每小时缩写为 eph；旧格式历史记录会自动清理"],"2026年9月15日":["调整站位时保持玩家1至玩家5槽位固定，仅在槽位之间移动角色与完整配装数据","配装比对改为按角色身份匹配，单纯交换站位不再被识别为整套配装变化","加载旧队伍预设时自动将原站位顺序转换到固定槽位","模拟历史详情改为横向角色标签页，点击角色即可切换查看","模拟历史对比改为横向角色标签页，全队共同掉落只保留一份"],"2026年9月11日":["优化历史掉落数量显示：小数按数值范围保留精度，大额数量取整，超过10万的金币使用M缩写","提高黑暗模式下历史比较增减数值的绿色与红色亮度"],"2026年9月10日":["模拟历史比较改为左右分栏，战斗指标与资源消耗在左、期望掉落在右","历史比较中的期望掉落改为24小时产量，并优先显示金币、钥匙碎片、护符和精华","全队共同掉落只显示一份，角色间确有差异的掉落单独列出","历史比较中的掉落数量达到1时最多显示两位小数，小于1时保留更多精度"],"2026年8月29日":["玩家标签支持拖动调整队伍站位，贯穿攻击会按标签从左到右的顺序处理","玩家站位会保存在当前浏览器中，并在加载队伍预设时恢复","新增按地图自动保存的模拟历史，不同难度记录会归入同一地图","模拟历史支持查看全队每名角色的主要指标、消耗品与期望掉落","支持选择同地图两条历史记录，按角色比较战斗表现与资源变化"],"2026年8月28日":["支持从私有配装数据导入每名角色实际生效的公会神龛战斗增益","房屋面板新增五种公会战斗神龛等级显示与模拟调整","逐怪物伤害与承伤明细改为默认折叠显示","钥匙碎片时间成本移至期望掉落上方，并新增每日碎片产量","钥匙碎片总耗时支持使用角色专业等级及游戏当前生效的专业增益精确计算","房屋面板改为房屋与公会神龛左右分栏显示","移除价格设置、市场价格获取与期望利润相关功能"],"2026年5月5日":["更新装备数据和本地化名称"],"2026年4月7日":["增加字段显示迷宫尝试次数和迷宫成功率"],"2026年3月5日":["优化狂怒相关的模拟性能"],"2026年3月3日":["支持迷宫封印对应的个人增益"],"2026年2月24日":["更新迷宫补丁的数据","新增支持迷宫单体/批量模拟"],"2026年2月1日":["修正战斗等级计算的精度","修正地下城完成或失败后重新进入战斗的时间间隔 by wangchyan","修正诅咒和削弱的持续时间 by wangchyan","修正诅咒和狂怒的触发逻辑 by wangchyan","修正地下城团灭重置机制的部分逻辑 by wangchyan","修复守护光环和速度光环部分增益未正确受对应等级加强的异常 by wangchyan","修复无敌技能未正确影响韧性数值的缺陷 by wangchyan","修复初次进入战斗时未能优先吃喝的异常 by wangchyan","战斗时长相关的统计现在仅计算已完成的战斗，不再包含当前未结束的战斗 by wangchyan"],"2026年1月11日":["修复trigger错误计算已阵亡单位的问题 by wangchyan"],"2025年12月31日":["实验性功能新增HP/MP可视化图表 by wangchyan","修复防御伤害未正确受damge加成的异常 by wangchyan","修复守护光环的治疗加成效果未生效的异常 by wangchyan","修复快速治疗等技能未正确选择最低%生命为目标的错误 by wangchyan"],"2025年12月30日":["地下城增加最短完成时间记录"],"2025年12月24日":["修复技能释放选择的缺陷，之前可能存在异常缺蓝等情况"],"2025年12月18日":["支持成就系统及对应buff效果","地下城怪物的掉落不再生效"],"2025年12月6日":["修复游戏更新后技能在无trigger情况下由[]变为null时造成的异常"],"2025年11月7日":["兼容支持从CN镜像站调用API获取价格"],"2025年10月14日":["修复怪物攻击间隔数值未能适配攻击等级的问题"],"2025年9月17日":["修复暴击光环的trigger缺陷"],"2025年9月9日":["复活时不再错误的清空所有buff","团灭日志增加反伤、荆棘和DOT伤害记录"],"2025年8月21日":["增加单挑战斗批量模拟和对应怪物选项","增加MooPass和社区buff的选项及对应功能","精炼装备数值加强","秘法主教属性削弱","init_client_info_v1.20250819.0.json游戏数据更新"],"2025年8月20日":["修复经验和掉落计算在极端情况下的可能异常"],"2025年8月19日":["合并Test和Temp分支的rework内容","init_client_info_v1.20250818.0.json游戏数据更新"],"2025年8月18日":["修复贯穿技能可能对相同目标造成重复伤害的问题","修复团灭日志在黑夜模式下的显示异常","战斗等级公式更新","钟乳石魔像的荆棘数值调整","init_client_info_v1.20250626.0_0817.json游戏数据更新"],"2025年8月16日":["增加停止模拟按钮 by BKN46","增加技能顺序调整按钮 by BKN46","增加团灭日志 by TruthLight","怪物属性更新","奥术反射更名为报应","init_client_info_v1.20250626.0_0815.json游戏数据更新"],"2025年8月14日":["怪物属性更新","远程和法师装备属性调整","反伤计算上限调整","修复战斗间隔释放技能的异常","修复技能释放判断逻辑的异常","法力值耗尽比例更加准确","调整远程经验的15%和魔法经验的12%映射到攻击经验","init_client_info_v1.20250626.0_0813.json游戏数据更新"],"2025年8月11日":["怪物属性更新","近战和物理技能施法时间更新","盾击和重锤数值调整","双手盾防御经验加成调整","init_client_info_v1.20250626.0_0811.json游戏数据更新"],"2025年8月8日":["实现组队等级差过大时对掉落和经验的惩罚","实现怪物经验随狂暴进度百分比增加","暴击光环数值调整","增加战斗等级数值显示","增加等级差距惩罚数值显示","init_client_info_v1.20250626.0_0807.json游戏数据更新"],"2025年8月7日":["修复组队战斗时一些重复物品掉落数量异常的缺陷 by contr4l","init_client_info_v1.20250626.0_0806.json游戏数据更新"],"2025年8月3日":["怪物狂暴机制及对应trigger生效","精炼装备更新，护符数值调整，守护光环增加闪避率","init_client_info_v1.20250626.0_0802.json游戏数据更新","狂怒层数修正为5层","招架结算机制调整"],"2025年7月31日":["物品数据和怪物属性更新","尖刺外壳和奥术反射重做","强化数值更新","删除异常trigger","狮鹫盾的虚弱重做","君王剑招架对队友生效","狂怒特效最大层数修正为6层","涟漪特效增加10MP恢复","反伤正确显示其命中率","反伤机制调整","同步双手盾属性和反伤荆棘技能数值的调整"],"2025年7月22日":["暴击光环受远程等级加成","光环基础数值和等级加成调整"],"2025年7月17日":["批量模拟支持勾选星球","经验分配比例调整至30%+70%","光环及对应trigger，并按对应技能等级百分比加成","水火自然默认调整为元素光环","init_client_info_v1.20250626.0_0717.json游戏数据更新"],"2025年7月11日":["怪物经验和技能等级公式更新","闪避和抗性计算公式更新","力量更替为近战以及对应的兼容","init_client_info_v1.20250626.0_0711.json游戏数据更新"],"2025年7月10日":["修复贯穿技能由敌人释放时可能多次击中相同目标的缺陷"],"2025年7月9日":["掉落和掉率调整","经验调整","疫病射击和破甲之刺调整","怪物自动恢复移除","疫病射击trigger调整","获取价格使用官方API"],"2025年7月7日":["怪物属性缩放和地图多难度","法师技能调整和装备上\'技能伤害\'词缀生效","攻击等级和房屋等级对施法速度的影响生效","物品调整","精准重做以攻击等级计算","TEST 远程魔法经验的10%映射到攻击经验！","经验重做和护符装备"]}');
+module.exports = /*#__PURE__*/JSON.parse('{"2026年9月16日":["模拟结果的每小时经验下方新增升级模拟，可按目标等级估算时间或按经过天数反推技能等级","配装比对忽略游戏任务徽章使用的 Trinket 槽位","移除模拟配置中的队伍预设，并自动清理浏览器内保存的旧预设","模拟历史现在会压缩保存完整队伍快照与各角色配装名","模拟历史新增导入按钮，可一键恢复当时的全队配置、地图和难度","配装比对改为直接按当前角色与配装名匹配服务器现有配装，手写配置自动跳过","历史记录中的战斗或完成次数每小时缩写为 eph；旧格式历史记录会自动清理"],"2026年9月15日":["调整站位时保持玩家1至玩家5槽位固定，仅在槽位之间移动角色与完整配装数据","配装比对改为按角色身份匹配，单纯交换站位不再被识别为整套配装变化","加载旧队伍预设时自动将原站位顺序转换到固定槽位","模拟历史详情改为横向角色标签页，点击角色即可切换查看","模拟历史对比改为横向角色标签页，全队共同掉落只保留一份"],"2026年9月11日":["优化历史掉落数量显示：小数按数值范围保留精度，大额数量取整，超过10万的金币使用M缩写","提高黑暗模式下历史比较增减数值的绿色与红色亮度"],"2026年9月10日":["模拟历史比较改为左右分栏，战斗指标与资源消耗在左、期望掉落在右","历史比较中的期望掉落改为24小时产量，并优先显示金币、钥匙碎片、护符和精华","全队共同掉落只显示一份，角色间确有差异的掉落单独列出","历史比较中的掉落数量达到1时最多显示两位小数，小于1时保留更多精度"],"2026年8月29日":["玩家标签支持拖动调整队伍站位，贯穿攻击会按标签从左到右的顺序处理","玩家站位会保存在当前浏览器中，并在加载队伍预设时恢复","新增按地图自动保存的模拟历史，不同难度记录会归入同一地图","模拟历史支持查看全队每名角色的主要指标、消耗品与期望掉落","支持选择同地图两条历史记录，按角色比较战斗表现与资源变化"],"2026年8月28日":["支持从私有配装数据导入每名角色实际生效的公会神龛战斗增益","房屋面板新增五种公会战斗神龛等级显示与模拟调整","逐怪物伤害与承伤明细改为默认折叠显示","钥匙碎片时间成本移至期望掉落上方，并新增每日碎片产量","钥匙碎片总耗时支持使用角色专业等级及游戏当前生效的专业增益精确计算","房屋面板改为房屋与公会神龛左右分栏显示","移除价格设置、市场价格获取与期望利润相关功能"],"2026年5月5日":["更新装备数据和本地化名称"],"2026年4月7日":["增加字段显示迷宫尝试次数和迷宫成功率"],"2026年3月5日":["优化狂怒相关的模拟性能"],"2026年3月3日":["支持迷宫封印对应的个人增益"],"2026年2月24日":["更新迷宫补丁的数据","新增支持迷宫单体/批量模拟"],"2026年2月1日":["修正战斗等级计算的精度","修正地下城完成或失败后重新进入战斗的时间间隔 by wangchyan","修正诅咒和削弱的持续时间 by wangchyan","修正诅咒和狂怒的触发逻辑 by wangchyan","修正地下城团灭重置机制的部分逻辑 by wangchyan","修复守护光环和速度光环部分增益未正确受对应等级加强的异常 by wangchyan","修复无敌技能未正确影响韧性数值的缺陷 by wangchyan","修复初次进入战斗时未能优先吃喝的异常 by wangchyan","战斗时长相关的统计现在仅计算已完成的战斗，不再包含当前未结束的战斗 by wangchyan"],"2026年1月11日":["修复trigger错误计算已阵亡单位的问题 by wangchyan"],"2025年12月31日":["实验性功能新增HP/MP可视化图表 by wangchyan","修复防御伤害未正确受damge加成的异常 by wangchyan","修复守护光环的治疗加成效果未生效的异常 by wangchyan","修复快速治疗等技能未正确选择最低%生命为目标的错误 by wangchyan"],"2025年12月30日":["地下城增加最短完成时间记录"],"2025年12月24日":["修复技能释放选择的缺陷，之前可能存在异常缺蓝等情况"],"2025年12月18日":["支持成就系统及对应buff效果","地下城怪物的掉落不再生效"],"2025年12月6日":["修复游戏更新后技能在无trigger情况下由[]变为null时造成的异常"],"2025年11月7日":["兼容支持从CN镜像站调用API获取价格"],"2025年10月14日":["修复怪物攻击间隔数值未能适配攻击等级的问题"],"2025年9月17日":["修复暴击光环的trigger缺陷"],"2025年9月9日":["复活时不再错误的清空所有buff","团灭日志增加反伤、荆棘和DOT伤害记录"],"2025年8月21日":["增加单挑战斗批量模拟和对应怪物选项","增加MooPass和社区buff的选项及对应功能","精炼装备数值加强","秘法主教属性削弱","init_client_info_v1.20250819.0.json游戏数据更新"],"2025年8月20日":["修复经验和掉落计算在极端情况下的可能异常"],"2025年8月19日":["合并Test和Temp分支的rework内容","init_client_info_v1.20250818.0.json游戏数据更新"],"2025年8月18日":["修复贯穿技能可能对相同目标造成重复伤害的问题","修复团灭日志在黑夜模式下的显示异常","战斗等级公式更新","钟乳石魔像的荆棘数值调整","init_client_info_v1.20250626.0_0817.json游戏数据更新"],"2025年8月16日":["增加停止模拟按钮 by BKN46","增加技能顺序调整按钮 by BKN46","增加团灭日志 by TruthLight","怪物属性更新","奥术反射更名为报应","init_client_info_v1.20250626.0_0815.json游戏数据更新"],"2025年8月14日":["怪物属性更新","远程和法师装备属性调整","反伤计算上限调整","修复战斗间隔释放技能的异常","修复技能释放判断逻辑的异常","法力值耗尽比例更加准确","调整远程经验的15%和魔法经验的12%映射到攻击经验","init_client_info_v1.20250626.0_0813.json游戏数据更新"],"2025年8月11日":["怪物属性更新","近战和物理技能施法时间更新","盾击和重锤数值调整","双手盾防御经验加成调整","init_client_info_v1.20250626.0_0811.json游戏数据更新"],"2025年8月8日":["实现组队等级差过大时对掉落和经验的惩罚","实现怪物经验随狂暴进度百分比增加","暴击光环数值调整","增加战斗等级数值显示","增加等级差距惩罚数值显示","init_client_info_v1.20250626.0_0807.json游戏数据更新"],"2025年8月7日":["修复组队战斗时一些重复物品掉落数量异常的缺陷 by contr4l","init_client_info_v1.20250626.0_0806.json游戏数据更新"],"2025年8月3日":["怪物狂暴机制及对应trigger生效","精炼装备更新，护符数值调整，守护光环增加闪避率","init_client_info_v1.20250626.0_0802.json游戏数据更新","狂怒层数修正为5层","招架结算机制调整"],"2025年7月31日":["物品数据和怪物属性更新","尖刺外壳和奥术反射重做","强化数值更新","删除异常trigger","狮鹫盾的虚弱重做","君王剑招架对队友生效","狂怒特效最大层数修正为6层","涟漪特效增加10MP恢复","反伤正确显示其命中率","反伤机制调整","同步双手盾属性和反伤荆棘技能数值的调整"],"2025年7月22日":["暴击光环受远程等级加成","光环基础数值和等级加成调整"],"2025年7月17日":["批量模拟支持勾选星球","经验分配比例调整至30%+70%","光环及对应trigger，并按对应技能等级百分比加成","水火自然默认调整为元素光环","init_client_info_v1.20250626.0_0717.json游戏数据更新"],"2025年7月11日":["怪物经验和技能等级公式更新","闪避和抗性计算公式更新","力量更替为近战以及对应的兼容","init_client_info_v1.20250626.0_0711.json游戏数据更新"],"2025年7月10日":["修复贯穿技能由敌人释放时可能多次击中相同目标的缺陷"],"2025年7月9日":["掉落和掉率调整","经验调整","疫病射击和破甲之刺调整","怪物自动恢复移除","疫病射击trigger调整","获取价格使用官方API"],"2025年7月7日":["怪物属性缩放和地图多难度","法师技能调整和装备上\'技能伤害\'词缀生效","攻击等级和房屋等级对施法速度的影响生效","物品调整","精准重做以攻击等级计算","TEST 远程魔法经验的10%映射到攻击经验！","经验重做和护符装备"]}');
 
 /***/ }),
 
@@ -4023,12 +4169,14 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _combatsimulator_data_achievementTierDetailMap_json__WEBPACK_IMPORTED_MODULE_16__ = __webpack_require__(/*! ./combatsimulator/data/achievementTierDetailMap.json */ "./src/combatsimulator/data/achievementTierDetailMap.json");
 /* harmony import */ var _combatsimulator_data_achievementDetailMap_json__WEBPACK_IMPORTED_MODULE_17__ = __webpack_require__(/*! ./combatsimulator/data/achievementDetailMap.json */ "./src/combatsimulator/data/achievementDetailMap.json");
 /* harmony import */ var _fragmentTimeCost_js__WEBPACK_IMPORTED_MODULE_18__ = __webpack_require__(/*! ./fragmentTimeCost.js */ "./src/fragmentTimeCost.js");
-/* harmony import */ var _guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_19__ = __webpack_require__(/*! ./guildCombatShrines.js */ "./src/guildCombatShrines.js");
-/* harmony import */ var _teamPresetComparison_js__WEBPACK_IMPORTED_MODULE_20__ = __webpack_require__(/*! ./teamPresetComparison.js */ "./src/teamPresetComparison.js");
-/* harmony import */ var _privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_21__ = __webpack_require__(/*! ./privateLoadoutBaseline.js */ "./src/privateLoadoutBaseline.js");
-/* harmony import */ var _simulationHistory_js__WEBPACK_IMPORTED_MODULE_22__ = __webpack_require__(/*! ./simulationHistory.js */ "./src/simulationHistory.js");
-/* harmony import */ var _playerFormation_js__WEBPACK_IMPORTED_MODULE_23__ = __webpack_require__(/*! ./playerFormation.js */ "./src/playerFormation.js");
-/* harmony import */ var _patchNote_json__WEBPACK_IMPORTED_MODULE_24__ = __webpack_require__(/*! ../patchNote.json */ "./patchNote.json");
+/* harmony import */ var _experienceLevelCalculator_js__WEBPACK_IMPORTED_MODULE_19__ = __webpack_require__(/*! ./experienceLevelCalculator.js */ "./src/experienceLevelCalculator.js");
+/* harmony import */ var _guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_20__ = __webpack_require__(/*! ./guildCombatShrines.js */ "./src/guildCombatShrines.js");
+/* harmony import */ var _teamPresetComparison_js__WEBPACK_IMPORTED_MODULE_21__ = __webpack_require__(/*! ./teamPresetComparison.js */ "./src/teamPresetComparison.js");
+/* harmony import */ var _privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_22__ = __webpack_require__(/*! ./privateLoadoutBaseline.js */ "./src/privateLoadoutBaseline.js");
+/* harmony import */ var _simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__ = __webpack_require__(/*! ./simulationHistory.js */ "./src/simulationHistory.js");
+/* harmony import */ var _playerFormation_js__WEBPACK_IMPORTED_MODULE_24__ = __webpack_require__(/*! ./playerFormation.js */ "./src/playerFormation.js");
+/* harmony import */ var _patchNote_json__WEBPACK_IMPORTED_MODULE_25__ = __webpack_require__(/*! ../patchNote.json */ "./patchNote.json");
+
 
 
 
@@ -4080,6 +4228,17 @@ let currentSimResults = {};
 let pendingSimulationHistoryContext = null;
 let simulationHistoryRecords = [];
 let simulationHistoryPlayerTabSequence = 0;
+let experienceLevelCalculatorContext = null;
+
+const EXPERIENCE_LEVEL_SKILLS = Object.freeze([
+    "stamina",
+    "intelligence",
+    "attack",
+    "melee",
+    "defense",
+    "ranged",
+    "magic",
+]);
 
 let currentPlayerTabId = '1';
 const pendingImporterLoadoutNames = new Map();
@@ -4230,8 +4389,8 @@ function createHouseInput(hrid) {
 }
 
 function setGuildCombatBuffLevels(levels = {}) {
-    player.guildCombatBuffLevels = (0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_19__.normalizeGuildCombatShrineLevels)(levels);
-    for (const { key } of _guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_19__.GUILD_COMBAT_SHRINE_DETAILS) {
+    player.guildCombatBuffLevels = (0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_20__.normalizeGuildCombatShrineLevels)(levels);
+    for (const { key } of _guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_20__.GUILD_COMBAT_SHRINE_DETAILS) {
         const input = document.querySelector(`[data-guild-combat-buff="${key}"]`);
         if (input) {
             input.value = player.guildCombatBuffLevels[key];
@@ -4240,13 +4399,13 @@ function setGuildCombatBuffLevels(levels = {}) {
 }
 
 function updateGuildCombatBuffLevels() {
-    player.guildCombatBuffLevels = (0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_19__.normalizeGuildCombatShrineLevels)(player.guildCombatBuffLevels);
-    for (const { key } of _guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_19__.GUILD_COMBAT_SHRINE_DETAILS) {
+    player.guildCombatBuffLevels = (0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_20__.normalizeGuildCombatShrineLevels)(player.guildCombatBuffLevels);
+    for (const { key } of _guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_20__.GUILD_COMBAT_SHRINE_DETAILS) {
         const input = document.querySelector(`[data-guild-combat-buff="${key}"]`);
         if (!input) {
             continue;
         }
-        const level = (0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_19__.normalizeGuildCombatShrineLevel)(input.value);
+        const level = (0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_20__.normalizeGuildCombatShrineLevel)(input.value);
         input.value = level;
         player.guildCombatBuffLevels[key] = level;
     }
@@ -4263,7 +4422,7 @@ function initGuildCombatBuffLevels() {
         <div class="col-3" data-i18n="common:guildCombatBuffs.level">Level</div>`;
     rows.push(header);
 
-    for (const { key } of _guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_19__.GUILD_COMBAT_SHRINE_DETAILS) {
+    for (const { key } of _guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_20__.GUILD_COMBAT_SHRINE_DETAILS) {
         const row = createElement("div", "row mb-2 align-items-center");
 
         const nameCol = createElement("div", "col-4");
@@ -4285,11 +4444,11 @@ function initGuildCombatBuffLevels() {
         levelInput.value = 0;
         levelInput.dataset.guildCombatBuff = key;
         levelInput.addEventListener("input", (event) => {
-            player.guildCombatBuffLevels[key] = (0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_19__.normalizeGuildCombatShrineLevel)(event.target.value);
+            player.guildCombatBuffLevels[key] = (0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_20__.normalizeGuildCombatShrineLevel)(event.target.value);
             updateUI();
         });
         levelInput.addEventListener("change", (event) => {
-            event.target.value = (0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_19__.normalizeGuildCombatShrineLevel)(event.target.value);
+            event.target.value = (0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_20__.normalizeGuildCombatShrineLevel)(event.target.value);
         });
         levelCol.appendChild(levelInput);
 
@@ -6139,16 +6298,16 @@ async function saveCompletedSimulationHistory(simResult) {
     }
 
     try {
-        const teamSnapshot = await (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_22__.encodeSimulationHistorySnapshot)(context.snapshot);
-        const record = (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_22__.buildSimulationHistoryRecord)({
+        const teamSnapshot = await (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.encodeSimulationHistorySnapshot)(context.snapshot);
+        const record = (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.buildSimulationHistoryRecord)({
             simResult,
             players: context.players,
             expectedDropsByPlayer,
             teamSnapshot,
             startedAt: context.startedAt,
         });
-        await (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_22__.saveSimulationHistoryRecord)(record);
-        simulationHistoryRecords = await (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_22__.loadSimulationHistoryRecords)();
+        await (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.saveSimulationHistoryRecord)(record);
+        simulationHistoryRecords = await (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.loadSimulationHistoryRecords)();
         updateSimulationHistoryCount();
         if (document.getElementById("simulationHistoryModal")?.classList.contains("show")) {
             renderSimulationHistory({ preferredMapKey: record.mapKey });
@@ -6316,7 +6475,7 @@ function renderSimulationHistory({ preferredMapKey = null, clearResults = true }
     fillSimulationHistoryRecordSelect(baselineSelect, records, previousBaseline, records.length > 1 ? 1 : 0);
     fillSimulationHistoryRecordSelect(comparisonSelect, records, previousComparison, 0);
 
-    const storage = (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_22__.getSimulationHistoryStorageSummary)(simulationHistoryRecords);
+    const storage = (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.getSimulationHistoryStorageSummary)(simulationHistoryRecords);
     document.getElementById("simulationHistoryStorageSummary").textContent = getSimulationHistoryText(
         "recordCount",
         "{{count}} records, about {{size}}",
@@ -6349,7 +6508,7 @@ function renderSimulationHistory({ preferredMapKey = null, clearResults = true }
 
 async function reloadSimulationHistory({ preferredMapKey = null, clearResults = true } = {}) {
     try {
-        simulationHistoryRecords = await (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_22__.loadSimulationHistoryRecords)();
+        simulationHistoryRecords = await (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.loadSimulationHistoryRecords)();
         renderSimulationHistory({ preferredMapKey, clearResults });
     } catch (error) {
         console.warn("Unable to load simulation history.", error);
@@ -6732,7 +6891,7 @@ function createSimulationHistoryRateComparisonSection(
     section.appendChild(heading);
     let displayRows = valueMultiplier === 1
         ? [...rows]
-        : (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_22__.scaleSimulationHistoryComparisonRows)(rows, valueMultiplier);
+        : (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.scaleSimulationHistoryComparisonRows)(rows, valueMultiplier);
     if (typeof rowSorter === "function") {
         displayRows = rowSorter(displayRows);
     }
@@ -6907,8 +7066,8 @@ function createSimulationHistoryDropComparison(
         getSimulationHistoryItemName,
         {
             maximumFractionDigits: 6,
-            valueMultiplier: _simulationHistory_js__WEBPACK_IMPORTED_MODULE_22__.SIMULATION_HISTORY_DROP_COMPARISON_HOURS,
-            rowSorter: _simulationHistory_js__WEBPACK_IMPORTED_MODULE_22__.sortSimulationHistoryDropRows,
+            valueMultiplier: _simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.SIMULATION_HISTORY_DROP_COMPARISON_HOURS,
+            rowSorter: _simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.sortSimulationHistoryDropRows,
             valueFormatter: formatSimulationHistoryDropNumber,
         },
     ));
@@ -6917,7 +7076,7 @@ function createSimulationHistoryDropComparison(
 }
 
 function renderSimulationHistoryComparison(baseline, comparison) {
-    const result = (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_22__.compareSimulationHistoryRecords)(baseline, comparison);
+    const result = (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.compareSimulationHistoryRecords)(baseline, comparison);
     const container = document.getElementById("simulationHistoryComparisonResults");
     document.getElementById("simulationHistoryRecordDetails").replaceChildren();
     container.replaceChildren();
@@ -6964,7 +7123,7 @@ function renderSimulationHistoryComparison(baseline, comparison) {
     const {
         sharedRows,
         differingRowsByPlayer,
-    } = (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_22__.partitionSimulationHistoryDropComparisons)(result.players);
+    } = (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.partitionSimulationHistoryDropComparisons)(result.players);
     if (sharedRows.length > 0) {
         const sharedDrops = createSimulationHistoryDropComparison(
             { ...result.players[0], drops: sharedRows },
@@ -7052,7 +7211,7 @@ async function handleSimulationHistoryRecordAction(event) {
         }
         button.disabled = true;
         try {
-            await (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_22__.deleteSimulationHistoryRecord)(record.id);
+            await (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.deleteSimulationHistoryRecord)(record.id);
             await reloadSimulationHistory({ preferredMapKey: record.mapKey });
         } catch (error) {
             console.warn("Unable to delete simulation history record.", error);
@@ -7098,7 +7257,7 @@ function restoreSimulationHistoryTarget(record) {
 }
 
 async function importSimulationHistoryTeam(record) {
-    const snapshot = await (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_22__.decodeSimulationHistorySnapshot)(record.teamSnapshot);
+    const snapshot = await (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.decodeSimulationHistorySnapshot)(record.teamSnapshot);
     const selectedSlots = Array.isArray(snapshot?.selectedPlayers)
         ? [...new Set(snapshot.selectedPlayers.map(String))]
             .filter((slot) => /^[1-5]$/.test(slot))
@@ -7176,7 +7335,7 @@ async function deleteCurrentSimulationHistoryMap() {
         return;
     }
     try {
-        await (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_22__.deleteSimulationHistoryMap)(mapKey);
+        await (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.deleteSimulationHistoryMap)(mapKey);
         await reloadSimulationHistory();
     } catch (error) {
         console.warn("Unable to delete simulation history map.", error);
@@ -7198,7 +7357,7 @@ async function clearAllSimulationHistoryRecords() {
         return;
     }
     try {
-        await (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_22__.clearSimulationHistory)();
+        await (0,_simulationHistory_js__WEBPACK_IMPORTED_MODULE_23__.clearSimulationHistory)();
         await reloadSimulationHistory();
     } catch (error) {
         console.warn("Unable to clear simulation history.", error);
@@ -7647,6 +7806,273 @@ function showDeaths(simResult, playerToDisplay) {
     resultDiv.replaceChildren(deathRow);
 }
 
+function interpolateExperienceLevelText(fallback, values = {}) {
+    return Object.entries(values).reduce(
+        (text, [key, value]) => text.replaceAll(`{{${key}}}`, String(value)),
+        fallback,
+    );
+}
+
+function getExperienceLevelText(key, fallback, values = {}) {
+    const translationKey = `common:simulationResults.levelCalculator.${key}`;
+    try {
+        const translated = i18next.t(translationKey, values);
+        if (typeof translated === "string" && translated !== translationKey) {
+            return translated;
+        }
+    } catch {
+        // Fall back to English while translations are still initializing.
+    }
+    return interpolateExperienceLevelText(fallback, values);
+}
+
+function getExperienceSkillName(skill) {
+    const translationKey = `leaderboardCategoryNames.${skill}`;
+    const fallback = skill.charAt(0).toUpperCase() + skill.slice(1);
+    try {
+        const translated = i18next.t(translationKey);
+        if (typeof translated === "string" && translated !== translationKey) {
+            return translated;
+        }
+    } catch {
+        // Fall back to the readable skill key.
+    }
+    return fallback;
+}
+
+function formatExperienceLevelNumber(value, maximumFractionDigits = 0) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) {
+        return "—";
+    }
+    return new Intl.NumberFormat(i18next?.language || undefined, {
+        maximumFractionDigits,
+    }).format(number);
+}
+
+function formatExperienceLevelDuration(hours) {
+    if (!Number.isFinite(hours)) {
+        return getExperienceLevelText("noRate", "No experience gain");
+    }
+    if (hours <= 0) {
+        return getExperienceLevelText("alreadyReached", "Already reached");
+    }
+    if (hours >= 24) {
+        let days = Math.floor(hours / 24);
+        let remainingHours = Math.round((hours - days * 24) * 10) / 10;
+        if (remainingHours >= 24) {
+            days += 1;
+            remainingHours = 0;
+        }
+        return getExperienceLevelText(
+            "durationDaysHours",
+            "{{days}} days {{hours}} hours",
+            {
+                days: formatExperienceLevelNumber(days),
+                hours: formatExperienceLevelNumber(remainingHours, 1),
+            },
+        );
+    }
+
+    const roundedMinutes = Math.max(1, Math.ceil(hours * 60));
+    if (roundedMinutes < 60) {
+        return getExperienceLevelText(
+            "durationMinutes",
+            "{{minutes}} minutes",
+            { minutes: formatExperienceLevelNumber(roundedMinutes) },
+        );
+    }
+    return getExperienceLevelText(
+        "durationHoursMinutes",
+        "{{hours}} hours {{minutes}} minutes",
+        {
+            hours: formatExperienceLevelNumber(Math.floor(roundedMinutes / 60)),
+            minutes: formatExperienceLevelNumber(roundedMinutes % 60),
+        },
+    );
+}
+
+function clampExperienceLevel(value) {
+    return Math.min(
+        _experienceLevelCalculator_js__WEBPACK_IMPORTED_MODULE_19__.MAX_SKILL_LEVEL,
+        Math.max(_experienceLevelCalculator_js__WEBPACK_IMPORTED_MODULE_19__.MIN_SKILL_LEVEL, Math.trunc(Number(value) || _experienceLevelCalculator_js__WEBPACK_IMPORTED_MODULE_19__.MIN_SKILL_LEVEL)),
+    );
+}
+
+function getConfiguredExperienceSkillLevel(playerNumber, skill) {
+    if (String(currentPlayerTabId) === String(playerNumber)) {
+        const visibleInputValue = document.getElementById(`inputLevel_${skill}`)?.value;
+        if (visibleInputValue !== undefined && visibleInputValue !== "") {
+            return clampExperienceLevel(visibleInputValue);
+        }
+    }
+
+    try {
+        const playerState = JSON.parse(playerDataMap[String(playerNumber)] || "{}");
+        return clampExperienceLevel(playerState?.player?.[`${skill}Level`]);
+    } catch {
+        return _experienceLevelCalculator_js__WEBPACK_IMPORTED_MODULE_19__.MIN_SKILL_LEVEL;
+    }
+}
+
+function clearExperienceLevelCalculatorResults() {
+    [
+        "experienceLevelCalculatorRate",
+        "experienceTargetRequired",
+        "experienceTargetTime",
+        "experienceDurationGained",
+        "experienceDurationLevel",
+        "experienceDurationProgress",
+        "experienceDurationRemaining",
+    ].forEach((id) => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.textContent = "—";
+        }
+    });
+}
+
+function renderExperienceLevelCalculator() {
+    const context = experienceLevelCalculatorContext;
+    const skill = document.getElementById("selectExperienceLevelSkill")?.value;
+    const rate = context?.rates?.[skill];
+    const currentLevelValue = Number(document.getElementById("inputExperienceCurrentLevel")?.value);
+    const targetLevelValue = Number(document.getElementById("inputExperienceTargetLevel")?.value);
+    const daysValue = Number(document.getElementById("inputExperienceDays")?.value);
+
+    if (
+        !context
+        || !skill
+        || !Number.isFinite(rate)
+        || rate <= 0
+        || !Number.isFinite(currentLevelValue)
+        || !Number.isFinite(targetLevelValue)
+        || !Number.isFinite(daysValue)
+        || daysValue < 0
+    ) {
+        clearExperienceLevelCalculatorResults();
+        return;
+    }
+
+    const currentLevel = clampExperienceLevel(currentLevelValue);
+    const targetLevel = clampExperienceLevel(targetLevelValue);
+    const targetResult = (0,_experienceLevelCalculator_js__WEBPACK_IMPORTED_MODULE_19__.calculateTimeToLevel)({
+        currentLevel,
+        targetLevel,
+        experiencePerHour: rate,
+    });
+    const durationResult = (0,_experienceLevelCalculator_js__WEBPACK_IMPORTED_MODULE_19__.calculateLevelAfterDuration)({
+        currentLevel,
+        days: daysValue,
+        experiencePerHour: rate,
+    });
+
+    document.getElementById("experienceLevelCalculatorRate").textContent = formatExperienceLevelNumber(rate);
+    document.getElementById("experienceTargetRequired").textContent = formatExperienceLevelNumber(
+        targetResult.requiredExperience,
+    );
+    document.getElementById("experienceTargetTime").textContent = formatExperienceLevelDuration(
+        targetResult.hours,
+    );
+    document.getElementById("experienceDurationGained").textContent = formatExperienceLevelNumber(
+        durationResult.gainedExperience,
+    );
+    document.getElementById("experienceDurationLevel").textContent = `Lv. ${durationResult.level}`;
+    document.getElementById("experienceDurationProgress").textContent = `${formatExperienceLevelNumber(
+        durationResult.levelProgress * 100,
+        2,
+    )}%`;
+    document.getElementById("experienceDurationRemaining").textContent = durationResult.atMaximumLevel
+        ? getExperienceLevelText("maxLevel", "Highest level in the experience table reached")
+        : formatExperienceLevelNumber(durationResult.experienceToNextLevel);
+}
+
+function selectExperienceLevelCalculatorSkill({ resetTarget = true } = {}) {
+    const context = experienceLevelCalculatorContext;
+    const skill = document.getElementById("selectExperienceLevelSkill")?.value;
+    if (!context || !skill) {
+        clearExperienceLevelCalculatorResults();
+        return;
+    }
+
+    const currentLevel = getConfiguredExperienceSkillLevel(context.playerNumber, skill);
+    const currentLevelInput = document.getElementById("inputExperienceCurrentLevel");
+    currentLevelInput.value = String(currentLevel);
+    if (resetTarget) {
+        document.getElementById("inputExperienceTargetLevel").value = String(
+            Math.min(_experienceLevelCalculator_js__WEBPACK_IMPORTED_MODULE_19__.MAX_SKILL_LEVEL, currentLevel + 1),
+        );
+    }
+    renderExperienceLevelCalculator();
+}
+
+function populateExperienceLevelSkillSelect(preferredSkill) {
+    const select = document.getElementById("selectExperienceLevelSkill");
+    const skills = EXPERIENCE_LEVEL_SKILLS.filter(
+        (skill) => (experienceLevelCalculatorContext?.rates?.[skill] ?? 0) > 0,
+    );
+    select.replaceChildren(...skills.map((skill) => {
+        const option = new Option(getExperienceSkillName(skill), skill);
+        option.setAttribute("data-i18n", `leaderboardCategoryNames.${skill}`);
+        return option;
+    }));
+    if (preferredSkill && skills.includes(preferredSkill)) {
+        select.value = preferredSkill;
+    }
+    return skills;
+}
+
+function openExperienceLevelCalculator() {
+    const emptyState = document.getElementById("experienceLevelCalculatorEmpty");
+    const content = document.getElementById("experienceLevelCalculatorContent");
+    const skills = populateExperienceLevelSkillSelect();
+    const hasExperience = skills.length > 0;
+    emptyState.classList.toggle("d-none", hasExperience);
+    content.classList.toggle("d-none", !hasExperience);
+
+    if (experienceLevelCalculatorContext) {
+        document.getElementById("experienceLevelCalculatorPlayer").textContent =
+            experienceLevelCalculatorContext.playerName;
+    }
+    if (hasExperience) {
+        selectExperienceLevelCalculatorSkill();
+    } else {
+        clearExperienceLevelCalculatorResults();
+    }
+
+    bootstrap.Modal.getOrCreateInstance(
+        document.getElementById("experienceLevelCalculatorModal"),
+    ).show();
+}
+
+function initExperienceLevelCalculator() {
+    document.getElementById("buttonExperienceLevelCalculator")?.addEventListener(
+        "click",
+        openExperienceLevelCalculator,
+    );
+    document.getElementById("selectExperienceLevelSkill")?.addEventListener(
+        "change",
+        () => selectExperienceLevelCalculatorSkill(),
+    );
+    [
+        "inputExperienceCurrentLevel",
+        "inputExperienceTargetLevel",
+        "inputExperienceDays",
+    ].forEach((id) => {
+        document.getElementById(id)?.addEventListener("input", renderExperienceLevelCalculator);
+    });
+
+    if (typeof i18next !== "undefined" && typeof i18next.on === "function") {
+        i18next.on("languageChanged", () => {
+            const selectedSkill = document.getElementById("selectExperienceLevelSkill")?.value;
+            if (experienceLevelCalculatorContext) {
+                populateExperienceLevelSkillSelect(selectedSkill);
+                renderExperienceLevelCalculator();
+            }
+        });
+    }
+}
+
 function showExperienceGained(simResult, playerToDisplay) {
     let resultDiv = document.getElementById("simulationResultExperienceGain");
     let newChildren = [];
@@ -7662,17 +8088,30 @@ function showExperienceGained(simResult, playerToDisplay) {
     totalRow.firstElementChild.setAttribute("data-i18n", "common:total");
     newChildren.push(totalRow);
 
+    const rates = {};
     ["Stamina", "Intelligence", "Attack", "Melee", "Defense", "Ranged", "Magic"].forEach((skill) => {
-        let experience = simResult.experienceGained[playerToDisplay]?.[skill.toLowerCase()] ?? 0;
+        const skillKey = skill.toLowerCase();
+        let experience = simResult.experienceGained[playerToDisplay]?.[skillKey] ?? 0;
         if (experience == 0) {
             return;
         }
-        let experiencePerHour = (experience / hoursSimulated).toFixed(0);
+        const rawExperiencePerHour = experience / hoursSimulated;
+        rates[skillKey] = rawExperiencePerHour;
+        let experiencePerHour = rawExperiencePerHour.toFixed(0);
         let experienceRow = createRow(["col-md-6", "col-md-6 text-end"], [skill, experiencePerHour]);
-        experienceRow.firstElementChild.setAttribute("data-i18n", "leaderboardCategoryNames." + skill.toLowerCase());
+        experienceRow.firstElementChild.setAttribute("data-i18n", "leaderboardCategoryNames." + skillKey);
         newChildren.push(experienceRow);
     });
 
+    const playerNumber = playerToDisplay.replace("player", "");
+    experienceLevelCalculatorContext = {
+        playerNumber,
+        playerName: document.getElementById(`${playerToDisplay}-tab`)?.textContent?.trim()
+            || `Player ${playerNumber}`,
+        rates,
+    };
+    document.getElementById("buttonExperienceLevelCalculator").disabled =
+        Object.keys(rates).length === 0;
     resultDiv.replaceChildren(...newChildren);
 }
 
@@ -8173,7 +8612,7 @@ function getPlayerFormationOrder() {
     const visibleOrder = [...document.querySelectorAll("#playerTab .nav-link")]
         .map(getPlayerSlotFromTab)
         .filter(Boolean);
-    return (0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_23__.normalizePlayerFormation)(visibleOrder);
+    return (0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_24__.normalizePlayerFormation)(visibleOrder);
 }
 
 function syncPlayerCheckboxOrder(formation) {
@@ -8182,7 +8621,7 @@ function syncPlayerCheckboxOrder(formation) {
         return;
     }
 
-    for (const slot of (0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_23__.normalizePlayerFormation)(formation)) {
+    for (const slot of (0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_24__.normalizePlayerFormation)(formation)) {
         const checkboxRow = document.getElementById(`player${slot}`)?.closest(".form-check");
         if (checkboxRow) {
             playerContainer.appendChild(checkboxRow);
@@ -8191,7 +8630,7 @@ function syncPlayerCheckboxOrder(formation) {
 }
 
 function restoreFixedPlayerSlotOrder() {
-    const fixedSlotOrder = (0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_23__.normalizePlayerFormation)([]);
+    const fixedSlotOrder = (0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_24__.normalizePlayerFormation)([]);
     const playerTab = document.getElementById("playerTab");
     if (!playerTab) {
         return fixedSlotOrder;
@@ -8219,8 +8658,8 @@ function normalizeRemappedPlayerLabel(label, destinationSlot) {
 }
 
 function movePlayerLoadoutsToFixedSlots(sourceOrder) {
-    const fixedSlotOrder = (0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_23__.normalizePlayerFormation)([]);
-    const normalizedSourceOrder = (0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_23__.normalizePlayerFormation)(sourceOrder);
+    const fixedSlotOrder = (0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_24__.normalizePlayerFormation)([]);
+    const normalizedSourceOrder = (0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_24__.normalizePlayerFormation)(sourceOrder);
     const formationChanged = normalizedSourceOrder.some(
         (slot, index) => slot !== fixedSlotOrder[index],
     );
@@ -8234,8 +8673,8 @@ function movePlayerLoadoutsToFixedSlots(sourceOrder) {
         slot,
         document.getElementById(`player${slot}-tab`)?.textContent?.trim() || "",
     ]));
-    const remappedPlayerData = (0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_23__.remapPlayerSlotValues)(playerDataMap, normalizedSourceOrder);
-    const remappedPlayerLabels = (0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_23__.remapPlayerSlotValues)(playerLabels, normalizedSourceOrder);
+    const remappedPlayerData = (0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_24__.remapPlayerSlotValues)(playerDataMap, normalizedSourceOrder);
+    const remappedPlayerLabels = (0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_24__.remapPlayerSlotValues)(playerLabels, normalizedSourceOrder);
 
     for (const destinationSlot of fixedSlotOrder) {
         playerDataMap[destinationSlot] = remappedPlayerData[destinationSlot];
@@ -8468,7 +8907,7 @@ function initSimulationControls() {
         const simDungeonToggle = document.getElementById("simDungeonToggle");
         const checkedPlayerSlots = [...document.querySelectorAll('.player-checkbox:checked')]
             .map((checkbox) => checkbox.id.replace('player', ''));
-        selectedPlayers = (0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_23__.orderSelectedPlayerSlots)(
+        selectedPlayers = (0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_24__.orderSelectedPlayerSlots)(
             [],
             checkedPlayerSlots,
         ).map(Number);
@@ -8742,7 +9181,7 @@ function parsePlayerJson(playerJson, hrid) {
         ...playerJson.player,
         houseRooms: playerJson.houseRooms,
         guildCombatBuffs,
-        guildCombatBuffLevels: (0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_19__.resolveGuildCombatShrineLevels)(
+        guildCombatBuffLevels: (0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_20__.resolveGuildCombatShrineLevels)(
             playerJson.guildCombatBuffLevels ?? playerJson.guildShrineLevels,
             guildCombatBuffs,
         ),
@@ -9671,7 +10110,7 @@ function doSoloImport() {
     player.guildCombatBuffs = Array.isArray(importSet.guildCombatBuffs)
         ? structuredClone(importSet.guildCombatBuffs)
         : [];
-    setGuildCombatBuffLevels((0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_19__.resolveGuildCombatShrineLevels)(
+    setGuildCombatBuffLevels((0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_20__.resolveGuildCombatShrineLevels)(
         importSet.guildCombatBuffLevels ?? importSet.guildShrineLevels,
         player.guildCombatBuffs,
     ));
@@ -9906,7 +10345,7 @@ function updateNextPlayer(currentPlayerNumber) {
     player.guildCombatBuffs = Array.isArray(importSet.guildCombatBuffs)
         ? structuredClone(importSet.guildCombatBuffs)
         : [];
-    setGuildCombatBuffLevels((0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_19__.resolveGuildCombatShrineLevels)(
+    setGuildCombatBuffLevels((0,_guildCombatShrines_js__WEBPACK_IMPORTED_MODULE_20__.resolveGuildCombatShrineLevels)(
         importSet.guildCombatBuffLevels ?? importSet.guildShrineLevels,
         player.guildCombatBuffs,
     ));
@@ -10159,7 +10598,7 @@ function getCurrentComparisonPlayerSlots() {
 }
 
 function getCurrentComparisonPlayerNames() {
-    return Object.fromEntries((0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_23__.normalizePlayerFormation)([]).map((slot) => [
+    return Object.fromEntries((0,_playerFormation_js__WEBPACK_IMPORTED_MODULE_24__.normalizePlayerFormation)([]).map((slot) => [
         slot,
         document.getElementById(`player${slot}-tab`)?.textContent?.trim() || "",
     ]));
@@ -10208,7 +10647,7 @@ function captureCurrentLoadoutComparison() {
         currentSlots,
         currentPlayerNames,
         skippedSlots,
-        references: (0,_privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_21__.buildPrivateLoadoutReferences)(baselineRequest),
+        references: (0,_privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_22__.buildPrivateLoadoutReferences)(baselineRequest),
     };
 }
 
@@ -10220,7 +10659,7 @@ function createPrivateLoadoutBaselineRequestId() {
 }
 
 function requestPrivateLoadoutBaselines(references, timeoutMs = 20000) {
-    if (document.documentElement.dataset[_privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_21__.PRIVATE_LOADOUT_BASELINE_BRIDGE_ATTRIBUTE] !== "1") {
+    if (document.documentElement.dataset[_privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_22__.PRIVATE_LOADOUT_BASELINE_BRIDGE_ATTRIBUTE] !== "1") {
         return Promise.resolve({ errorCode: "bridge-unavailable", results: [] });
     }
 
@@ -10229,7 +10668,7 @@ function requestPrivateLoadoutBaselines(references, timeoutMs = 20000) {
         let timeoutId;
         const cleanup = () => {
             clearTimeout(timeoutId);
-            document.removeEventListener(_privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_21__.PRIVATE_LOADOUT_BASELINE_RESPONSE_EVENT, handleResponse);
+            document.removeEventListener(_privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_22__.PRIVATE_LOADOUT_BASELINE_RESPONSE_EVENT, handleResponse);
         };
         const handleResponse = (event) => {
             let response;
@@ -10245,13 +10684,13 @@ function requestPrivateLoadoutBaselines(references, timeoutMs = 20000) {
             resolve(response);
         };
 
-        document.addEventListener(_privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_21__.PRIVATE_LOADOUT_BASELINE_RESPONSE_EVENT, handleResponse);
+        document.addEventListener(_privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_22__.PRIVATE_LOADOUT_BASELINE_RESPONSE_EVENT, handleResponse);
         timeoutId = setTimeout(() => {
             cleanup();
             resolve({ requestId, errorCode: "timeout", results: [] });
         }, timeoutMs);
 
-        document.dispatchEvent(new CustomEvent(_privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_21__.PRIVATE_LOADOUT_BASELINE_REQUEST_EVENT, {
+        document.dispatchEvent(new CustomEvent(_privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_22__.PRIVATE_LOADOUT_BASELINE_REQUEST_EVENT, {
             detail: JSON.stringify({ requestId, references }),
         }));
     });
@@ -10762,7 +11201,7 @@ async function compareCurrentTeamToExistingLoadouts() {
         const response = current.references.length > 0
             ? await requestPrivateLoadoutBaselines(current.references)
             : { errorCode: "missing-reference", results: [] };
-        const resolution = (0,_privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_21__.resolvePrivateLoadoutBaseline)(
+        const resolution = (0,_privateLoadoutBaseline_js__WEBPACK_IMPORTED_MODULE_22__.resolvePrivateLoadoutBaseline)(
             current.baselineRequest,
             response,
             response?.errorCode || "bridge-unavailable",
@@ -10773,7 +11212,7 @@ async function compareCurrentTeamToExistingLoadouts() {
             ...resolution.baselinePreset,
             selectedPlayers: matchedSlots,
         };
-        const comparison = (0,_teamPresetComparison_js__WEBPACK_IMPORTED_MODULE_20__.compareTeamPresetWithCurrent)(
+        const comparison = (0,_teamPresetComparison_js__WEBPACK_IMPORTED_MODULE_21__.compareTeamPresetWithCurrent)(
             matchedBaseline,
             playerDataMap,
             matchedSlots,
@@ -10929,14 +11368,14 @@ function showErrorModal(error) {
 
 function initPatchNotes() {
     const patchNotesRows = document.getElementById("patchNotes");
-    for (const pn in _patchNote_json__WEBPACK_IMPORTED_MODULE_24__) {
+    for (const pn in _patchNote_json__WEBPACK_IMPORTED_MODULE_25__) {
         const patchNoteContainer = document.createElement("div");
         patchNotesRows.setAttribute('class', 'col-12 mb-4');
 
         const patchNoteElement = document.createElement("h6");
         patchNoteElement.innerHTML = pn;
         const patchNoteList = document.createElement("ul");
-        for (const note of _patchNote_json__WEBPACK_IMPORTED_MODULE_24__[pn]) {
+        for (const note of _patchNote_json__WEBPACK_IMPORTED_MODULE_25__[pn]) {
             const noteElement = document.createElement("li");
             noteElement.innerHTML = note;
             patchNoteList.appendChild(noteElement);
@@ -11118,6 +11557,7 @@ initDungeons();
 initLabyrinth();
 initTriggerModal();
 initSimulationControls();
+initExperienceLevelCalculator();
 initSimulationHistory();
 initEquipmentSetsModal();
 initErrorHandling();
