@@ -9,6 +9,7 @@ const calculatorSource = await readFile(
 const calculatorModuleUrl = `data:text/javascript;base64,${Buffer.from(calculatorSource).toString("base64")}`;
 const {
     EXPERIENCE_TOTAL_BY_LEVEL,
+    calculateLevelAfterExperience,
     calculateLevelAfterDuration,
     calculateTimeToLevel,
     getTotalExperienceForLevel,
@@ -75,6 +76,16 @@ test("caps projections at level 200", () => {
     assert.equal(result.levelProgress, 1);
     assert.equal(result.experienceToNextLevel, 0);
     assert.equal(result.atMaximumLevel, true);
+});
+
+test("projects a final level from a direct experience gain", () => {
+    const result = calculateLevelAfterExperience({
+        currentLevel: 1,
+        gainedExperience: 3300,
+    });
+
+    assert.equal(result.level, 19);
+    assert.equal(result.levelProgress, 0);
 });
 
 test("rejects a negative duration", () => {

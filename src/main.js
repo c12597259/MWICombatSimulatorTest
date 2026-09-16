@@ -58,6 +58,19 @@ import {
     orderSelectedPlayerSlots,
     remapPlayerSlotValues,
 } from "./playerFormation.js";
+import {
+    SIMULATION_PLAN_DEFAULT_TARGET_QUANTITY,
+    SIMULATION_PLAN_SCHEMA_VERSION,
+    SIMULATION_PLAN_SKILLS,
+    SIMULATION_PLAN_STORAGE_KEY,
+    calculateSimulationPlan,
+    calculateSimulationPlanStep,
+    compareSimulationPlanMapKeys,
+    createSimulationPlanStep,
+    getSimulationPlanMapDefinition,
+    isSimulationPlanEligibleRecord,
+    normalizeSimulationPlans,
+} from "./simulationPlan.js";
 
 import patchNote from "../patchNote.json";
 
@@ -86,6 +99,9 @@ let pendingSimulationHistoryContext = null;
 let simulationHistoryRecords = [];
 let simulationHistoryPlayerTabSequence = 0;
 let experienceLevelCalculatorContext = null;
+let simulationPlans = [];
+let activeSimulationPlanId = "";
+let simulationPlanPlayerTabSequence = 0;
 
 const EXPERIENCE_LEVEL_SKILLS = Object.freeze([
     "stamina",
@@ -2258,6 +2274,15 @@ function renderSimulationHistoryRecordRows(records) {
 
         const actionCell = document.createElement("td");
         actionCell.className = "text-nowrap";
+        if (isSimulationPlanEligibleRecord(record)) {
+            const addToPlanButton = document.createElement("button");
+            addToPlanButton.type = "button";
+            addToPlanButton.className = "btn btn-success btn-sm me-2";
+            addToPlanButton.dataset.historyAction = "add-plan";
+            addToPlanButton.dataset.recordId = record.id;
+            addToPlanButton.textContent = getSimulationHistoryText("addToPlan", "Add to Plan");
+            actionCell.appendChild(addToPlanButton);
+        }
         const importButton = document.createElement("button");
         importButton.type = "button";
         importButton.className = "btn btn-primary btn-sm me-2";
@@ -2302,16 +2327,21 @@ function renderSimulationHistory({ preferredMapKey = null, clearResults = true }
         groups.get(record.mapKey).push(record);
     }
 
-    const groupEntries = [...groups.entries()].sort(
-        (left, right) => right[1][0].createdAt.localeCompare(left[1][0].createdAt),
-    );
+    const groupEntries = [...groups.entries()].sort((left, right) => {
+        const planOrder = compareSimulationPlanMapKeys(left[0], right[0]);
+        if (planOrder !== 0) {
+            return planOrder;
+        }
+        return right[1][0].createdAt.localeCompare(left[1][0].createdAt);
+    });
     mapSelect.replaceChildren();
     if (groupEntries.length === 0) {
         mapSelect.add(new Option(getSimulationHistoryText("selectMap", "Select a map"), ""));
     } else {
         for (const [mapKey, records] of groupEntries) {
+            const mapCode = getSimulationPlanMapCode(mapKey);
             mapSelect.add(new Option(
-                `${getSimulationHistoryMapName(records[0])} (${records.length})`,
+                `${mapCode ? `${mapCode} · ` : ""}${getSimulationHistoryMapName(records[0])} (${records.length})`,
                 mapKey,
             ));
         }
@@ -3038,6 +3068,16 @@ async function handleSimulationHistoryRecordAction(event) {
         return;
     }
 
+    if (button.dataset.historyAction === "add-plan") {
+        button.disabled = true;
+        try {
+            await addHistoryRecordToSimulationPlan(record);
+        } finally {
+            button.disabled = false;
+        }
+        return;
+    }
+
     if (button.dataset.historyAction === "import") {
         if (!confirm(getSimulationHistoryText(
             "importConfirm",
@@ -3292,6 +3332,686 @@ function initSimulationHistory() {
         });
     }
     void reloadSimulationHistory();
+}
+
+// #endregion
+
+// #region Simulation Plans
+
+function getSimulationPlanText(key, fallback, values = {}) {
+    const translationKey = `common:simulationPlan.${key}`;
+    try {
+        const translated = i18next.t(translationKey, values);
+        if (typeof translated === "string" && translated !== translationKey) {
+            return translated;
+        }
+    } catch {
+        // Use the supplied fallback while translations are initializing.
+    }
+    return interpolateSimulationHistoryFallback(fallback, values);
+}
+
+function createSimulationPlanId() {
+    if (globalThis.crypto?.randomUUID) {
+        return globalThis.crypto.randomUUID();
+    }
+    return `plan-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function getNextSimulationPlanName() {
+    let number = simulationPlans.length + 1;
+    const names = new Set(simulationPlans.map((plan) => plan.name));
+    let name = getSimulationPlanText("defaultName", "计划 {{number}}", { number });
+    while (names.has(name)) {
+        number += 1;
+        name = getSimulationPlanText("defaultName", "计划 {{number}}", { number });
+    }
+    return name;
+}
+
+function createEmptySimulationPlan(name = getNextSimulationPlanName()) {
+    const now = new Date().toISOString();
+    return {
+        schemaVersion: SIMULATION_PLAN_SCHEMA_VERSION,
+        id: createSimulationPlanId(),
+        name,
+        createdAt: now,
+        updatedAt: now,
+        steps: [],
+    };
+}
+
+function getActiveSimulationPlan() {
+    return simulationPlans.find((plan) => plan.id === activeSimulationPlanId) ?? null;
+}
+
+function ensureActiveSimulationPlan() {
+    let plan = getActiveSimulationPlan();
+    if (!plan) {
+        plan = createEmptySimulationPlan();
+        simulationPlans.push(plan);
+        activeSimulationPlanId = plan.id;
+    }
+    return plan;
+}
+
+function setSimulationPlanStatus(message = "", style = "muted") {
+    const status = document.getElementById("simulationPlanStatus");
+    if (!status) {
+        return;
+    }
+    status.textContent = message;
+    status.className = `small mb-3 text-${style}`;
+}
+
+function updateSimulationPlanStepCount() {
+    const count = document.getElementById("simulationPlanStepCount");
+    if (count) {
+        count.textContent = String(getActiveSimulationPlan()?.steps?.length ?? 0);
+    }
+}
+
+function persistSimulationPlans() {
+    try {
+        localStorage.setItem(SIMULATION_PLAN_STORAGE_KEY, JSON.stringify({
+            schemaVersion: SIMULATION_PLAN_SCHEMA_VERSION,
+            activePlanId: activeSimulationPlanId,
+            plans: simulationPlans,
+        }));
+        updateSimulationPlanStepCount();
+        return true;
+    } catch (error) {
+        console.warn("Unable to save simulation plans.", error);
+        setSimulationPlanStatus(
+            getSimulationPlanText("saveError", "The plan could not be saved in this browser."),
+            "danger",
+        );
+        return false;
+    }
+}
+
+function loadSimulationPlans() {
+    try {
+        const storedValue = localStorage.getItem(SIMULATION_PLAN_STORAGE_KEY);
+        const parsed = storedValue ? JSON.parse(storedValue) : null;
+        simulationPlans = normalizeSimulationPlans(Array.isArray(parsed) ? parsed : parsed?.plans);
+        activeSimulationPlanId = String(parsed?.activePlanId ?? "");
+    } catch (error) {
+        console.warn("Unable to load simulation plans.", error);
+        simulationPlans = [];
+        activeSimulationPlanId = "";
+    }
+    ensureActiveSimulationPlan();
+    persistSimulationPlans();
+}
+
+function getSimulationPlanMapCode(mapKey) {
+    const definition = getSimulationPlanMapDefinition(mapKey);
+    if (!definition) {
+        return "";
+    }
+    if (definition.code.startsWith("图")) {
+        return getSimulationPlanText(
+            "zoneCode",
+            "Map {{number}}",
+            { number: definition.code.slice(1) },
+        );
+    }
+    return definition.code;
+}
+
+function getSimulationPlanMapLabel(recordOrStep) {
+    const code = getSimulationPlanMapCode(recordOrStep.mapKey);
+    return `${code} · ${getSimulationHistoryMapName(recordOrStep)}`;
+}
+
+function formatSimulationPlanDuration(hours) {
+    if (!Number.isFinite(hours)) {
+        return "—";
+    }
+    if (hours < 24) {
+        return getSimulationPlanText(
+            "hours",
+            "{{hours}} hours",
+            { hours: formatSimulationHistoryNumber(hours, 2) },
+        );
+    }
+    const days = Math.floor(hours / 24);
+    const remainder = Math.round((hours - days * 24) * 100) / 100;
+    return getSimulationPlanText(
+        "daysHours",
+        "{{days}} days {{hours}} hours",
+        {
+            days: formatSimulationHistoryNumber(days, 0),
+            hours: formatSimulationHistoryNumber(remainder, 2),
+        },
+    );
+}
+
+function formatSimulationPlanRate(step) {
+    const rates = (step.players ?? [])
+        .map((player) => Number(player.targetRatePerHour))
+        .filter((rate) => Number.isFinite(rate) && rate > 0);
+    if (rates.length === 0) {
+        return "—";
+    }
+    const minimum = Math.min(...rates);
+    const maximum = Math.max(...rates);
+    if (Math.abs(maximum - minimum) < 1e-8) {
+        return getSimulationPlanText(
+            "rateSingle",
+            "{{rate}}/hour",
+            { rate: formatSimulationHistoryNumber(minimum, 4) },
+        );
+    }
+    return getSimulationPlanText(
+        "rateRange",
+        "{{min}}–{{max}}/hour",
+        {
+            min: formatSimulationHistoryNumber(minimum, 4),
+            max: formatSimulationHistoryNumber(maximum, 4),
+        },
+    );
+}
+
+function extractSimulationPlanStartingLevels(snapshot, record) {
+    const levelsBySlot = {};
+    for (const playerEntry of record.players ?? []) {
+        const slot = String(playerEntry.slot ?? "");
+        try {
+            const serialized = snapshot?.playerDataMap?.[slot];
+            const playerState = typeof serialized === "string" ? JSON.parse(serialized) : serialized;
+            levelsBySlot[slot] = Object.fromEntries(SIMULATION_PLAN_SKILLS.map((skill) => [
+                skill,
+                Number(playerState?.player?.[`${skill}Level`]) || 1,
+            ]));
+        } catch {
+            levelsBySlot[slot] = Object.fromEntries(
+                SIMULATION_PLAN_SKILLS.map((skill) => [skill, 1]),
+            );
+        }
+    }
+    return levelsBySlot;
+}
+
+async function addHistoryRecordToSimulationPlan(record) {
+    if (!isSimulationPlanEligibleRecord(record)) {
+        setSimulationHistoryStatus(
+            getSimulationPlanText(
+                "addUnsupported",
+                "Only full-map records for Maps 1–11 and Dungeons D1–D4 can be added.",
+            ),
+            "warning",
+        );
+        return;
+    }
+
+    try {
+        const snapshot = await decodeSimulationHistorySnapshot(record.teamSnapshot);
+        const plan = ensureActiveSimulationPlan();
+        const step = createSimulationPlanStep(record, {
+            targetQuantity: SIMULATION_PLAN_DEFAULT_TARGET_QUANTITY,
+            startingLevelsBySlot: extractSimulationPlanStartingLevels(snapshot, record),
+        });
+        plan.steps.push(step);
+        plan.updatedAt = new Date().toISOString();
+        persistSimulationPlans();
+        const message = getSimulationPlanText(
+            "addSuccess",
+            "Added {{map}} {{difficulty}} to '{{plan}}'.",
+            {
+                map: getSimulationPlanMapLabel(record),
+                difficulty: getSimulationHistoryDifficulty(record),
+                plan: plan.name,
+            },
+        );
+        setSimulationHistoryStatus(message, "success");
+        setSimulationPlanStatus(message, "success");
+        if (document.getElementById("simulationPlanModal")?.classList.contains("show")) {
+            renderSimulationPlan();
+        }
+    } catch (error) {
+        console.warn("Unable to add history record to simulation plan.", error);
+        setSimulationHistoryStatus(
+            getSimulationPlanText(
+                "addError",
+                "The team levels in this history record could not be read.",
+            ),
+            "danger",
+        );
+    }
+}
+
+function renderSimulationPlanSelector(plan) {
+    const select = document.getElementById("selectSimulationPlan");
+    select.replaceChildren(...simulationPlans.map(
+        (entry) => new Option(`${entry.name} (${entry.steps.length})`, entry.id),
+    ));
+    select.value = plan.id;
+    document.getElementById("inputSimulationPlanName").value = plan.name;
+    document.getElementById("buttonDeleteSimulationPlan").disabled = simulationPlans.length === 0;
+}
+
+function createSimulationPlanActionButton({ action, label, className, disabled = false }) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = className;
+    button.dataset.planAction = action;
+    button.textContent = label;
+    button.disabled = disabled;
+    return button;
+}
+
+function renderSimulationPlanSteps(plan, calculation) {
+    const rows = document.getElementById("simulationPlanStepRows");
+    rows.replaceChildren();
+    plan.steps.forEach((step, index) => {
+        const stepResult = calculation.steps[index] ?? calculateSimulationPlanStep(step);
+        const row = document.createElement("tr");
+        row.dataset.stepId = step.id;
+        row.appendChild(createSimulationHistoryCell(String(index + 1)));
+
+        const mapCell = createSimulationHistoryCell(
+            `${getSimulationPlanMapLabel(step)} · ${getSimulationHistoryDifficulty(step)}`,
+            "simulation-plan-map-name",
+        );
+        row.appendChild(mapCell);
+
+        const sourceCell = createSimulationHistoryCell(
+            formatSimulationHistoryDate(step.sourceCreatedAt),
+        );
+        sourceCell.title = (step.players ?? [])
+            .map((player) => `${player.name}${player.loadoutName ? ` - ${player.loadoutName}` : ""}`)
+            .join("\n");
+        row.appendChild(sourceCell);
+
+        row.appendChild(createSimulationHistoryCell(
+            getSimulationHistoryItemName(step.targetItemHrid),
+            "simulation-plan-target-name",
+        ));
+
+        const quantityCell = document.createElement("td");
+        const quantityInput = document.createElement("input");
+        quantityInput.type = "number";
+        quantityInput.className = "form-control form-control-sm simulation-plan-quantity-input";
+        quantityInput.min = "0";
+        quantityInput.step = "1";
+        quantityInput.value = String(step.targetQuantity);
+        quantityInput.dataset.planAction = "quantity";
+        quantityInput.dataset.stepId = step.id;
+        quantityCell.appendChild(quantityInput);
+        row.appendChild(quantityCell);
+
+        row.appendChild(createSimulationHistoryCell(
+            formatSimulationPlanRate(step),
+            "text-end text-nowrap",
+        ));
+        row.appendChild(createSimulationHistoryCell(
+            formatSimulationPlanDuration(stepResult.durationHours),
+            "text-end text-nowrap",
+        ));
+
+        const actionCell = document.createElement("td");
+        actionCell.className = "text-nowrap";
+        actionCell.append(
+            createSimulationPlanActionButton({
+                action: "up",
+                label: "↑",
+                className: "btn btn-outline-secondary btn-sm me-1",
+                disabled: index === 0,
+            }),
+            createSimulationPlanActionButton({
+                action: "down",
+                label: "↓",
+                className: "btn btn-outline-secondary btn-sm me-1",
+                disabled: index === plan.steps.length - 1,
+            }),
+            createSimulationPlanActionButton({
+                action: "remove",
+                label: getSimulationPlanText("remove", "Remove"),
+                className: "btn btn-outline-danger btn-sm",
+            }),
+        );
+        row.querySelectorAll("button[data-plan-action]").forEach((button) => {
+            button.dataset.stepId = step.id;
+            if (button.dataset.planAction === "up") {
+                button.title = getSimulationPlanText("moveUp", "Move Up");
+            } else if (button.dataset.planAction === "down") {
+                button.title = getSimulationPlanText("moveDown", "Move Down");
+            }
+        });
+        row.appendChild(actionCell);
+        rows.appendChild(row);
+    });
+
+    document.getElementById("simulationPlanEmpty").classList.toggle(
+        "d-none",
+        plan.steps.length > 0,
+    );
+}
+
+function createSimulationPlanSimpleTable(entries, labelResolver) {
+    if (entries.length === 0) {
+        const empty = document.createElement("span");
+        empty.className = "text-muted";
+        empty.textContent = getSimulationPlanText("none", "None");
+        return empty;
+    }
+    const table = createSimulationHistoryTable([
+        getSimulationPlanText("item", "Item"),
+        getSimulationPlanText("quantity", "Expected Amount"),
+    ]);
+    for (const [key, value] of entries) {
+        const row = document.createElement("tr");
+        row.appendChild(createSimulationHistoryCell(labelResolver(key)));
+        row.appendChild(createSimulationHistoryCell(
+            formatSimulationHistoryNumber(value, 2),
+            "text-end",
+        ));
+        table.tBodies[0].appendChild(row);
+    }
+    const wrapper = document.createElement("div");
+    wrapper.className = "table-responsive";
+    wrapper.appendChild(table);
+    return wrapper;
+}
+
+function createSimulationPlanExperienceTable(player) {
+    const table = createSimulationHistoryTable([
+        getSimulationPlanText("skill", "Skill"),
+        getSimulationPlanText("startLevel", "Starting Level"),
+        getSimulationPlanText("experienceGained", "Experience Gained"),
+        getSimulationPlanText("finalLevel", "Final Level"),
+        getSimulationPlanText("progress", "Level Progress"),
+    ]);
+    for (const skill of SIMULATION_PLAN_SKILLS) {
+        const gained = Number(player.experienceGained?.[skill] ?? 0);
+        if (gained <= 0) {
+            continue;
+        }
+        const projection = player.skills[skill];
+        const row = document.createElement("tr");
+        row.appendChild(createSimulationHistoryCell(getSimulationHistorySkillName(skill)));
+        row.appendChild(createSimulationHistoryCell(
+            String(player.startingLevels[skill]),
+            "text-end",
+        ));
+        row.appendChild(createSimulationHistoryCell(
+            formatSimulationHistoryNumber(gained, 0),
+            "text-end",
+        ));
+        row.appendChild(createSimulationHistoryCell(`Lv. ${projection.level}`, "text-end"));
+        row.appendChild(createSimulationHistoryCell(
+            `${formatSimulationHistoryNumber(projection.levelProgress * 100, 2)}%`,
+            "text-end",
+        ));
+        table.tBodies[0].appendChild(row);
+    }
+    if (table.tBodies[0].rows.length === 0) {
+        const row = document.createElement("tr");
+        const cell = createSimulationHistoryCell(
+            getSimulationPlanText("none", "None"),
+            "text-center text-muted",
+        );
+        cell.colSpan = 5;
+        row.appendChild(cell);
+        table.tBodies[0].appendChild(row);
+    }
+    const wrapper = document.createElement("div");
+    wrapper.className = "table-responsive";
+    wrapper.appendChild(table);
+    return wrapper;
+}
+
+function createSimulationPlanPlayerSummary(player, index, groupId) {
+    const pane = document.createElement("div");
+    pane.className = `tab-pane fade${index === 0 ? " show active" : ""}`;
+    pane.id = `${groupId}-pane-${index}`;
+    pane.setAttribute("role", "tabpanel");
+
+    const experienceHeading = document.createElement("h6");
+    experienceHeading.textContent = getSimulationPlanText(
+        "experience",
+        "Skill Experience and Final Levels",
+    );
+    pane.append(experienceHeading, createSimulationPlanExperienceTable(player));
+
+    const grid = document.createElement("div");
+    grid.className = "row g-4 mt-1";
+    const sections = [
+        {
+            title: getSimulationPlanText("consumables", "Consumables"),
+            entries: Object.entries(player.consumablesUsed ?? {}).sort((a, b) => b[1] - a[1]),
+        },
+        {
+            title: getSimulationPlanText("drops", "Target and Bonus Drops"),
+            entries: Object.entries(player.expectedDrops ?? {}).sort((a, b) => b[1] - a[1]),
+        },
+    ];
+    for (const section of sections) {
+        const column = document.createElement("section");
+        column.className = "col-md-6";
+        const heading = document.createElement("h6");
+        heading.textContent = section.title;
+        column.append(
+            heading,
+            createSimulationPlanSimpleTable(section.entries, getSimulationHistoryItemName),
+        );
+        grid.appendChild(column);
+    }
+    pane.appendChild(grid);
+    return pane;
+}
+
+function renderSimulationPlanPlayerSummaries(players) {
+    const container = document.getElementById("simulationPlanPlayerSummary");
+    container.replaceChildren();
+    if (players.length === 0) {
+        return;
+    }
+
+    const heading = document.createElement("h6");
+    heading.textContent = getSimulationPlanText("playerSummary", "Player Summary");
+    const groupId = `simulation-plan-player-${++simulationPlanPlayerTabSequence}`;
+    const tabs = document.createElement("ul");
+    tabs.className = "nav nav-tabs simulation-plan-player-tabs";
+    tabs.setAttribute("role", "tablist");
+    const content = document.createElement("div");
+    content.className = "tab-content border border-top-0 rounded-bottom p-3";
+
+    players.forEach((player, index) => {
+        const item = document.createElement("li");
+        item.className = "nav-item";
+        item.setAttribute("role", "presentation");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `nav-link${index === 0 ? " active" : ""}`;
+        button.dataset.bsToggle = "tab";
+        button.dataset.bsTarget = `#${groupId}-pane-${index}`;
+        button.setAttribute("role", "tab");
+        button.setAttribute("aria-selected", index === 0 ? "true" : "false");
+        button.textContent = player.name;
+        item.appendChild(button);
+        tabs.appendChild(item);
+        content.appendChild(createSimulationPlanPlayerSummary(player, index, groupId));
+    });
+
+    container.append(heading, tabs, content);
+}
+
+function renderSimulationPlanSummary(plan, calculation) {
+    const summary = document.getElementById("simulationPlanSummary");
+    summary.classList.toggle("d-none", plan.steps.length === 0);
+    if (plan.steps.length === 0) {
+        return;
+    }
+
+    document.getElementById("simulationPlanTotalTime").textContent =
+        formatSimulationPlanDuration(calculation.totalHours);
+    const invalidSteps = calculation.steps.filter((step) => !step.valid);
+    const warning = document.getElementById("simulationPlanWarning");
+    warning.classList.toggle("d-none", invalidSteps.length === 0);
+    warning.textContent = invalidSteps.length > 0
+        ? getSimulationPlanText(
+            "invalidRate",
+            "These steps have no target drop rate and cannot be calculated: {{steps}}",
+            { steps: invalidSteps.map(getSimulationPlanMapLabel).join("、") },
+        )
+        : "";
+
+    const totalConsumables = Object.entries(calculation.consumablesUsed ?? {})
+        .sort((left, right) => right[1] - left[1]);
+    const consumablesContainer = document.getElementById("simulationPlanTotalConsumables");
+    consumablesContainer.replaceChildren(createSimulationPlanSimpleTable(
+        totalConsumables,
+        getSimulationHistoryItemName,
+    ));
+    renderSimulationPlanPlayerSummaries(calculation.players);
+}
+
+function renderSimulationPlan() {
+    const plan = ensureActiveSimulationPlan();
+    const calculation = calculateSimulationPlan(plan);
+    renderSimulationPlanSelector(plan);
+    renderSimulationPlanSteps(plan, calculation);
+    renderSimulationPlanSummary(plan, calculation);
+    updateSimulationPlanStepCount();
+}
+
+function createNewSimulationPlan() {
+    const plan = createEmptySimulationPlan();
+    simulationPlans.push(plan);
+    activeSimulationPlanId = plan.id;
+    persistSimulationPlans();
+    renderSimulationPlan();
+    setSimulationPlanStatus(
+        getSimulationPlanText("created", "Created plan '{{name}}'.", { name: plan.name }),
+        "success",
+    );
+}
+
+function deleteActiveSimulationPlan() {
+    const plan = getActiveSimulationPlan();
+    if (!plan || !confirm(getSimulationPlanText(
+        "deleteConfirm",
+        "Delete the current plan '{{name}}'?",
+        { name: plan.name },
+    ))) {
+        return;
+    }
+    const deletedName = plan.name;
+    simulationPlans = simulationPlans.filter((entry) => entry.id !== plan.id);
+    activeSimulationPlanId = simulationPlans[0]?.id ?? "";
+    ensureActiveSimulationPlan();
+    persistSimulationPlans();
+    renderSimulationPlan();
+    setSimulationPlanStatus(
+        getSimulationPlanText("deleted", "Deleted plan '{{name}}'.", { name: deletedName }),
+        "success",
+    );
+}
+
+function renameActiveSimulationPlan() {
+    const plan = getActiveSimulationPlan();
+    const input = document.getElementById("inputSimulationPlanName");
+    const name = input.value.trim();
+    if (!plan) {
+        return;
+    }
+    if (!name) {
+        input.value = plan.name;
+        setSimulationPlanStatus(
+            getSimulationPlanText("nameRequired", "The plan name cannot be empty."),
+            "warning",
+        );
+        return;
+    }
+    plan.name = name;
+    plan.updatedAt = new Date().toISOString();
+    persistSimulationPlans();
+    renderSimulationPlanSelector(plan);
+    setSimulationPlanStatus();
+}
+
+function handleSimulationPlanStepAction(event) {
+    const control = event.target.closest("[data-plan-action]");
+    if (!control) {
+        return;
+    }
+    const plan = getActiveSimulationPlan();
+    const stepIndex = plan?.steps?.findIndex((step) => step.id === control.dataset.stepId) ?? -1;
+    if (!plan || stepIndex < 0) {
+        return;
+    }
+
+    const action = control.dataset.planAction;
+    if (action === "quantity") {
+        const quantity = Number(control.value);
+        if (!Number.isFinite(quantity) || quantity < 0) {
+            return;
+        }
+        plan.steps[stepIndex].targetQuantity = quantity;
+    } else if (action === "remove") {
+        plan.steps.splice(stepIndex, 1);
+    } else if (action === "up" && stepIndex > 0) {
+        [plan.steps[stepIndex - 1], plan.steps[stepIndex]] = [
+            plan.steps[stepIndex],
+            plan.steps[stepIndex - 1],
+        ];
+    } else if (action === "down" && stepIndex < plan.steps.length - 1) {
+        [plan.steps[stepIndex + 1], plan.steps[stepIndex]] = [
+            plan.steps[stepIndex],
+            plan.steps[stepIndex + 1],
+        ];
+    } else {
+        return;
+    }
+
+    plan.updatedAt = new Date().toISOString();
+    persistSimulationPlans();
+    renderSimulationPlan();
+}
+
+function initSimulationPlans() {
+    loadSimulationPlans();
+    document.getElementById("simulationPlanModal")?.addEventListener("show.bs.modal", () => {
+        setSimulationPlanStatus();
+        renderSimulationPlan();
+    });
+    document.getElementById("selectSimulationPlan")?.addEventListener("change", (event) => {
+        activeSimulationPlanId = event.target.value;
+        persistSimulationPlans();
+        setSimulationPlanStatus();
+        renderSimulationPlan();
+    });
+    document.getElementById("inputSimulationPlanName")?.addEventListener(
+        "change",
+        renameActiveSimulationPlan,
+    );
+    document.getElementById("buttonCreateSimulationPlan")?.addEventListener(
+        "click",
+        createNewSimulationPlan,
+    );
+    document.getElementById("buttonDeleteSimulationPlan")?.addEventListener(
+        "click",
+        deleteActiveSimulationPlan,
+    );
+    document.getElementById("simulationPlanStepRows")?.addEventListener(
+        "click",
+        handleSimulationPlanStepAction,
+    );
+    document.getElementById("simulationPlanStepRows")?.addEventListener(
+        "change",
+        handleSimulationPlanStepAction,
+    );
+
+    if (typeof i18next?.on === "function") {
+        i18next.on("languageChanged", () => {
+            if (document.getElementById("simulationPlanModal")?.classList.contains("show")) {
+                renderSimulationPlan();
+            }
+        });
+    }
 }
 
 // #endregion
@@ -7415,6 +8135,7 @@ initLabyrinth();
 initTriggerModal();
 initSimulationControls();
 initExperienceLevelCalculator();
+initSimulationPlans();
 initSimulationHistory();
 initEquipmentSetsModal();
 initErrorHandling();

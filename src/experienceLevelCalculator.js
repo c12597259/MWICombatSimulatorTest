@@ -89,9 +89,25 @@ export function calculateLevelAfterDuration({ currentLevel, days, experiencePerH
     const normalizedCurrentLevel = normalizeLevel(currentLevel);
     const normalizedDays = normalizeNonNegativeNumber(days, "Days");
     const normalizedRate = normalizeNonNegativeNumber(experiencePerHour, "Experience per hour");
-    const startingExperience = getTotalExperienceForLevel(normalizedCurrentLevel);
     const gainedExperience = normalizedDays * 24 * normalizedRate;
-    const totalExperience = startingExperience + gainedExperience;
+    return {
+        ...calculateLevelAfterExperience({
+            currentLevel: normalizedCurrentLevel,
+            gainedExperience,
+        }),
+        days: normalizedDays,
+        experiencePerHour: normalizedRate,
+    };
+}
+
+export function calculateLevelAfterExperience({ currentLevel, gainedExperience }) {
+    const normalizedCurrentLevel = normalizeLevel(currentLevel);
+    const normalizedGainedExperience = normalizeNonNegativeNumber(
+        gainedExperience,
+        "Gained experience",
+    );
+    const startingExperience = getTotalExperienceForLevel(normalizedCurrentLevel);
+    const totalExperience = startingExperience + normalizedGainedExperience;
     const level = findLevelForTotalExperience(totalExperience);
     const atMaximumLevel = level >= MAX_SKILL_LEVEL;
     const currentLevelExperience = getTotalExperienceForLevel(level);
@@ -113,10 +129,8 @@ export function calculateLevelAfterDuration({ currentLevel, days, experiencePerH
 
     return {
         currentLevel: normalizedCurrentLevel,
-        days: normalizedDays,
-        experiencePerHour: normalizedRate,
         startingExperience,
-        gainedExperience,
+        gainedExperience: normalizedGainedExperience,
         totalExperience,
         level,
         levelProgress,
