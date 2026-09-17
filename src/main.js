@@ -77,6 +77,9 @@ import {
     shouldHandleSimulationPlanControlEvent,
 } from "./simulationPlan.js";
 import {
+    serializeSimulationPlanConsumableTransfer,
+} from "./simulationPlanConsumableTransfer.js";
+import {
     ALLOW_SOLO_ZONE_STORAGE_KEY,
     getSelectableCombatZones,
     isSingleMonsterCombatAction,
@@ -3924,6 +3927,68 @@ function createSimulationPlanExperienceTable(player) {
     return wrapper;
 }
 
+function getSimulationPlanTransferItemName(itemHrid, language) {
+    const translationKey = `itemNames.${itemHrid}`;
+    try {
+        const translated = i18next.t(translationKey, { lng: language });
+        if (typeof translated === "string" && translated !== translationKey) {
+            return translated;
+        }
+    } catch {
+        // Fall back to the game data name while translations are unavailable.
+    }
+    return itemDetailMap[itemHrid]?.name ?? getSimulationHistoryItemName(itemHrid);
+}
+
+async function writeSimulationPlanTextToClipboard(text) {
+    if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+    }
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    const copied = document.execCommand("copy");
+    textarea.remove();
+    if (!copied) {
+        throw new Error("Clipboard copy was rejected.");
+    }
+}
+
+async function exportSimulationPlanPlayerConsumables(player, button) {
+    const originalText = button.textContent;
+    button.disabled = true;
+    try {
+        const serialized = serializeSimulationPlanConsumableTransfer(
+            player,
+            getSimulationPlanTransferItemName,
+        );
+        await writeSimulationPlanTextToClipboard(serialized);
+        button.textContent = getSimulationPlanText("consumablesCopied", "Copied");
+        button.classList.remove("btn-outline-primary");
+        button.classList.add("btn-success");
+        window.setTimeout(() => {
+            if (!button.isConnected) {
+                return;
+            }
+            button.textContent = originalText;
+            button.classList.remove("btn-success");
+            button.classList.add("btn-outline-primary");
+            button.disabled = false;
+        }, 1500);
+    } catch (error) {
+        console.warn("Unable to copy simulation plan consumables.", error);
+        button.disabled = false;
+        alert(getSimulationPlanText(
+            "consumablesCopyFailed",
+            "Consumables could not be copied. Check the browser clipboard permission.",
+        ));
+    }
+}
+
 function createSimulationPlanPlayerSummary(player, index, groupId) {
     const pane = document.createElement("div");
     pane.className = `tab-pane fade${index === 0 ? " show active" : ""}`;
@@ -3943,6 +4008,7 @@ function createSimulationPlanPlayerSummary(player, index, groupId) {
         {
             title: getSimulationPlanText("consumables", "Consumables"),
             entries: Object.entries(player.consumablesUsed ?? {}).sort((a, b) => b[1] - a[1]),
+            exportConsumables: true,
         },
         {
             title: getSimulationPlanText("drops", "Expected Items"),
@@ -3956,10 +4022,29 @@ function createSimulationPlanPlayerSummary(player, index, groupId) {
     for (const section of sections) {
         const column = document.createElement("section");
         column.className = "col-lg-4";
+        const headingRow = document.createElement("div");
+        headingRow.className = "d-flex align-items-center justify-content-between gap-2 mb-2";
         const heading = document.createElement("h6");
+        heading.className = "mb-0";
         heading.textContent = section.title;
+        headingRow.appendChild(heading);
+        if (section.exportConsumables) {
+            const exportButton = document.createElement("button");
+            exportButton.type = "button";
+            exportButton.className = "btn btn-outline-primary btn-sm flex-shrink-0";
+            exportButton.textContent = getSimulationPlanText("exportConsumables", "Export");
+            exportButton.title = getSimulationPlanText(
+                "exportConsumablesTitle",
+                "Round quantities up and copy them for the MWI Toolkit importer.",
+            );
+            exportButton.disabled = section.entries.length === 0;
+            exportButton.addEventListener("click", () => {
+                void exportSimulationPlanPlayerConsumables(player, exportButton);
+            });
+            headingRow.appendChild(exportButton);
+        }
         column.append(
-            heading,
+            headingRow,
             createSimulationPlanSimpleTable(section.entries, getSimulationHistoryItemName),
         );
         grid.appendChild(column);
