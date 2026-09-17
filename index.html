@@ -679,37 +679,6 @@
                                     value="0" min="0" max="20" required />
                             </div>
                         </div>
-                        <div class="row mb-2">
-                            <label for="selectEquipment_set" class="col-md-2 col-form-label">Presets</label>
-                            <div class="col-md-6">
-                                <select id="selectEquipment_set" class="form-select">
-                                    <option value="">None</option>
-                                    <optgroup label="MELEE">
-                                        <option value="Cheese">Cheese</option>
-                                        <option value="Verdant">Verdant</option>
-                                        <option value="Azure">Azure</option>
-                                        <option value="Burble">Burble</option>
-                                        <option value="Crimson">Crimson</option>
-                                        <option value="Rainbow">Rainbow</option>
-                                        <option value="Holy">Holy</option>
-                                    </optgroup>
-                                    <optgroup label="MAGIC">
-                                        <option value="Cotton">Cotton</option>
-                                        <option value="Linen">Linen</option>
-                                        <option value="Bamboo">Bamboo</option>
-                                        <option value="Silk">Silk</option>
-                                        <option value="Radiant">Radiant</option>
-                                    </optgroup>
-                                    <optgroup label="RANGED">
-                                        <option value="Rough">Rough</option>
-                                        <option value="Reptile">Reptile</option>
-                                        <option value="Gobo">Gobo</option>
-                                        <option value="Beast">Beast</option>
-                                        <option value="Umbral">Umbral</option>
-                                    </optgroup>
-                                </select>
-                            </div>
-                        </div>
                         <!-- #endregion -->
                     </div>
                 </div>
@@ -981,9 +950,10 @@
                         </div>
                         <div class="row">
                             <div class="col-md-auto">
-                                <button id="buttonEquipmentSets" class="btn btn-primary" type="button"
-                                    data-bs-toggle="modal" data-bs-target="#equipmentSetsModal" data-i18n="common:controls.equipmentSets">
-                                    Equipment Sets
+                                <button id="buttonSimulationPlan" class="btn btn-primary" type="button"
+                                    data-bs-toggle="modal" data-bs-target="#simulationPlanModal">
+                                    <span data-i18n="common:simulationPlan.button">Simulation Plan</span>
+                                    <span id="simulationPlanStepCount" class="badge bg-light text-dark ms-1">0</span>
                                 </button>
                             </div>
                             <div class="col-md-auto">
@@ -999,22 +969,6 @@
                                     <span id="simulationHistoryCount" class="badge bg-light text-dark ms-1">0</span>
                                 </button>
                             </div>
-                            <div class="col-md-auto">
-                                <button id="buttonSimulationPlan" class="btn btn-primary" type="button"
-                                    data-bs-toggle="modal" data-bs-target="#simulationPlanModal">
-                                    <span data-i18n="common:simulationPlan.button">Simulation Plan</span>
-                                    <span id="simulationPlanStepCount" class="badge bg-light text-dark ms-1">0</span>
-                                </button>
-                            </div>
-                            <div class="col-md-auto">
-                                <div data-i18n="common:controls.darkMode">
-                                Dark Mode:
-                                </div>
-                                <label class="switch">
-                                    <input type="checkbox" id="darkModeToggle">
-                                    <span class="slider round"></span>
-                                </label>
-                            </div>
                         </div>
                         <div class="row mb-2 pt-3">
                             <div class="col-md-auto">
@@ -1024,8 +978,6 @@
                                 </button>
                             </div>
                         </div>
-                        <label for="comboBox">Select an Character: </label>
-                        <select id = "profile-combo-container"></select>
                         <!-- #endregion -->
                     </div>
                 </div>

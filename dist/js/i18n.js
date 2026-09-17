@@ -12029,6 +12029,8 @@ document.addEventListener('DOMContentLoaded', function () {
         switcherContainer.style.top = '10px';
         switcherContainer.style.right = '10px';
         switcherContainer.style.zIndex = '1000';
+        switcherContainer.style.display = 'flex';
+        switcherContainer.style.gap = '4px';
 
         const enhancementSimulatorButton = document.createElement('a');
         enhancementSimulatorButton.className = 'btn btn-sm btn-outline-success';
@@ -12037,11 +12039,31 @@ document.addEventListener('DOMContentLoaded', function () {
         enhancementSimulatorButton.target = '_blank';
         enhancementSimulatorButton.rel = 'noopener noreferrer';
 
+        const darkModeButton = document.createElement('button');
+        darkModeButton.type = 'button';
+        const updateDarkModeButton = function () {
+            const enabled = document.body.classList.contains('dark-mode');
+            darkModeButton.className = 'btn btn-sm ' + (enabled ? 'btn-secondary' : 'btn-outline-secondary');
+            darkModeButton.textContent = '🌙 ' + i18next.t('common:controls.darkMode');
+            darkModeButton.setAttribute('aria-pressed', String(enabled));
+            darkModeButton.title = i18next.t('common:controls.darkMode');
+        };
+        darkModeButton.onclick = function () {
+            const enabled = !document.body.classList.contains('dark-mode');
+            document.body.classList.toggle('dark-mode', enabled);
+            localStorage.setItem('darkModeEnabled', String(enabled));
+            updateDarkModeButton();
+        };
+        updateDarkModeButton();
+
         const enButton = document.createElement('button');
         enButton.className = 'btn btn-sm ' + (i18next.language === 'en' ? 'btn-primary' : 'btn-outline-primary');
         enButton.textContent = "English";
         enButton.onclick = function () {
-            i18next.changeLanguage('en').then(updateContent);
+            i18next.changeLanguage('en').then(function () {
+                updateContent();
+                updateDarkModeButton();
+            });
             enButton.className = 'btn btn-sm btn-primary';
             zhButton.className = 'btn btn-sm btn-outline-primary';
         };
@@ -12050,15 +12072,17 @@ document.addEventListener('DOMContentLoaded', function () {
         zhButton.className = 'btn btn-sm ' + (i18next.language === 'zh' ? 'btn-primary' : 'btn-outline-primary');
         zhButton.textContent = "中文";
         zhButton.onclick = function () {
-            i18next.changeLanguage('zh').then(updateContent);
+            i18next.changeLanguage('zh').then(function () {
+                updateContent();
+                updateDarkModeButton();
+            });
             zhButton.className = 'btn btn-sm btn-primary';
             enButton.className = 'btn btn-sm btn-outline-primary';
         };
 
         switcherContainer.appendChild(enhancementSimulatorButton);
-        switcherContainer.appendChild(document.createTextNode(' '));
+        switcherContainer.appendChild(darkModeButton);
         switcherContainer.appendChild(enButton);
-        switcherContainer.appendChild(document.createTextNode(' '));
         switcherContainer.appendChild(zhButton);
 
         document.body.appendChild(switcherContainer);

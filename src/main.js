@@ -526,61 +526,6 @@ function updateEquipmentState() {
     });
 }
 
-document.getElementById("selectEquipment_set").onchange = changeEquipmentSetListener;
-
-function changeEquipmentSetListener() {
-    let value = this.value
-    let optgroupType = this.options[this.selectedIndex].parentNode.label;
-
-    ["head", "body", "legs", "feet", "hands"].forEach((type) => {
-        let selectType = type;
-
-        let currentEquipment = document.getElementById("selectEquipment_" + selectType);
-        if (type === "feet") {
-            type = "_boots";
-        }
-        if (type === "hands") {
-            if (optgroupType === "RANGED") {
-                type = "_bracers";
-            } else if (optgroupType === "MAGIC") {
-                type = "_gloves";
-            } else {
-                type = "_gauntlets";
-            }
-        }
-        if (type === "head") {
-            if (optgroupType === "RANGED") {
-                type = "_hood";
-            } else if (optgroupType === "MAGIC") {
-                type = "_hat";
-            } else {
-                type = "_helmet";
-            }
-        }
-        if (type === "legs") {
-            if (optgroupType === "RANGED") {
-                type = "_chaps";
-            } else if (optgroupType === "MAGIC") {
-                type = "_robe_bottoms";
-            } else {
-                type = "_plate_legs";
-            }
-        }
-        if (type === "body") {
-            if (optgroupType === "RANGED") {
-                type = "_tunic";
-            } else if (optgroupType === "MAGIC") {
-                type = "_robe_top";
-            } else {
-                type = "_plate_body";
-            }
-        }
-        currentEquipment.value = "/items/" + value.toLowerCase() + type;
-    });
-    updateEquipmentState();
-    updateUI();
-}
-
 // #endregion
 
 // #region Combat Stats
@@ -6491,9 +6436,9 @@ function renderSelectedWipeEvent(index, simResult) {
             playerElement.textContent = `${player.hrid}: ${player.current}/${player.max}`;
 
             if (player.current <= 0) {
-                playerElement.style.color = darkModeToggle.checked ? '#FF6347' : '#CC0000';
+                playerElement.style.color = document.body.classList.contains('dark-mode') ? '#FF6347' : '#CC0000';
             } else if (damagedPlayers.has(player.hrid)) {
-                playerElement.style.color = darkModeToggle.checked ? '#00BFFF' : '#007BFF';
+                playerElement.style.color = document.body.classList.contains('dark-mode') ? '#00BFFF' : '#007BFF';
             }
 
             if (idx > 0) {
@@ -8462,18 +8407,11 @@ function updateUI() {
     updateContent();
 }
 
-const darkModeToggle = document.getElementById('darkModeToggle');
 const body = document.body;
 
 if (localStorage.getItem('darkModeEnabled') === 'true') {
     body.classList.add('dark-mode');
-    darkModeToggle.checked = true;
 }
-
-darkModeToggle.addEventListener('change', () => {
-    body.classList.toggle('dark-mode');
-    localStorage.setItem('darkModeEnabled', darkModeToggle.checked);
-});
 
 function updateContent() {
     document.querySelectorAll('[data-i18n]').forEach(function (element) {
