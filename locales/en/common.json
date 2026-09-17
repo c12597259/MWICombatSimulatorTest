@@ -188,8 +188,6 @@
         "empty": "Add a target item above to begin the plan.",
         "summary": "Plan Summary",
         "totalTime": "Total Time",
-        "totalConsumables": "Total Party Consumables",
-        "totalRequiredKeys": "Party Keys Required to Open Chests",
         "selectHistoryRecord": "Select a history record",
         "savedHistoryRecord": "{{date}} · saved record",
         "requiredSourceQuantity": "Need {{quantity}} {{item}}",

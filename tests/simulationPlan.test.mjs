@@ -250,7 +250,7 @@ test("calculates refinement chests and opening keys from regular chest output", 
     assert.equal(t2Result.players[0].requiredKeys["/items/chimerical_chest_key"], 160);
 });
 
-test("aggregates sequential time, consumables, experience, drops, keys, and final levels", () => {
+test("aggregates sequential time and each player's consumables, experience, drops, keys, and final levels", () => {
     const fragmentStep = createSimulationPlanStep("/items/blue_key_fragment", {
         targetQuantity: 200,
     });
@@ -274,7 +274,8 @@ test("aggregates sequential time, consumables, experience, drops, keys, and fina
     assert.equal(alice.expectedDrops["/items/blue_key_fragment"], 400);
     assert.equal(alice.expectedDrops["/items/chimerical_chest"], 80);
     assert.equal(alice.requiredKeys["/items/chimerical_chest_key"], 106.4);
-    assert.equal(result.requiredKeys["/items/chimerical_chest_key"], 106.4);
+    assert.equal("consumablesUsed" in result, false);
+    assert.equal("requiredKeys" in result, false);
 });
 
 test("drops old-schema and unsupported steps while normalizing saved plans", () => {

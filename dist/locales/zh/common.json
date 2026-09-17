@@ -188,8 +188,6 @@
         "empty": "请先在上方添加一个目标物品。",
         "summary": "计划汇总",
         "totalTime": "总耗时",
-        "totalConsumables": "全队消耗品合计",
-        "totalRequiredKeys": "全队开箱所需钥匙",
         "selectHistoryRecord": "请选择历史记录",
         "savedHistoryRecord": "{{date}} · 已保存记录",
         "requiredSourceQuantity": "需要 {{quantity}} 个{{item}}",

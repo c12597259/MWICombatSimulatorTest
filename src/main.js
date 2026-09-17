@@ -4082,20 +4082,6 @@ function renderSimulationPlanSummary(plan, calculation) {
         )
         : "";
 
-    const totalConsumables = Object.entries(calculation.consumablesUsed ?? {})
-        .sort((left, right) => right[1] - left[1]);
-    const consumablesContainer = document.getElementById("simulationPlanTotalConsumables");
-    consumablesContainer.replaceChildren(createSimulationPlanSimpleTable(
-        totalConsumables,
-        getSimulationHistoryItemName,
-    ));
-    const totalRequiredKeys = Object.entries(calculation.requiredKeys ?? {})
-        .sort((left, right) => right[1] - left[1]);
-    const requiredKeysContainer = document.getElementById("simulationPlanTotalRequiredKeys");
-    requiredKeysContainer.replaceChildren(createSimulationPlanSimpleTable(
-        totalRequiredKeys,
-        getSimulationHistoryItemName,
-    ));
     renderSimulationPlanPlayerSummaries(calculation.players);
 }
 

@@ -581,20 +581,11 @@ export function calculateSimulationPlan(plan) {
         ])),
     }));
 
-    const consumablesUsed = {};
-    const requiredKeys = {};
-    for (const player of players) {
-        addRateMap(consumablesUsed, player.consumablesUsed);
-        addRateMap(requiredKeys, player.requiredKeys);
-    }
-
     return {
         valid,
         totalHours,
         steps,
         players,
-        consumablesUsed,
-        requiredKeys,
     };
 }
 
