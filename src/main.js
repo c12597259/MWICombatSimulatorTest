@@ -2511,13 +2511,29 @@ function getSimulationHistoryItemName(itemHrid) {
     return getLocalizedHistoryValue(`itemNames.${itemHrid}`, fallback);
 }
 
-function createSimulationHistoryRateSection(title, values, labelResolver, maximumFractionDigits = 2) {
+function createSimulationHistoryRateSection(
+    title,
+    values,
+    labelResolver,
+    {
+        maximumFractionDigits = 2,
+        valueMultiplier = 1,
+        rowSorter = null,
+        valueFormatter = null,
+    } = {},
+) {
     const section = document.createElement("section");
     const heading = document.createElement("h6");
     heading.textContent = title;
     section.appendChild(heading);
 
-    const entries = Object.entries(values ?? {}).sort((left, right) => right[1] - left[1]);
+    let entries = Object.entries(values ?? {}).map(([key, value]) => ({
+        key,
+        value: Number(value) * valueMultiplier,
+    }));
+    entries = typeof rowSorter === "function"
+        ? rowSorter(entries)
+        : entries.sort((left, right) => right.value - left.value);
     if (entries.length === 0) {
         const empty = document.createElement("p");
         empty.className = "small text-muted";
@@ -2530,11 +2546,13 @@ function createSimulationHistoryRateSection(title, values, labelResolver, maximu
         getSimulationHistoryText("entry", "Metric / Item"),
         getSimulationHistoryText("value", "Value"),
     ]);
-    for (const [key, value] of entries) {
+    for (const { key, value } of entries) {
         const row = document.createElement("tr");
         row.appendChild(createSimulationHistoryCell(labelResolver(key), "history-item-name"));
         row.appendChild(createSimulationHistoryCell(
-            formatSimulationHistoryNumber(value, maximumFractionDigits),
+            valueFormatter
+                ? valueFormatter(value, key)
+                : formatSimulationHistoryNumber(value, maximumFractionDigits),
             "text-end history-value-column",
         ));
         table.tBodies[0].appendChild(row);
@@ -2621,11 +2639,11 @@ function createSimulationHistoryPlayerDetail(playerEntry) {
     const grid = document.createElement("div");
     grid.className = "row g-4";
 
-    const overviewColumn = document.createElement("div");
-    overviewColumn.className = "col-lg-6";
+    const primaryColumn = document.createElement("div");
+    primaryColumn.className = "col-lg-6";
     const overviewHeading = document.createElement("h6");
     overviewHeading.textContent = getSimulationHistoryText("sections.overview", "Main Metrics");
-    overviewColumn.appendChild(overviewHeading);
+    primaryColumn.appendChild(overviewHeading);
     const overviewTable = createSimulationHistoryTable();
     for (const metric of getSimulationHistoryMetricDefinitions()) {
         appendSimulationHistoryValueRow(
@@ -2634,34 +2652,37 @@ function createSimulationHistoryPlayerDetail(playerEntry) {
             `${formatSimulationHistoryNumber(playerEntry[metric.key], metric.digits)}${metric.suffix ?? ""}`,
         );
     }
-    overviewColumn.appendChild(overviewTable);
-    grid.appendChild(overviewColumn);
+    primaryColumn.appendChild(overviewTable);
 
-    const experienceColumn = document.createElement("div");
-    experienceColumn.className = "col-lg-6";
-    experienceColumn.appendChild(createSimulationHistoryRateSection(
+    const experienceSection = createSimulationHistoryRateSection(
         getSimulationHistoryText("sections.experience", "Experience per Hour"),
         playerEntry.experiencePerHour,
         getSimulationHistorySkillName,
-    ));
-    grid.appendChild(experienceColumn);
+    );
+    experienceSection.className = "mt-4";
+    primaryColumn.appendChild(experienceSection);
 
-    const consumablesColumn = document.createElement("div");
-    consumablesColumn.className = "col-lg-6";
-    consumablesColumn.appendChild(createSimulationHistoryRateSection(
+    const consumablesSection = createSimulationHistoryRateSection(
         getSimulationHistoryText("sections.consumables", "Consumables per Hour"),
         playerEntry.consumablesPerHour,
         getSimulationHistoryItemName,
-    ));
-    grid.appendChild(consumablesColumn);
+    );
+    consumablesSection.className = "mt-4";
+    primaryColumn.appendChild(consumablesSection);
+    grid.appendChild(primaryColumn);
 
     const dropsColumn = document.createElement("div");
     dropsColumn.className = "col-lg-6";
     dropsColumn.appendChild(createSimulationHistoryRateSection(
-        getSimulationHistoryText("sections.drops", "Expected Drops per Hour"),
+        getSimulationHistoryText("sections.drops24", "Expected Drops per 24 Hours"),
         playerEntry.expectedDropsPerHour,
         getSimulationHistoryItemName,
-        6,
+        {
+            maximumFractionDigits: 6,
+            valueMultiplier: SIMULATION_HISTORY_DROP_COMPARISON_HOURS,
+            rowSorter: sortSimulationHistoryDropRows,
+            valueFormatter: formatSimulationHistoryDropNumber,
+        },
     ));
     grid.appendChild(dropsColumn);
 

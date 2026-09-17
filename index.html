@@ -435,13 +435,6 @@
         </ul>
         <div class="row pt-3">
             <div class="col-md-5">
-                <div class="row mb-3" id="teamPresetComparisonBar">
-                    <div class="col">
-                        <button type="button" class="btn btn-warning w-100" id="buttonCompareTeamPreset"
-                            data-i18n="common:teamComparison.compare">Compare with Current Loadouts</button>
-                        <div class="form-text" id="teamPresetComparisonStatus" aria-live="polite"></div>
-                    </div>
-                </div>
                 <div class="row mb-3">
                     <div class="col-md-4">
                         <!-- #region Levels -->
@@ -515,6 +508,11 @@
                                 data-bs-toggle="modal" data-bs-target="#achievementsModal" data-i18n="achievementsPanel.achievements">
                                 House Rooms
                             </button>
+                        </div>
+                        <div class="row mb-2" id="teamPresetComparisonBar">
+                            <button type="button" class="btn btn-warning" id="buttonCompareTeamPreset"
+                                data-i18n="common:teamComparison.compare">Compare with Current Loadouts</button>
+                            <div class="form-text" id="teamPresetComparisonStatus" aria-live="polite"></div>
                         </div>
                         <!-- #endregion -->
                     </div>
