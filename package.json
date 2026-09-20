@@ -5,7 +5,10 @@
     "main": "index.js",
     "scripts": {
         "test": "node --test tests/fragmentTimeCost.test.mjs tests/guildCombatBuffs.test.mjs tests/teamPresetComparison.test.mjs tests/privateLoadoutBaseline.test.mjs tests/simulationHistory.test.mjs tests/playerFormation.test.mjs tests/experienceLevelCalculator.test.mjs tests/simulationPlan.test.mjs tests/simulationPlanConsumableTransfer.test.mjs tests/toolkitConsumableImportUserscript.test.mjs tests/zoneSelection.test.mjs",
+        "test:combat": "node --test tests/combatPerformance.test.mjs tests/simulationWorkerPool.test.mjs",
+        "bench": "node bench/run.cjs",
         "build": "webpack",
+        "build:production": "webpack --mode production",
         "watch": "webpack --watch",
         "start": "webpack serve --mode development --open"
     },
