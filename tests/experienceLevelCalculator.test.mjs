@@ -11,6 +11,7 @@ const {
     EXPERIENCE_TOTAL_BY_LEVEL,
     calculateLevelAfterExperience,
     calculateLevelAfterDuration,
+    calculateSkillLevelsAfterDuration,
     calculateTimeToLevel,
     getTotalExperienceForLevel,
 } = await import(calculatorModuleUrl);
@@ -86,6 +87,24 @@ test("projects a final level from a direct experience gain", () => {
 
     assert.equal(result.level, 19);
     assert.equal(result.levelProgress, 0);
+});
+
+test("projects every skill that gains experience over the same duration", () => {
+    const results = calculateSkillLevelsAfterDuration({
+        skills: ["melee", "attack", "defense"],
+        currentLevels: { melee: 1, attack: 1, defense: 50 },
+        experiencePerHourBySkill: { melee: 100, attack: 50, defense: 0 },
+        days: 1,
+    });
+
+    assert.deepEqual(results.map(({ skill, level, gainedExperience }) => ({
+        skill,
+        level,
+        gainedExperience,
+    })), [
+        { skill: "melee", level: 16, gainedExperience: 2400 },
+        { skill: "attack", level: 12, gainedExperience: 1200 },
+    ]);
 });
 
 test("rejects a negative duration", () => {

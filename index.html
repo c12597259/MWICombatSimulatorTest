@@ -145,6 +145,21 @@
             border-color: #666 !important;
         }
 
+        body.dark-mode #experienceLevelCalculatorModal .table {
+            --bs-table-color: #f0f0f0;
+            --bs-table-bg: #444;
+            --bs-table-border-color: #666;
+            --bs-table-active-color: #fff;
+            --bs-table-active-bg: #555;
+        }
+
+        body.dark-mode #experienceLevelCalculatorModal .table-light {
+            --bs-table-color: #fff;
+            --bs-table-bg: #555;
+            color: #fff;
+            background-color: #555;
+        }
+
         body.dark-mode #buttonSimulationResultDamageDetails {
             color: #f0f0f0;
             border-color: #aaa;
@@ -2418,6 +2433,25 @@
                                 </section>
                             </div>
                         </div>
+                        <section class="border rounded p-3 mt-3">
+                            <h6 data-i18n="common:simulationResults.levelCalculator.allSkillsProjection">
+                                All Skill Level Projections
+                            </h6>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-bordered align-middle mb-0">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th data-i18n="common:simulationResults.levelCalculator.skill">Skill</th>
+                                            <th class="text-end" data-i18n="common:simulationResults.levelCalculator.currentLevel">Current Level</th>
+                                            <th class="text-end" data-i18n="common:simulationResults.levelCalculator.experiencePerHour">Experience per Hour</th>
+                                            <th class="text-end" id="experienceAllSkillsAfterDaysHeading">Level after days</th>
+                                            <th class="text-end" data-i18n="common:simulationResults.levelCalculator.levelProgress">Level Progress</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="experienceAllSkillProjectionRows"></tbody>
+                                </table>
+                            </div>
+                        </section>
                     </div>
                 </div>
                 <div class="modal-footer">

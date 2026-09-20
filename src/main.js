@@ -21,6 +21,7 @@ import {
     MAX_SKILL_LEVEL,
     MIN_SKILL_LEVEL,
     calculateLevelAfterDuration,
+    calculateSkillLevelsAfterDuration,
     calculateTimeToLevel,
 } from "./experienceLevelCalculator.js";
 import {
@@ -4816,6 +4817,70 @@ function clearExperienceLevelCalculatorResults() {
             element.textContent = "—";
         }
     });
+    document.getElementById("experienceAllSkillProjectionRows")?.replaceChildren();
+    const afterDaysHeading = document.getElementById("experienceAllSkillsAfterDaysHeading");
+    if (afterDaysHeading) {
+        afterDaysHeading.textContent = getExperienceLevelText(
+            "levelAfterDays",
+            "Level after {{days}} days",
+            { days: "—" },
+        );
+    }
+}
+
+function renderExperienceAllSkillProjections({
+    context,
+    selectedSkill,
+    selectedCurrentLevel,
+    days,
+}) {
+    const rows = document.getElementById("experienceAllSkillProjectionRows");
+    const afterDaysHeading = document.getElementById("experienceAllSkillsAfterDaysHeading");
+    if (!rows || !afterDaysHeading) {
+        return;
+    }
+
+    afterDaysHeading.textContent = getExperienceLevelText(
+        "levelAfterDays",
+        "Level after {{days}} days",
+        { days: formatExperienceLevelNumber(days, 2) },
+    );
+    const skills = EXPERIENCE_LEVEL_SKILLS.filter(
+        (skill) => (context.rates?.[skill] ?? 0) > 0,
+    );
+    const currentLevels = Object.fromEntries(skills.map((skill) => [
+        skill,
+        skill === selectedSkill
+            ? selectedCurrentLevel
+            : getConfiguredExperienceSkillLevel(context.playerNumber, skill),
+    ]));
+    const projections = calculateSkillLevelsAfterDuration({
+        skills,
+        currentLevels,
+        experiencePerHourBySkill: context.rates,
+        days,
+    });
+
+    rows.replaceChildren(...projections.map((projection) => {
+        const row = document.createElement("tr");
+        if (projection.skill === selectedSkill) {
+            row.className = "table-active";
+        }
+        row.append(
+            createSimulationHistoryCell(getExperienceSkillName(projection.skill)),
+            createSimulationHistoryCell(`Lv. ${projection.currentLevel}`, "text-end"),
+            createSimulationHistoryCell(
+                formatExperienceLevelNumber(projection.experiencePerHour),
+                "text-end",
+            ),
+            createSimulationHistoryCell(`Lv. ${projection.level}`, "text-end fw-semibold"),
+            createSimulationHistoryCell(
+                `${formatExperienceLevelNumber(projection.levelProgress * 100, 2)}%`,
+                "text-end",
+            ),
+        );
+        return row;
+    }));
 }
 
 function renderExperienceLevelCalculator() {
@@ -4871,6 +4936,12 @@ function renderExperienceLevelCalculator() {
     document.getElementById("experienceDurationRemaining").textContent = durationResult.atMaximumLevel
         ? getExperienceLevelText("maxLevel", "Highest level in the experience table reached")
         : formatExperienceLevelNumber(durationResult.experienceToNextLevel);
+    renderExperienceAllSkillProjections({
+        context,
+        selectedSkill: skill,
+        selectedCurrentLevel: currentLevel,
+        days: daysValue,
+    });
 }
 
 function selectExperienceLevelCalculatorSkill({ resetTarget = true } = {}) {

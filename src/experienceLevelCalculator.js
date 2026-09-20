@@ -100,6 +100,33 @@ export function calculateLevelAfterDuration({ currentLevel, days, experiencePerH
     };
 }
 
+export function calculateSkillLevelsAfterDuration({
+    skills = [],
+    currentLevels = {},
+    experiencePerHourBySkill = {},
+    days,
+}) {
+    const normalizedDays = normalizeNonNegativeNumber(days, "Days");
+    const orderedSkills = Array.isArray(skills) && skills.length > 0
+        ? skills
+        : Object.keys(experiencePerHourBySkill);
+
+    return orderedSkills.flatMap((skill) => {
+        const experiencePerHour = Number(experiencePerHourBySkill?.[skill]);
+        if (!Number.isFinite(experiencePerHour) || experiencePerHour <= 0) {
+            return [];
+        }
+        return [{
+            skill,
+            ...calculateLevelAfterDuration({
+                currentLevel: currentLevels?.[skill] ?? MIN_SKILL_LEVEL,
+                days: normalizedDays,
+                experiencePerHour,
+            }),
+        }];
+    });
+}
+
 export function calculateLevelAfterExperience({ currentLevel, gainedExperience }) {
     const normalizedCurrentLevel = normalizeLevel(currentLevel);
     const normalizedGainedExperience = normalizeNonNegativeNumber(
