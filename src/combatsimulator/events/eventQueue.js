@@ -14,13 +14,13 @@ class EventQueue {
     }
 
     containsEventOfType(type) {
-        let heapEvents = this.minHeap.toArray();
+        let heapEvents = this.minHeap.heapArray;
 
         return heapEvents.some((event) => event.type == type);
     }
 
     containsEventOfTypeAndHrid(type, hrid) {
-        let heapEvents = this.minHeap.toArray();
+        let heapEvents = this.minHeap.heapArray;
         return heapEvents.some((event) => event.type == type && event.hrid == hrid);
     }
 
@@ -38,19 +38,18 @@ class EventQueue {
 
     clearMatching(fn) {
         let cleared = false;
-        let heapEvents = this.minHeap.toArray();
-
-        for (const event of heapEvents) {
-            if (fn(event)) {
-                this.minHeap.remove(event);
-                cleared = true;
-            }
+        // Snapshot only matching entries, preserving the old removal order. A
+        // lazy-delete heap would reorder equal-time events and change battles.
+        const matches = this.minHeap.heapArray.filter(fn);
+        for (const event of matches) {
+            this.minHeap.remove(event);
+            cleared = true;
         }
         return cleared;
     }
 
     getMatching(fn) {
-        let heapEvents = this.minHeap.toArray(); 
+        let heapEvents = this.minHeap.heapArray;
     
         for (const event of heapEvents) {
             if (fn(event)) {

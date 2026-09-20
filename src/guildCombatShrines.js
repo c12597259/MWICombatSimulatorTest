@@ -126,7 +126,12 @@ export function isKnownGuildCombatShrineBuffType(typeHrid) {
 }
 
 export function getGuildCombatShrineBoosts(typeHrid, levels = {}) {
-    const normalized = normalizeGuildCombatShrineLevels(levels);
+    if (!KNOWN_BUFF_TYPES.has(typeHrid)) return [];
+    return getNormalizedGuildCombatShrineBoosts(typeHrid, normalizeGuildCombatShrineLevels(levels));
+}
+
+// Internal hot path: the caller normalizes once for an entire stat recalculation.
+export function getNormalizedGuildCombatShrineBoosts(typeHrid, normalized) {
     const boosts = [];
 
     if (typeHrid === "/buff_types/damage" && normalized.force > 0) {

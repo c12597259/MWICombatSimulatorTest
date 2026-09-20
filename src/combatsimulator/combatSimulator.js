@@ -41,6 +41,7 @@ class CombatSimulator extends EventTarget {
         this.simResult = new SimResult(zone, labyrinth, players.length);
         this.allPlayersDead = false;
         this.enableHpMpVisualization = options.enableHpMpVisualization || false;
+        this.debug = options.debug || false;
 
         this.wipeLogs = {
             buffer: new Array(200),
@@ -174,13 +175,14 @@ class CombatSimulator extends EventTarget {
         this.reset();
 
         let ticks = 0;
+        let lastProgressTime = performance.now();
 
         let combatStartEvent = new CombatStartEvent(0);
         this.eventQueue.addEvent(combatStartEvent);
 
         while (this.simulationTime < simulationTimeLimit) {
             let nextEvent = this.eventQueue.getNextEvent();
-            await this.processEvent(nextEvent);
+            this.processEvent(nextEvent);
 
             ticks++;
             if (ticks == 1000) {
@@ -189,11 +191,14 @@ class CombatSimulator extends EventTarget {
                 if (this.enableHpMpVisualization) {
                     this.simResult.addTimeSeriesSnapshot(this.simulationTime, this.players);
                 }
+                const now = performance.now();
+                if (now - lastProgressTime < 250) continue;
+                lastProgressTime = now;
                 let progressEvent = new CustomEvent("progress", {
                     detail: {
                         zone: this.zone?.hrid,
                         difficultyTier: this.zone?.difficultyTier,
-                        labyrinth: this.labyrinth?.hrid,
+                        labyrinth: this.labyrinth?.monsterHrid,
                         roomLevel: this.labyrinth?.roomLevel,
                         progress: Math.min(this.simulationTime / simulationTimeLimit, 1),
                         timeSeriesData: this.enableHpMpVisualization ? this.simResult.timeSeriesData : null
@@ -203,6 +208,15 @@ class CombatSimulator extends EventTarget {
             }
         }
 
+        this.dispatchEvent(new CustomEvent("progress", { detail: {
+            zone: this.zone?.hrid,
+            difficultyTier: this.zone?.difficultyTier,
+            labyrinth: this.labyrinth?.monsterHrid,
+            roomLevel: this.labyrinth?.roomLevel,
+            progress: 1,
+            timeSeriesData: this.enableHpMpVisualization ? this.simResult.timeSeriesData : null,
+        } }));
+
         // for (let i = 0; i < this.simResult.timeSpentAlive.length; i++) {
         //     if (this.simResult.timeSpentAlive[i].alive == true) {
         //         this.simResult.updateTimeSpentAlive(this.simResult.timeSpentAlive[i].name, false, simulationTimeLimit);
@@ -211,7 +225,7 @@ class CombatSimulator extends EventTarget {
 
         this.simResult.isDungeon = this.zone?.isDungeon ?? false;
         if (this.zone && this.simResult.isDungeon) {
-            console.log("Timeout now at wave #" + (this.zone.encountersKilled - 1));
+            if (this.debug) console.log("Timeout now at wave #" + (this.zone.encountersKilled - 1));
 
             this.simResult.dungeonsCompleted = this.zone.dungeonsCompleted;
             this.simResult.dungeonsFailed = this.zone.dungeonsFailed;
@@ -265,7 +279,7 @@ class CombatSimulator extends EventTarget {
         this.simResult = new SimResult(this.zone, this.labyrinth, this.players.length);
     }
 
-    async processEvent(event) {
+    processEvent(event) {
         this.simulationTime = event.time;
 
         // console.log(this.simulationTime / 1e9, event.type, event);
@@ -727,7 +741,7 @@ class CombatSimulator extends EventTarget {
         ) {
             if (this.zone) {
                 if (this.zone.isDungeon) {
-                    console.log("All Players died at wave #" + (this.zone.encountersKilled - 1) + " with ememies: " + this.enemies.map(enemy => (enemy.hrid+"("+(enemy.combatDetails.currentHitpoints*100/enemy.combatDetails.maxHitpoints).toFixed(2)+"%)")).join(", "));
+                    if (this.debug) console.log("All Players died at wave #" + (this.zone.encountersKilled - 1) + " with ememies: " + this.enemies.map(enemy => (enemy.hrid+"("+(enemy.combatDetails.currentHitpoints*100/enemy.combatDetails.maxHitpoints).toFixed(2)+"%)")).join(", "));
 
                     this.saveWipeLogsToSimResult(this.zone.encountersKilled - 1);
                     // console.log(this.simResult)

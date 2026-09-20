@@ -7,6 +7,8 @@ import Achievement from "./achievement";
 import {
     GUILD_COMBAT_SHRINE_DEFAULTS,
     getGuildCombatShrineBoosts,
+    getNormalizedGuildCombatShrineBoosts,
+    normalizeGuildCombatShrineLevels,
     isKnownGuildCombatShrineBuffType,
     resolveGuildCombatShrineLevels,
 } from "../guildCombatShrines.js";
@@ -83,11 +85,33 @@ class Player extends CombatUnit {
     getBuffBoosts(type) {
         return [
             ...super.getBuffBoosts(type),
-            ...getGuildCombatShrineBoosts(type, this.guildCombatBuffLevels),
+            ...(this._shrineLevelsForUpdate
+                ? getNormalizedGuildCombatShrineBoosts(type, this._shrineLevelsForUpdate)
+                : getGuildCombatShrineBoosts(type, this.guildCombatBuffLevels)),
         ];
     }
 
     updateCombatDetails() {
+        this._shrineLevelsForUpdate = normalizeGuildCombatShrineLevels(this.guildCombatBuffLevels);
+        this.updateEquipmentStats();
+        super.updateCombatDetails();
+        this._shrineLevelsForUpdate = null;
+    }
+
+    updateEquipmentStats() {
+        // Check slot, identity and enhancement: editor changes invalidate the cache,
+        // while combat buff changes can reuse the exact same base sums.
+        const entries = Object.entries(this.equipment);
+        const previous = this._equipmentSnapshot;
+        if (previous && previous.length === entries.length && entries.every(([slot, item], index) => {
+            const old = previous[index];
+            return old.slot === slot && old.item === item && old.hrid === item?.hrid
+                && old.level === item?.enhancementLevel && old.gameItem === item?.gameItem;
+        })) {
+            const stats = this.combatDetails.combatStats;
+            for (const key of this._equipmentStatKeys) stats[key] = this._equipmentStats[key];
+            return;
+        }
         if (this.equipment["/equipment_types/main_hand"]) {
             this.combatDetails.combatStats.combatStyleHrid =
                 this.equipment["/equipment_types/main_hand"].getCombatStyle();
@@ -117,7 +141,7 @@ class Player extends CombatUnit {
             this.combatDetails.combatStats.focusTraining = "";
         }
 
-        [
+        const equipmentStats = [
             "stabAccuracy",
             "slashAccuracy",
             "smashAccuracy",
@@ -188,7 +212,8 @@ class Player extends CombatUnit {
             "rangedExperience",
             "magicExperience",
             "retaliation"
-        ].forEach((stat) => {
+        ];
+        equipmentStats.forEach((stat) => {
             this.combatDetails.combatStats[stat] = Object.values(this.equipment)
                 .filter((equipment) => equipment != null)
                 .map((equipment) => equipment.getCombatStat(stat))
@@ -205,7 +230,15 @@ class Player extends CombatUnit {
             this.combatDetails.combatStats.drinkSlots = 1;
         }
 
-        super.updateCombatDetails();
+        this._equipmentSnapshot = entries.map(([slot, item]) => ({
+            slot, item, hrid: item?.hrid, level: item?.enhancementLevel, gameItem: item?.gameItem,
+        }));
+        this._equipmentStats = {};
+        for (const stat of [...equipmentStats, "combatStyleHrid", "damageType", "attackInterval",
+            "primaryTraining", "focusTraining", "foodSlots", "drinkSlots"]) {
+            this._equipmentStats[stat] = this.combatDetails.combatStats[stat];
+        }
+        this._equipmentStatKeys = Object.keys(this._equipmentStats);
     }
 }
 
