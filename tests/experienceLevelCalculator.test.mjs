@@ -14,7 +14,38 @@ const {
     calculateSkillLevelsAfterDuration,
     calculateTimeToLevel,
     getTotalExperienceForLevel,
+    resolveSkillExperience,
 } = await import(calculatorModuleUrl);
+
+test("real cumulative XP shortens target time and carries progress across all skill projections", () => {
+    const xp = 49993657.35;
+    const expected = getTotalExperienceForLevel(117) - xp;
+    assert.equal(calculateTimeToLevel({ currentLevel: 116, currentExperience: xp, targetLevel: 117, experiencePerHour: 10000 }).hours, expected / 10000);
+    const projections = calculateSkillLevelsAfterDuration({ skills: ["melee", "attack"], currentLevels: {melee: 2, attack: 3}, currentExperiences: {melee: 50, attack: 90}, experiencePerHourBySkill: {melee: 1, attack: 2}, days: 1 });
+    assert.equal(projections[0].totalExperience, 74);
+    assert.equal(projections[1].totalExperience, 138);
+    assert.ok(projections[0].startingProgress > 0);
+});
+
+test("only matching character and base level can use captured XP; manual levels and legacy inputs use 0%", () => {
+    const state = { characterId: "1", player: { meleeLevel: 2 }, skillExperience: {schemaVersion:1, characterId:"1", complete:true, capturedAt:"2026-09-24T00:00:00Z", skills:[{skillHrid:"/skills/melee", level:2,totalExperience:50}]} };
+    assert.equal(resolveSkillExperience(state, "melee").startingExperience, 50);
+    assert.equal(resolveSkillExperience(state, "melee", 3).startingExperience, 76);
+    assert.equal(resolveSkillExperience(state, "melee", 2, true).startingExperience, 33);
+    assert.equal(resolveSkillExperience({...state,characterId:"2"}, "melee").source, "level-start");
+    assert.equal(resolveSkillExperience({player:{meleeLevel:2}}, "melee").startingExperience, 33);
+    for (const bad of [null, -1, NaN, Infinity, "50", 76]) {
+        state.skillExperience.skills[0].totalExperience = bad;
+        assert.equal(resolveSkillExperience(state,"melee").source,"level-start");
+        assert.equal(calculateLevelAfterExperience({currentLevel:2,currentExperience:bad,gainedExperience:0}).startingExperience,33);
+    }
+});
+
+test("zero XP, zero gain, fractional XP and level 200 are supported", () => {
+    assert.equal(calculateLevelAfterExperience({currentLevel:1,currentExperience:0,gainedExperience:0}).totalExperience,0);
+    assert.equal(calculateLevelAfterExperience({currentLevel:2,currentExperience:50.25,gainedExperience:0.5}).totalExperience,50.75);
+    assert.equal(calculateLevelAfterExperience({currentLevel:200,currentExperience:100000000123,gainedExperience:10}).totalExperience,100000000133);
+});
 
 test("contains the supplied cumulative experience thresholds from level 1 through 200", () => {
     assert.equal(EXPERIENCE_TOTAL_BY_LEVEL.length, 200);

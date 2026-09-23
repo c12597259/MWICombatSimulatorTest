@@ -104,6 +104,25 @@ function sourceFor(record) {
     });
 }
 
+test("plan uses frozen XP once from first occurrence, not from each subsequent history source", () => {
+    const record = createZoneRecord();
+    const first = createSimulationPlanHistorySource(record, { startingLevelsBySlot: {1:{stamina:2}}, startingSkillExperienceBySlot: {1:{stamina:{startingExperience:50,source:"captured",capturedAt:"2026-09-24T00:00:00Z"}}} });
+    const second = createSimulationPlanHistorySource(record, { startingLevelsBySlot: {1:{stamina:3}}, startingSkillExperienceBySlot: {1:{stamina:{startingExperience:90,source:"captured"}}} });
+    const steps = [first,second].map(source => {
+        const step = createSimulationPlanStep("/items/blue_key_fragment", {targetQuantity:2});
+        setSimulationPlanStepHistorySource(step,MAPS.blue,source);
+        return step;
+    });
+    const result = calculateSimulationPlan({steps});
+    const alice = result.players.find(p=>p.name==="Alice");
+    assert.equal(alice.skills.stamina.startingExperience,50);
+    assert.equal(alice.skills.stamina.totalExperience,50+alice.experienceGained.stamina);
+    first.players[0].startingSkillExperience.stamina.startingExperience = 70;
+    assert.equal(alice.skills.stamina.startingExperience,50);
+    const persisted = JSON.parse(JSON.stringify(steps));
+    assert.equal(calculateSimulationPlan({steps:persisted}).players[0].skills.stamina.startingExperience,50);
+});
+
 test("defines the eleven zones followed by the four dungeons in history order", () => {
     assert.equal(SIMULATION_PLAN_MAPS.length, 15);
     assert.deepEqual(

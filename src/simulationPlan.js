@@ -284,6 +284,7 @@ function getOrCreatePlayerSummary(playerMap, player) {
             identity: player.identity,
             name: player.name,
             startingLevels: normalizeStartingLevels(player.startingLevels),
+            startingSkillExperience: JSON.parse(JSON.stringify(player.startingSkillExperience || {})),
             experienceGained: {},
             consumablesUsed: {},
             expectedDrops: {},
@@ -337,7 +338,7 @@ export function getDungeonChestExpectations(difficulty) {
     };
 }
 
-export function createSimulationPlanHistorySource(record, { startingLevelsBySlot = {} } = {}) {
+export function createSimulationPlanHistorySource(record, { startingLevelsBySlot = {}, startingSkillExperienceBySlot = {} } = {}) {
     const mapDefinition = getSimulationPlanMapDefinition(record?.mapKey);
     if (!mapDefinition) {
         throw new Error("This history map is not supported by simulation plans.");
@@ -370,6 +371,7 @@ export function createSimulationPlanHistorySource(record, { startingLevelsBySlot
             name: String(player.name ?? player.playerKey ?? "").trim(),
             loadoutName: String(player.loadoutName ?? "").trim(),
             startingLevels: normalizeStartingLevels(startingLevelsBySlot[player.slot]),
+            startingSkillExperience: JSON.parse(JSON.stringify(startingSkillExperienceBySlot[player.slot] || {})),
             itemRatePerHour: roundNumber(Math.max(
                 0,
                 isDungeon
@@ -413,7 +415,7 @@ export function setSimulationPlanStepHistorySource(step, mapKey, historySource) 
     if (historySource && historySource.mapKey !== mapKey) {
         throw new Error("The selected history record belongs to a different map.");
     }
-    source.historyRecord = historySource ?? null;
+    source.historyRecord = historySource ? JSON.parse(JSON.stringify(historySource)) : null;
     return step;
 }
 
@@ -576,6 +578,7 @@ export function calculateSimulationPlan(plan) {
             skill,
             calculateLevelAfterExperience({
                 currentLevel: summary.startingLevels[skill],
+                currentExperience: summary.startingSkillExperience?.[skill]?.startingExperience,
                 gainedExperience: toFiniteNumber(summary.experienceGained[skill]),
             }),
         ])),
@@ -595,7 +598,7 @@ function normalizeHistorySource(value, expectedMapKey) {
     }
     return {
         ...value,
-        players: Array.isArray(value.players) ? value.players : [],
+        players: Array.isArray(value.players) ? JSON.parse(JSON.stringify(value.players)) : [],
     };
 }
 

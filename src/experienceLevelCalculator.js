@@ -45,14 +45,42 @@ export function getTotalExperienceForLevel(level) {
     return EXPERIENCE_TOTAL_BY_LEVEL[normalizeLevel(level) - 1];
 }
 
-export function calculateTimeToLevel({ currentLevel, targetLevel, experiencePerHour }) {
+// A changed/hypothetical base level must never inherit XP from another level.
+export function resolveStartingExperience(currentLevel, currentExperience) {
+    const level = normalizeLevel(currentLevel);
+    const floor = getTotalExperienceForLevel(level);
+    const valid = typeof currentExperience === "number" && Number.isFinite(currentExperience)
+        && currentExperience >= floor
+        && (level === MAX_SKILL_LEVEL || currentExperience < getTotalExperienceForLevel(level + 1));
+    return valid ? currentExperience : floor;
+}
+
+export function resolveSkillExperience(playerState, skill, levelOverride, forceLevelStart = false) {
+    const currentLevel = normalizeLevel(levelOverride ?? playerState?.player?.[`${skill}Level`] ?? 1);
+    const profile = playerState?.skillExperience;
+    const characterId = String(playerState?.characterId ?? playerState?.privateSnapshot?.characterId ?? "");
+    const entry = profile?.skills?.find?.(item => item.skillHrid === `/skills/${skill}`);
+    const valid = !forceLevelStart && profile?.schemaVersion === 1 && profile.complete === true
+        && characterId !== "" && String(profile.characterId) === characterId
+        && Number(entry?.level) === currentLevel && typeof entry?.totalExperience === "number"
+        && Number.isFinite(entry.totalExperience)
+        && resolveStartingExperience(currentLevel, entry.totalExperience) === entry.totalExperience;
+    const startingExperience = resolveStartingExperience(currentLevel, valid ? entry.totalExperience : undefined);
+    const startingProgress = currentLevel === MAX_SKILL_LEVEL ? 1
+        : (startingExperience - getTotalExperienceForLevel(currentLevel))
+            / (getTotalExperienceForLevel(currentLevel + 1) - getTotalExperienceForLevel(currentLevel));
+    return { currentLevel, startingExperience, startingProgress,
+        source: valid ? "captured" : "level-start", capturedAt: valid ? String(profile.capturedAt || "") : "" };
+}
+
+export function calculateTimeToLevel({ currentLevel, currentExperience, targetLevel, experiencePerHour }) {
     const normalizedCurrentLevel = normalizeLevel(currentLevel);
     const normalizedTargetLevel = normalizeLevel(targetLevel);
     const normalizedRate = normalizeNonNegativeNumber(experiencePerHour, "Experience per hour");
     const requiredExperience = Math.max(
         0,
         getTotalExperienceForLevel(normalizedTargetLevel)
-            - getTotalExperienceForLevel(normalizedCurrentLevel),
+            - resolveStartingExperience(normalizedCurrentLevel, currentExperience),
     );
 
     return {
@@ -85,7 +113,7 @@ function findLevelForTotalExperience(totalExperience) {
     return resultIndex + 1;
 }
 
-export function calculateLevelAfterDuration({ currentLevel, days, experiencePerHour }) {
+export function calculateLevelAfterDuration({ currentLevel, currentExperience, days, experiencePerHour }) {
     const normalizedCurrentLevel = normalizeLevel(currentLevel);
     const normalizedDays = normalizeNonNegativeNumber(days, "Days");
     const normalizedRate = normalizeNonNegativeNumber(experiencePerHour, "Experience per hour");
@@ -93,6 +121,7 @@ export function calculateLevelAfterDuration({ currentLevel, days, experiencePerH
     return {
         ...calculateLevelAfterExperience({
             currentLevel: normalizedCurrentLevel,
+            currentExperience,
             gainedExperience,
         }),
         days: normalizedDays,
@@ -103,6 +132,7 @@ export function calculateLevelAfterDuration({ currentLevel, days, experiencePerH
 export function calculateSkillLevelsAfterDuration({
     skills = [],
     currentLevels = {},
+    currentExperiences = {},
     experiencePerHourBySkill = {},
     days,
 }) {
@@ -120,6 +150,7 @@ export function calculateSkillLevelsAfterDuration({
             skill,
             ...calculateLevelAfterDuration({
                 currentLevel: currentLevels?.[skill] ?? MIN_SKILL_LEVEL,
+                currentExperience: currentExperiences?.[skill],
                 days: normalizedDays,
                 experiencePerHour,
             }),
@@ -127,13 +158,16 @@ export function calculateSkillLevelsAfterDuration({
     });
 }
 
-export function calculateLevelAfterExperience({ currentLevel, gainedExperience }) {
+export function calculateLevelAfterExperience({ currentLevel, currentExperience, gainedExperience }) {
     const normalizedCurrentLevel = normalizeLevel(currentLevel);
     const normalizedGainedExperience = normalizeNonNegativeNumber(
         gainedExperience,
         "Gained experience",
     );
-    const startingExperience = getTotalExperienceForLevel(normalizedCurrentLevel);
+    const startingExperience = resolveStartingExperience(normalizedCurrentLevel, currentExperience);
+    const startingProgress = normalizedCurrentLevel === MAX_SKILL_LEVEL ? 1
+        : (startingExperience - getTotalExperienceForLevel(normalizedCurrentLevel))
+            / (getTotalExperienceForLevel(normalizedCurrentLevel + 1) - getTotalExperienceForLevel(normalizedCurrentLevel));
     const totalExperience = startingExperience + normalizedGainedExperience;
     const level = findLevelForTotalExperience(totalExperience);
     const atMaximumLevel = level >= MAX_SKILL_LEVEL;
@@ -157,6 +191,7 @@ export function calculateLevelAfterExperience({ currentLevel, gainedExperience }
     return {
         currentLevel: normalizedCurrentLevel,
         startingExperience,
+        startingProgress,
         gainedExperience: normalizedGainedExperience,
         totalExperience,
         level,

@@ -24,6 +24,7 @@ import {
     calculateLevelAfterDuration,
     calculateSkillLevelsAfterDuration,
     calculateTimeToLevel,
+    resolveSkillExperience,
 } from "./experienceLevelCalculator.js";
 import {
     GUILD_COMBAT_SHRINE_DETAILS,
@@ -114,6 +115,8 @@ let pendingSimulationHistoryContext = null;
 let simulationHistoryRecords = [];
 let simulationHistoryPlayerTabSequence = 0;
 let experienceLevelCalculatorContext = null;
+let lastSimulationExperienceSnapshot = {};
+const experienceLevelManualSkills = new Set();
 let simulationPlans = [];
 let activeSimulationPlanId = "";
 let simulationPlanPlayerTabSequence = 0;
@@ -3540,6 +3543,17 @@ function extractSimulationPlanStartingLevels(snapshot, record) {
     return levelsBySlot;
 }
 
+function extractSimulationPlanStartingExperience(snapshot, record) {
+    return Object.fromEntries((record.players || []).map(entry => {
+        const slot = String(entry.slot);
+        try {
+            const raw = snapshot?.playerDataMap?.[slot];
+            const state = typeof raw === "string" ? JSON.parse(raw) : raw;
+            return [slot, Object.fromEntries(SIMULATION_PLAN_SKILLS.map(skill => [skill, resolveSkillExperience(state, skill)]))];
+        } catch { return [slot, {}]; }
+    }));
+}
+
 function getSimulationPlanTargetLabel(definition) {
     return `${definition.code} · ${getSimulationHistoryItemName(definition.itemHrid)}`;
 }
@@ -3865,7 +3879,7 @@ function createSimulationPlanExperienceTable(player) {
         const row = document.createElement("tr");
         row.appendChild(createSimulationHistoryCell(getSimulationHistorySkillName(skill)));
         row.appendChild(createSimulationHistoryCell(
-            String(player.startingLevels[skill]),
+            `Lv. ${player.startingLevels[skill]} · ${formatSimulationHistoryNumber(projection.startingProgress * 100, 2)}%`,
             "text-end",
         ));
         row.appendChild(createSimulationHistoryCell(
@@ -3969,6 +3983,14 @@ function createSimulationPlanPlayerSummary(player, index, groupId) {
         "Skill Experience and Final Levels",
     );
     pane.append(experienceHeading, createSimulationPlanExperienceTable(player));
+    const experienceNote = document.createElement("p");
+    experienceNote.className = "small text-secondary";
+    const capturedDates = [...new Set(Object.values(player.startingSkillExperience || {})
+        .filter(value => value.source === "captured").map(value => value.capturedAt).filter(Boolean))];
+    experienceNote.textContent = getSimulationPlanText("experienceSnapshotHint",
+        "Starts from this character's first selected record; later steps only add earned XP. Missing or mismatched XP starts at 0%.");
+    if (capturedDates.length) experienceNote.textContent += ` (${capturedDates.map(date => new Date(date).toLocaleString()).join(", ")})`;
+    pane.appendChild(experienceNote);
 
     const grid = document.createElement("div");
     grid.className = "row g-4 mt-1";
@@ -4232,6 +4254,7 @@ async function handleSimulationPlanStepAction(event) {
                     mapKey,
                     createSimulationPlanHistorySource(record, {
                         startingLevelsBySlot: extractSimulationPlanStartingLevels(snapshot, record),
+                        startingSkillExperienceBySlot: extractSimulationPlanStartingExperience(snapshot, record),
                     }),
                 );
             } catch (error) {
@@ -4788,6 +4811,10 @@ function clampExperienceLevel(value) {
 }
 
 function getConfiguredExperienceSkillLevel(playerNumber, skill) {
+    if (experienceLevelCalculatorContext?.playerState) {
+        return clampExperienceLevel(experienceLevelCalculatorContext.manualLevels?.[skill]
+            ?? experienceLevelCalculatorContext.playerState.player?.[`${skill}Level`]);
+    }
     if (String(currentPlayerTabId) === String(playerNumber)) {
         const visibleInputValue = document.getElementById(`inputLevel_${skill}`)?.value;
         if (visibleInputValue !== undefined && visibleInputValue !== "") {
@@ -4806,6 +4833,7 @@ function getConfiguredExperienceSkillLevel(playerNumber, skill) {
 function clearExperienceLevelCalculatorResults() {
     [
         "experienceLevelCalculatorRate",
+        "experienceCurrentProgress",
         "experienceTargetRequired",
         "experienceTargetTime",
         "experienceDurationGained",
@@ -4858,6 +4886,9 @@ function renderExperienceAllSkillProjections({
     const projections = calculateSkillLevelsAfterDuration({
         skills,
         currentLevels,
+        currentExperiences: Object.fromEntries(skills.map(skill => [skill,
+            resolveSkillExperience(context.playerState, skill, currentLevels[skill], experienceLevelManualSkills.has(skill)).startingExperience,
+        ])),
         experiencePerHourBySkill: context.rates,
         days,
     });
@@ -4869,7 +4900,7 @@ function renderExperienceAllSkillProjections({
         }
         row.append(
             createSimulationHistoryCell(getExperienceSkillName(projection.skill)),
-            createSimulationHistoryCell(`Lv. ${projection.currentLevel}`, "text-end"),
+            createSimulationHistoryCell(`Lv. ${projection.currentLevel} · ${formatExperienceLevelNumber(projection.startingProgress * 100, 2)}%`, "text-end"),
             createSimulationHistoryCell(
                 formatExperienceLevelNumber(projection.experiencePerHour),
                 "text-end",
@@ -4908,13 +4939,22 @@ function renderExperienceLevelCalculator() {
 
     const currentLevel = clampExperienceLevel(currentLevelValue);
     const targetLevel = clampExperienceLevel(targetLevelValue);
+    const starting = resolveSkillExperience(context.playerState, skill, currentLevel, experienceLevelManualSkills.has(skill));
+    const startInfo = document.getElementById("experienceCurrentProgress");
+    startInfo.textContent = getExperienceLevelText(
+        starting.source === "captured" ? "capturedStart" : "levelStart",
+        starting.source === "captured" ? "Captured XP: {{experience}} · {{progress}}% · {{date}}" : "No matching captured XP / manual level: starts at 0%",
+        { experience: formatExperienceLevelNumber(starting.startingExperience, 2), progress: formatExperienceLevelNumber(starting.startingProgress * 100, 2), date: starting.capturedAt ? new Date(starting.capturedAt).toLocaleString() : "—" },
+    );
     const targetResult = calculateTimeToLevel({
         currentLevel,
+        currentExperience: starting.startingExperience,
         targetLevel,
         experiencePerHour: rate,
     });
     const durationResult = calculateLevelAfterDuration({
         currentLevel,
+        currentExperience: starting.startingExperience,
         days: daysValue,
         experiencePerHour: rate,
     });
@@ -4981,6 +5021,8 @@ function populateExperienceLevelSkillSelect(preferredSkill) {
 }
 
 function openExperienceLevelCalculator() {
+    experienceLevelManualSkills.clear();
+    if (experienceLevelCalculatorContext) experienceLevelCalculatorContext.manualLevels = {};
     const emptyState = document.getElementById("experienceLevelCalculatorEmpty");
     const content = document.getElementById("experienceLevelCalculatorContent");
     const skills = populateExperienceLevelSkillSelect();
@@ -5017,7 +5059,15 @@ function initExperienceLevelCalculator() {
         "inputExperienceTargetLevel",
         "inputExperienceDays",
     ].forEach((id) => {
-        document.getElementById(id)?.addEventListener("input", renderExperienceLevelCalculator);
+        document.getElementById(id)?.addEventListener("input", () => {
+            if (id === "inputExperienceCurrentLevel" && experienceLevelCalculatorContext) {
+                const skill = document.getElementById("selectExperienceLevelSkill").value;
+                experienceLevelManualSkills.add(skill);
+                experienceLevelCalculatorContext.manualLevels ||= {};
+                experienceLevelCalculatorContext.manualLevels[skill] = clampExperienceLevel(document.getElementById(id).value);
+            }
+            renderExperienceLevelCalculator();
+        });
     });
 
     if (typeof i18next !== "undefined" && typeof i18next.on === "function") {
@@ -5064,6 +5114,7 @@ function showExperienceGained(simResult, playerToDisplay) {
     const playerNumber = playerToDisplay.replace("player", "");
     experienceLevelCalculatorContext = {
         playerNumber,
+        playerState: JSON.parse(lastSimulationExperienceSnapshot[playerNumber] || playerDataMap[playerNumber] || "{}"),
         playerName: document.getElementById(`${playerToDisplay}-tab`)?.textContent?.trim()
             || `Player ${playerNumber}`,
         rates,
@@ -5905,6 +5956,7 @@ function initSimulationControls() {
 
 function startSimulation(selectedPlayers) {
     pendingSimulationHistoryContext = null;
+    lastSimulationExperienceSnapshot = { ...playerDataMap };
     let simLabyrinthToggle = document.getElementById("simLabyrinthToggle");
     let simAllLabyrinthsToggle = document.getElementById("simAllLabyrinthsToggle");
 
@@ -6038,6 +6090,7 @@ function startSimulation(selectedPlayers) {
             extra : extra
         };
         pendingSimulationHistoryContext = captureSimulationHistoryContext(selectedPlayers);
+        lastSimulationExperienceSnapshot = { ...pendingSimulationHistoryContext.snapshot.playerDataMap };
         simStartTime = Date.now();
         if (!worker) {
             worker = new Worker(new URL("multiWorker.js", import.meta.url));
