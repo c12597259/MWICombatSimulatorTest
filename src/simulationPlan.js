@@ -285,6 +285,8 @@ function getOrCreatePlayerSummary(playerMap, player) {
             name: player.name,
             startingLevels: normalizeStartingLevels(player.startingLevels),
             startingSkillExperience: JSON.parse(JSON.stringify(player.startingSkillExperience || {})),
+            productionSnapshot: player.productionSnapshot ? JSON.parse(JSON.stringify(player.productionSnapshot)) : null,
+            combatHours: 0,
             experienceGained: {},
             consumablesUsed: {},
             expectedDrops: {},
@@ -338,7 +340,7 @@ export function getDungeonChestExpectations(difficulty) {
     };
 }
 
-export function createSimulationPlanHistorySource(record, { startingLevelsBySlot = {}, startingSkillExperienceBySlot = {} } = {}) {
+export function createSimulationPlanHistorySource(record, { startingLevelsBySlot = {}, startingSkillExperienceBySlot = {}, productionSnapshotsBySlot = {} } = {}) {
     const mapDefinition = getSimulationPlanMapDefinition(record?.mapKey);
     if (!mapDefinition) {
         throw new Error("This history map is not supported by simulation plans.");
@@ -372,6 +374,7 @@ export function createSimulationPlanHistorySource(record, { startingLevelsBySlot
             loadoutName: String(player.loadoutName ?? "").trim(),
             startingLevels: normalizeStartingLevels(startingLevelsBySlot[player.slot]),
             startingSkillExperience: JSON.parse(JSON.stringify(startingSkillExperienceBySlot[player.slot] || {})),
+            productionSnapshot: productionSnapshotsBySlot[player.slot] ? JSON.parse(JSON.stringify(productionSnapshotsBySlot[player.slot])) : null,
             itemRatePerHour: roundNumber(Math.max(
                 0,
                 isDungeon
@@ -495,6 +498,7 @@ export function calculateSimulationPlanStep(step) {
         for (const source of sources) {
             for (const player of source.players) {
                 const summary = getOrCreatePlayerSummary(playerMap, player);
+                summary.combatHours += source.durationHours;
                 addRateMap(summary.experienceGained, player.experienceGained);
                 addRateMap(summary.consumablesUsed, player.consumablesUsed);
                 addRateMap(summary.expectedDrops, {
@@ -565,6 +569,7 @@ export function calculateSimulationPlan(plan) {
         for (const player of step.players) {
             const summary = getOrCreatePlayerSummary(playerMap, player);
             summary.stepCount += 1;
+            summary.combatHours += player.combatHours;
             addRateMap(summary.experienceGained, player.experienceGained);
             addRateMap(summary.consumablesUsed, player.consumablesUsed);
             addRateMap(summary.expectedDrops, player.expectedDrops);
@@ -642,6 +647,7 @@ export function normalizeSimulationPlans(value) {
             name: String(plan.name ?? "").trim(),
             createdAt: String(plan.createdAt ?? ""),
             updatedAt: String(plan.updatedAt ?? ""),
+            productionSettings: JSON.parse(JSON.stringify(plan.productionSettings || {})),
             steps: Array.isArray(plan.steps)
                 ? plan.steps.map(normalizeStep).filter(Boolean)
                 : [],

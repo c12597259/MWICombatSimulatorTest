@@ -123,6 +123,19 @@ test("plan uses frozen XP once from first occurrence, not from each subsequent h
     assert.equal(calculateSimulationPlan({steps:persisted}).players[0].skills.stamina.startingExperience,50);
 });
 
+test("plan production uses the first detached snapshot and sums only that character's combat time", () => {
+    const profile = {schemaVersion:1,characterId:'test',loadouts:[{loadoutId:'life',loadoutName:'Life'}]};
+    const first = createSimulationPlanHistorySource(createZoneRecord(), {productionSnapshotsBySlot:{1:profile}});
+    const step = createSimulationPlanStep('/items/blue_key_fragment', {targetQuantity:2});
+    setSimulationPlanStepHistorySource(step,MAPS.blue,first);
+    profile.loadouts[0].loadoutName='mutated';
+    const result = calculateSimulationPlan({steps:[step,JSON.parse(JSON.stringify(step))]});
+    assert.equal(result.players[0].productionSnapshot.loadouts[0].loadoutName,'Life');
+    assert.ok(Math.abs(result.players[0].combatHours-result.totalHours)<1e-8);
+    const plan={id:'p',name:'P',steps:[step],productionSettings:{alice:{gatheringPercent:20,choices:{'/action_types/cooking':'life'}}}};
+    assert.deepEqual(normalizeSimulationPlans([plan])[0].productionSettings,plan.productionSettings);
+});
+
 test("defines the eleven zones followed by the four dungeons in history order", () => {
     assert.equal(SIMULATION_PLAN_MAPS.length, 15);
     assert.deepEqual(

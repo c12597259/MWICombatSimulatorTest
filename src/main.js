@@ -18,6 +18,9 @@ import combatStyleDetailMap from "./combatsimulator/data/combatStyleDetailMap.js
 import achievementTierMap from "./combatsimulator/data/achievementTierDetailMap.json"
 import achievementDetailMap from "./combatsimulator/data/achievementDetailMap.json"
 import { calculateFragmentTimeCosts } from "./fragmentTimeCost.js";
+import { calculateProductionPreparation } from "./productionPreparation.js";
+import { createProductionPreparationView } from "./productionPreparationView.js";
+import enhancementMultipliers from "./combatsimulator/data/enhancementLevelTotalBonusMultiplierTable.json";
 import {
     MAX_SKILL_LEVEL,
     MIN_SKILL_LEVEL,
@@ -3554,6 +3557,17 @@ function extractSimulationPlanStartingExperience(snapshot, record) {
     }));
 }
 
+function extractSimulationPlanProductionSnapshots(snapshot, record) {
+    return Object.fromEntries((record.players || []).map(entry => {
+        try {
+            const raw = snapshot?.playerDataMap?.[String(entry.slot)];
+            const state = typeof raw === "string" ? JSON.parse(raw) : raw;
+            const profile = state?.productionSnapshot;
+            return [String(entry.slot), profile && String(profile.characterId) === String(state.characterId) ? profile : null];
+        } catch { return [String(entry.slot), null]; }
+    }));
+}
+
 function getSimulationPlanTargetLabel(definition) {
     return `${definition.code} · ${getSimulationHistoryItemName(definition.itemHrid)}`;
 }
@@ -3977,6 +3991,22 @@ function createSimulationPlanPlayerSummary(player, index, groupId) {
     pane.id = `${groupId}-pane-${index}`;
     pane.setAttribute("role", "tabpanel");
 
+    const plan = getActiveSimulationPlan();
+    plan.productionSettings ||= {};
+    const preparationSettings = plan.productionSettings[player.identity] || {};
+    pane.appendChild(createProductionPreparationView({
+        snapshot: player.productionSnapshot, consumables: player.consumablesUsed, combatHours: player.combatHours,
+        settings: preparationSettings,
+        onChange: settings => {
+            plan.productionSettings[player.identity] = settings;
+            plan.updatedAt = new Date().toISOString();
+            persistSimulationPlans();
+        },
+        data: { actionDetailMap, itemDetailMap, enhancementMultipliers },
+        language: typeof i18next !== "undefined" ? i18next.language : "zh",
+        itemName: getSimulationHistoryItemName,
+    }));
+
     const experienceHeading = document.createElement("h6");
     experienceHeading.textContent = getSimulationPlanText(
         "experience",
@@ -4255,6 +4285,7 @@ async function handleSimulationPlanStepAction(event) {
                     createSimulationPlanHistorySource(record, {
                         startingLevelsBySlot: extractSimulationPlanStartingLevels(snapshot, record),
                         startingSkillExperienceBySlot: extractSimulationPlanStartingExperience(snapshot, record),
+                        productionSnapshotsBySlot: extractSimulationPlanProductionSnapshots(snapshot, record),
                     }),
                 );
             } catch (error) {
@@ -4353,7 +4384,7 @@ function initSimulationPlans() {
 function getPlayerFragmentProductionData(playerToDisplay) {
     const playerNumber = playerToDisplay.replace("player", "");
     try {
-        const importData = JSON.parse(playerDataMap[playerNumber]);
+        const importData = JSON.parse(lastSimulationExperienceSnapshot[playerNumber] || playerDataMap[playerNumber]);
         const productionProfile = importData.productionProfile ?? {};
         return {
             profile: {
@@ -4374,6 +4405,8 @@ function getPlayerFragmentProductionData(playerToDisplay) {
                     ?? importData.effectiveActionHridBuffs,
             },
             houseRooms: importData.houseRooms ?? {},
+            productionSnapshot: importData.productionSnapshot?.characterId === String(importData.characterId)
+                ? importData.productionSnapshot : null,
         };
     } catch (error) {
         console.warn("Unable to read production data for fragment time cost.", error);
@@ -4433,6 +4466,22 @@ function showFragmentTimeCosts(simResult, playerToDisplay, expectedDropMap, simu
         actionDetailMap,
         itemDetailMap,
     });
+    let preparation = null;
+    if (productionData.productionSnapshot && simulatedHours > 0) {
+        preparation = calculateProductionPreparation({
+            snapshot: productionData.productionSnapshot,
+            consumables: Object.fromEntries(Object.entries(simResult.consumablesUsed?.[playerToDisplay] || {})
+                .map(([item, amount]) => [item, amount / simulatedHours])),
+            actionDetailMap, itemDetailMap, enhancementMultipliers,
+        });
+        result.craftMinutesPerSimHour = preparation.totalMinutes ?? NaN;
+        result.mode = preparation.complete ? "personalized" : "estimated";
+        for (const fragment of result.fragments) {
+            fragment.totalMinutesPerFragment = preparation.complete
+                ? simulatedHours * (60 + preparation.totalMinutes) / fragment.expectedAmount : NaN;
+            fragment.totalFragmentsPerDay = 1440 / fragment.totalMinutesPerFragment;
+        }
+    }
 
     if (result.fragments.length === 0) {
         section.classList.add("d-none");
@@ -4498,6 +4547,12 @@ function showFragmentTimeCosts(simResult, playerToDisplay, expectedDropMap, simu
         noteChildren.push(span);
     });
     note.replaceChildren(...noteChildren);
+    if (preparation) {
+        const zh = typeof i18next === "undefined" || i18next.language.startsWith("zh");
+        note.textContent = preparation.complete
+            ? (zh ? "已按专业配装重算；专业饮料假设提前备好。社区采集 29.5%、生产效率 19.7%；个人卷轴和迷宫升级不计入。计划汇总中可调整配装与固定增益。" : "Rebuilt from profession loadouts; professional tea assumed already prepared. Fixed community gathering 29.5%, production efficiency 19.7%; no scrolls or labyrinth upgrades. Adjust these in plan summaries.")
+            : (zh ? "专业资料或材料来源不完整，暂不提供含制作耗时的碎片速度。请在计划角色汇总中查看缺项。" : "Production data or sources are incomplete; crafting-inclusive fragment rates are unavailable. See the plan character summary for details.");
+    }
     section.classList.remove("d-none");
 }
 
