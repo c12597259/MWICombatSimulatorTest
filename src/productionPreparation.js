@@ -114,7 +114,7 @@ function sourceIndex(actions) {
     return index;
 }
 
-export function calculateProductionPreparation({ consumables = {}, snapshot, settings = {},
+export function calculateProductionPreparation({ consumables = {}, snapshot, settings = {}, inventory = null,
     actionDetailMap = {}, itemDetailMap = {}, enhancementMultipliers = {} }) {
     const profile = buildProductionProfile(snapshot, settings, { itemDetailMap, enhancementMultipliers });
     const issues = new Set();
@@ -124,23 +124,28 @@ export function calculateProductionPreparation({ consumables = {}, snapshot, set
     const usedActions = new Set();
     const externalMaterials = {};
     const preparedMaterials = {};
+    const stock = inventory?.complete === true && String(inventory.characterId) === String(snapshot?.characterId)
+        ? inventory.items || {} : {};
+    const inventoryMode = settings.inventoryMode || 'all';
+    const available = hrid => inventoryMode === 'none' || (inventoryMode === 'finished' && !Object.hasOwn(consumables, hrid))
+        ? 0 : Math.max(0, number(stock[hrid]));
     for (const [hrid, qty] of Object.entries(consumables)) if (number(qty) > 0) base[hrid] = number(qty);
     const ensure = hrid => {
         if (nodes.has(hrid)) return;
         // Mark before descending: teas can require themselves through brewing.
-        const node = { dependencies: {}, minutes: 0, category: 'other' }; nodes.set(hrid, node);
+        const node = { dependencies: {}, minutes: 0, category: 'other', issues: [] }; nodes.set(hrid, node);
         if (PREPARED_PRODUCTION_MATERIALS.includes(hrid)) return;
         const sources = index.get(hrid) || [];
         const expectedName = (itemDetailMap[hrid]?.name || '').replace('Milk', 'Cow').replace('Rainbow Cow', 'Unicow').replace('Log', 'Tree');
         const source = sources.find(s => s.action.name === expectedName) || sources.find(s => !s.gathering) || sources[0];
-        if (!source || !(source.output > 0)) { issues.add(`missing-source:${hrid}`); return; }
+        if (!source || !(source.output > 0)) { node.issues.push(`missing-source:${hrid}`); return; }
         const { action } = source;
-        usedActions.add(action.type);
+        node.actionType = action.type;
         const setup = profile.setups[action.type];
-        for (const issue of [...profile.issues, ...setup.issues]) issues.add(issue);
+        node.issues.push(...profile.issues, ...setup.issues);
         if (setup.issues.length || profile.issues.length) return;
         const required = number(action.levelRequirement?.level, 1) + setup.actionLevel;
-        if (setup.boostedLevel < required) { issues.add(`level-too-low:${action.hrid}`); return; }
+        if (setup.boostedLevel < required) { node.issues.push(`level-too-low:${action.hrid}`); return; }
         const levelEfficiency = Math.max(0, setup.boostedLevel - required) / 100;
         const seconds = Math.max(3, action.baseTimeCost / 1e9 / (1 + setup.speed));
         const processable = source.gathering && Object.values(actionDetailMap).some(a =>
@@ -150,7 +155,7 @@ export function calculateProductionPreparation({ consumables = {}, snapshot, set
         // not credited against other demand. Integer/remainder effects excluded.
         const rawFraction = processable ? Math.max(0, 1 - setup.processing) : 1;
         const output = source.output * (1 + (source.gathering ? setup.gathering : setup.gourmet)) * rawFraction;
-        if (!(output > 0)) { issues.add(`invalid-output:${hrid}`); return; }
+        if (!(output > 0)) { node.issues.push(`invalid-output:${hrid}`); return; }
         const hours = seconds / 3600 / (1 + setup.efficiency + levelEfficiency) / output;
         node.minutes = hours * 60;
         node.category = source.gathering ? 'gathering' : action.type.endsWith('/cooking') ? 'cooking'
@@ -170,7 +175,7 @@ export function calculateProductionPreparation({ consumables = {}, snapshot, set
     for (let iteration = 0; iteration < 512 && !converged; iteration++) {
         const next = { ...base };
         for (const [hrid, qty] of Object.entries(demand)) for (const [dep, ratio] of Object.entries(nodes.get(hrid)?.dependencies || {}))
-            next[dep] = (next[dep] || 0) + qty * ratio;
+            next[dep] = (next[dep] || 0) + Math.max(0, qty - available(hrid)) * ratio;
         const scale = Math.max(1, ...Object.values(next));
         if (!Number.isFinite(scale) || scale > 1e18) break;
         converged = [...nodes.keys()].every(key => Math.abs(number(next[key]) - number(demand[key])) <= 1e-10 * Math.max(1, number(next[key])));
@@ -178,15 +183,21 @@ export function calculateProductionPreparation({ consumables = {}, snapshot, set
     }
     if (!converged) issues.add('nonconvergent-supply');
     const minutes = emptyMinutes();
+    const materialBalance = {};
     for (const [hrid, qty] of Object.entries(demand)) {
         const node = nodes.get(hrid);
-        if (node) minutes[node.category] += qty * node.minutes;
-        if (issues.has(`missing-source:${hrid}`)) externalMaterials[hrid] = qty;
-        if (PREPARED_PRODUCTION_MATERIALS.includes(hrid)) preparedMaterials[hrid] = qty;
+        const remaining = Math.max(0, qty - available(hrid));
+        materialBalance[hrid] = { required: qty, available: available(hrid), used: Math.min(qty, available(hrid)), remaining };
+        if (!(remaining > 1e-10)) continue;
+        if (node?.actionType) usedActions.add(node.actionType);
+        for (const issue of node?.issues || []) issues.add(issue);
+        if (node) minutes[node.category] += remaining * node.minutes;
+        if (issues.has(`missing-source:${hrid}`)) externalMaterials[hrid] = remaining;
+        if (PREPARED_PRODUCTION_MATERIALS.includes(hrid)) preparedMaterials[hrid] = remaining;
     }
     const knownMinutes = Object.values(minutes).reduce((a, b) => a + b, 0);
     return { minutes, knownMinutes, totalMinutes: issues.size ? null : knownMinutes,
-        complete: issues.size === 0, issues: [...issues], externalMaterials, preparedMaterials,
+        complete: issues.size === 0, issues: [...issues], externalMaterials, preparedMaterials, materialBalance,
         usedActions: [...usedActions], setups: profile.setups, capturedAt: profile.capturedAt };
 }
 

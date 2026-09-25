@@ -13,6 +13,13 @@ const {
     serializeSimulationPlanConsumableTransfer,
 } = await import(moduleUrl);
 
+test('shortfall export cannot be mistaken for a Toolkit total-demand import', () => {
+    const payload = JSON.parse(serializeSimulationPlanConsumableTransfer({name:'A',consumablesUsed:{'/items/donut':2.2}}, null, {shortfall:true}));
+    assert.equal(payload.type, 'mwi-simulation-plan-consumable-shortfall');
+    assert.notEqual(payload.type, SIMULATION_PLAN_CONSUMABLE_TRANSFER_TYPE);
+    assert.equal(payload.items[0].quantity, 3);
+});
+
 test("rounds each character consumable upward and includes bilingual item names", () => {
     const payload = createSimulationPlanConsumableTransfer({
         name: "Alice",

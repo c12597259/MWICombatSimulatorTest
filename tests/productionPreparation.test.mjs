@@ -116,3 +116,49 @@ test('processing tea reduces usable raw gathering output without crediting copro
     const r=calculateProductionPreparation({snapshot:p,settings,consumables:{'/items/food':100},...d});
     assert.equal(r.complete,true);assert.ok(Math.abs(r.minutes.gathering-2000/60/.9)<1e-8);
 });
+
+test('finished inventory removes only the shortfall and then shares ingredient stock once',()=>{
+    const p=profile(), d=data();
+    const inventory={complete:true,characterId:'test',items:{'/items/food':20,'/items/berry':100}};
+    const before=JSON.stringify(inventory);
+    const r=calculateProductionPreparation({snapshot:p,settings,inventory,consumables:{'/items/food':100},...d});
+    assert.equal(r.complete,true);
+    assert.equal(r.materialBalance['/items/food'].remaining,80);
+    assert.equal(r.materialBalance['/items/berry'].required,160);
+    assert.equal(r.materialBalance['/items/berry'].remaining,60);
+    assert.ok(Math.abs(r.minutes.gathering-600/60)<1e-8);
+    assert.ok(Math.abs(r.minutes.cooking-800/60/1.71)<1e-8);
+    assert.equal(JSON.stringify(inventory),before);
+    const finished=calculateProductionPreparation({snapshot:p,settings:{...settings,inventoryMode:'finished'},inventory,consumables:{'/items/food':100},...d});
+    assert.equal(finished.materialBalance['/items/berry'].remaining,160);
+    const off=calculateProductionPreparation({snapshot:p,settings:{...settings,inventoryMode:'none'},inventory,consumables:{'/items/food':100},...d});
+    assert.equal(off.materialBalance['/items/food'].remaining,100);
+    const other=calculateProductionPreparation({snapshot:p,settings,inventory:{...inventory,characterId:'other'},consumables:{'/items/food':100},...d});
+    assert.equal(other.totalMinutes,off.totalMinutes);
+});
+
+test('shared materials are pooled across multiple recipes, not deducted per recipe',()=>{
+    const p=profile(),d=data();d.actionDetailMap.food2={...d.actionDetailMap.food,hrid:'/actions/cooking/food2',outputItems:[{itemHrid:'/items/food2',count:1}]};
+    const r=calculateProductionPreparation({snapshot:p,settings,inventory:{complete:true,characterId:'test',items:{'/items/berry':100}},
+        consumables:{'/items/food':40,'/items/food2':40},...d});
+    assert.equal(r.materialBalance['/items/berry'].required,160);assert.equal(r.materialBalance['/items/berry'].used,100);
+    assert.equal(r.materialBalance['/items/berry'].remaining,60);
+});
+
+test('stock-covered branches do not require production levels or material sources',()=>{
+    const p=profile(),d=data();p.skills=[];p.complete=false;
+    const r=calculateProductionPreparation({snapshot:p,settings,inventory:{complete:true,characterId:'test',items:{'/items/food':100}},consumables:{'/items/food':100},...d});
+    assert.equal(r.complete,true);assert.equal(r.totalMinutes,0);assert.deepEqual(r.usedActions,[]);
+    const missing=calculateProductionPreparation({snapshot:p,settings,inventory:{complete:true,characterId:'test',items:{'/items/food':99}},consumables:{'/items/food':100},...d});
+    assert.equal(missing.totalMinutes,null);
+    p.complete=true;p.skills=profile().skills;d.actionDetailMap.food.inputItems=[{itemHrid:'/items/unknown',count:1}];
+    const covered=calculateProductionPreparation({snapshot:p,settings,inventory:{complete:true,characterId:'test',items:{'/items/unknown':100}},consumables:{'/items/food':100},...d});
+    assert.equal(covered.complete,true);assert.ok(covered.totalMinutes>0);
+});
+
+test('stock is deducted once in cyclic professional tea supply',()=>{
+    const p=profile();p.equipment=[];p.drinks[action('brewing')]=[{itemHrid:'/items/tea'}];
+    const r=calculateProductionPreparation({snapshot:p,settings:{...settings,includeTeaSupply:true},inventory:{complete:true,characterId:'test',items:{'/items/tea':50}},consumables:{'/items/tea':100},...data()});
+    const unitMinutes=10/60/1.1;
+    assert.equal(r.complete,true);assert.ok(Math.abs(r.totalMinutes-50*unitMinutes/(1-unitMinutes/5))<1e-6);
+});

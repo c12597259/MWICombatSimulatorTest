@@ -19,6 +19,7 @@ import achievementTierMap from "./combatsimulator/data/achievementTierDetailMap.
 import achievementDetailMap from "./combatsimulator/data/achievementDetailMap.json"
 import { calculateFragmentTimeCosts, applyPreparationToFragmentTimeCosts } from "./fragmentTimeCost.js";
 import { createProductionPreparationView } from "./productionPreparationView.js";
+import { normalizePlanInventory, calculateConsumableShortfall, requestPlanInventories } from './planInventory.js';
 import enhancementMultipliers from "./combatsimulator/data/enhancementLevelTotalBonusMultiplierTable.json";
 import {
     MAX_SKILL_LEVEL,
@@ -3953,13 +3954,14 @@ async function writeSimulationPlanTextToClipboard(text) {
     }
 }
 
-async function exportSimulationPlanPlayerConsumables(player, button) {
+async function exportSimulationPlanPlayerConsumables(player, button, options) {
     const originalText = button.textContent;
     button.disabled = true;
     try {
         const serialized = serializeSimulationPlanConsumableTransfer(
             player,
             getSimulationPlanTransferItemName,
+            options,
         );
         await writeSimulationPlanTextToClipboard(serialized);
         button.textContent = getSimulationPlanText("consumablesCopied", "Copied");
@@ -3984,7 +3986,55 @@ async function exportSimulationPlanPlayerConsumables(player, button) {
     }
 }
 
-function createSimulationPlanPlayerSummary(player, index, groupId) {
+// Latest inventory lives separately: never serialize it into combat history or plans.
+const planInventories = new Map();
+const attemptedInventoryCharacters = new Set();
+let planInventoryLoading = false;
+let planInventoryMessage = '';
+
+async function refreshPlanInventories(players, force = false) {
+    if (planInventoryLoading) return;
+    const ids = [...new Set(players.map(p => String(p.productionSnapshot?.characterId || '')).filter(Boolean))];
+    if (!ids.length) return;
+    ids.forEach(id => attemptedInventoryCharacters.add(id));
+    planInventoryLoading = true;
+    try {
+        const incoming = await requestPlanInventories(ids, { force });
+        let count = 0;
+        for (const id of ids) {
+            const value = normalizePlanInventory(incoming[id], id);
+            if (!value) continue;
+            const previous = planInventories.get(id);
+            if (!previous || Date.parse(value.capturedAt) >= Date.parse(previous.capturedAt)) planInventories.set(id, value);
+            count++;
+        }
+        planInventoryMessage = `已读取 ${count}/${ids.length} 名角色的库存快照；库存时间见各角色。`;
+    } catch (error) {
+        planInventoryMessage = error.message === 'bridge-unavailable'
+            ? '需要主电脑插件 1.9.0.3 才能读取库存。旧库存（如有）仍保留。'
+            : '库存读取失败，请检查本地同步服务并重试。旧库存（如有）仍保留。';
+    } finally {
+        planInventoryLoading = false;
+        if (document.getElementById('simulationPlanModal')?.classList.contains('show')) renderSimulationPlan();
+    }
+}
+
+function createPlanConsumableInventoryTable(rows) {
+    const wrapper = createElement('div', 'table-responsive');
+    const table = createElement('table', 'table table-sm');
+    const header = createElement('tr');
+    for (const title of ['消耗品', '计划需要', '库存已有', '还需制作']) header.append(createElement('th', '', title));
+    const head = createElement('thead'); head.append(header); table.append(head);
+    const body = createElement('tbody');
+    for (const row of rows) {
+        const tr = createElement('tr'); tr.append(createElement('td', '', getSimulationHistoryItemName(row.itemHrid)));
+        for (const qty of [row.required, row.available, row.missing]) tr.append(createElement('td', '', qty === null ? '—' : qty.toLocaleString()));
+        body.append(tr);
+    }
+    table.append(body); wrapper.append(table); return wrapper;
+}
+
+function createSimulationPlanPlayerSummary(player, index, groupId, onPreparation) {
     const pane = document.createElement("div");
     pane.className = `tab-pane fade${index === 0 ? " show active" : ""}`;
     pane.id = `${groupId}-pane-${index}`;
@@ -3993,9 +4043,13 @@ function createSimulationPlanPlayerSummary(player, index, groupId) {
     const plan = getActiveSimulationPlan();
     plan.productionSettings ||= {};
     const preparationSettings = plan.productionSettings[player.identity] || {};
+    const inventory = planInventories.get(String(player.productionSnapshot?.characterId || '')) || null;
+    const shortfall = calculateConsumableShortfall(player.consumablesUsed, inventory);
     pane.appendChild(createProductionPreparationView({
         snapshot: player.productionSnapshot, consumables: player.consumablesUsed, combatHours: player.combatHours,
-        settings: preparationSettings,
+        settings: preparationSettings, inventory,
+        onResult: result => onPreparation?.(player.identity,
+            inventory || preparationSettings.inventoryMode === 'none' ? result.totalMinutes : null),
         onChange: settings => {
             plan.productionSettings[player.identity] = settings;
             plan.updatedAt = new Date().toISOString();
@@ -4040,7 +4094,7 @@ function createSimulationPlanPlayerSummary(player, index, groupId) {
     ];
     for (const section of sections) {
         const column = document.createElement("section");
-        column.className = "col-lg-4";
+        column.className = section.exportConsumables ? "col-lg-6" : "col-lg-3";
         const headingRow = document.createElement("div");
         headingRow.className = "d-flex align-items-center justify-content-between gap-2 mb-2";
         const heading = document.createElement("h6");
@@ -4051,7 +4105,7 @@ function createSimulationPlanPlayerSummary(player, index, groupId) {
             const exportButton = document.createElement("button");
             exportButton.type = "button";
             exportButton.className = "btn btn-outline-primary btn-sm flex-shrink-0";
-            exportButton.textContent = getSimulationPlanText("exportConsumables", "Export");
+            exportButton.textContent = '导出全部';
             exportButton.title = getSimulationPlanText(
                 "exportConsumablesTitle",
                 "Round quantities up and copy them for the MWI Toolkit importer.",
@@ -4061,11 +4115,24 @@ function createSimulationPlanPlayerSummary(player, index, groupId) {
                 void exportSimulationPlanPlayerConsumables(player, exportButton);
             });
             headingRow.appendChild(exportButton);
+            const missingButton = createElement('button', 'btn btn-outline-primary btn-sm flex-shrink-0', '导出缺口');
+            missingButton.type = 'button';
+            missingButton.disabled = !inventory || !shortfall.some(row => row.missing > 0);
+            missingButton.title = '复制补货清单；Toolkit 会自行扣库存，请使用「导出全部」导入 Toolkit。';
+            missingButton.addEventListener('click', () => void exportSimulationPlanPlayerConsumables({ ...player,
+                consumablesUsed: Object.fromEntries(shortfall.map(row => [row.itemHrid, row.missing])) }, missingButton, { shortfall: true }));
+            headingRow.append(missingButton);
         }
         column.append(
             headingRow,
-            createSimulationPlanSimpleTable(section.entries, getSimulationHistoryItemName),
+            section.exportConsumables ? createPlanConsumableInventoryTable(shortfall)
+                : createSimulationPlanSimpleTable(section.entries, getSimulationHistoryItemName),
         );
+        if (section.exportConsumables) column.append(createElement('p', 'small text-secondary', inventory
+            ? `库存采集于 ${new Date(inventory.capturedAt).toLocaleString()}。缺口仅扣成品，制作时间按上方模式抵扣材料；需求已向上取整。`
+            : '库存未知，不能导出缺口；可以导出全部需求。'));
+        if (section.exportConsumables) column.append(createElement('p', 'small text-secondary',
+            '导出全部：导入 Toolkit，由它扣库存。导出缺口：独立补货清单，不用于 Toolkit，避免重复扣减。'));
         grid.appendChild(column);
     }
     pane.appendChild(grid);
@@ -4074,6 +4141,8 @@ function createSimulationPlanPlayerSummary(player, index, groupId) {
 
 function renderSimulationPlanPlayerSummaries(players) {
     const container = document.getElementById("simulationPlanPlayerSummary");
+    const previousIdentity = container.querySelector('[role="tab"].active')?.dataset.playerIdentity;
+    const activeIndex = Math.max(0, players.findIndex(player => player.identity === previousIdentity));
     container.replaceChildren();
     if (players.length === 0) {
         return;
@@ -4081,6 +4150,21 @@ function renderSimulationPlanPlayerSummaries(players) {
 
     const heading = document.createElement("h6");
     heading.textContent = getSimulationPlanText("playerSummary", "Player Summary");
+    const inventoryBar = createElement('div', 'd-flex flex-wrap align-items-center gap-2 mb-2');
+    const refresh = createElement('button', 'btn btn-outline-primary btn-sm', planInventoryLoading ? '正在读取库存…' : '读取最新库存');
+    refresh.type = 'button'; refresh.disabled = planInventoryLoading || !players.some(p => p.productionSnapshot?.characterId);
+    refresh.addEventListener('click', () => { refresh.disabled = true; refresh.textContent = '正在读取库存…'; void refreshPlanInventories(players, true); });
+    inventoryBar.append(refresh, createElement('span', 'small text-secondary', planInventoryMessage || '库存来自插件缓存，可手动从服务器刷新。仅用于本次估计，不会扣除游戏中的实际物品。'));
+    const readiness = createElement('div', 'small mb-3');
+    const preparationByPlayer = new Map();
+    const updateReadiness = (identity, minutes) => {
+        preparationByPlayer.set(identity, minutes);
+        const complete = players.every(p => Number.isFinite(preparationByPlayer.get(p.identity)));
+        readiness.textContent = complete
+            ? `全队准备时间（各角色可同时制作，取最大值）：${formatSimulationPlanDuration(Math.max(0, ...preparationByPlayer.values()) / 60)}`
+            : '全队准备时间：—（部分角色库存或制作条件尚不完整）';
+    };
+    readiness.textContent = '全队准备时间：—（部分角色库存或制作条件尚不完整）';
     const groupId = `simulation-plan-player-${++simulationPlanPlayerTabSequence}`;
     const tabs = document.createElement("ul");
     tabs.className = "nav nav-tabs simulation-plan-player-tabs";
@@ -4094,18 +4178,24 @@ function renderSimulationPlanPlayerSummaries(players) {
         item.setAttribute("role", "presentation");
         const button = document.createElement("button");
         button.type = "button";
-        button.className = `nav-link${index === 0 ? " active" : ""}`;
+        button.className = `nav-link${index === activeIndex ? " active" : ""}`;
+        button.dataset.playerIdentity = player.identity;
         button.dataset.bsToggle = "tab";
         button.dataset.bsTarget = `#${groupId}-pane-${index}`;
         button.setAttribute("role", "tab");
-        button.setAttribute("aria-selected", index === 0 ? "true" : "false");
+        button.setAttribute("aria-selected", index === activeIndex ? "true" : "false");
         button.textContent = player.name;
         item.appendChild(button);
         tabs.appendChild(item);
-        content.appendChild(createSimulationPlanPlayerSummary(player, index, groupId));
+        const pane = createSimulationPlanPlayerSummary(player, index, groupId, updateReadiness);
+        pane.classList.toggle('active', index === activeIndex);
+        pane.classList.toggle('show', index === activeIndex);
+        content.appendChild(pane);
     });
 
-    container.append(heading, tabs, content);
+    container.append(heading, inventoryBar, readiness, tabs, content);
+    if (!planInventoryLoading && players.some(p => p.productionSnapshot?.characterId
+        && !attemptedInventoryCharacters.has(String(p.productionSnapshot.characterId)))) void refreshPlanInventories(players);
 }
 
 function renderSimulationPlanSummary(plan, calculation) {

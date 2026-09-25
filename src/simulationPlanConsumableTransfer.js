@@ -17,7 +17,7 @@ function resolveItemName(itemHrid, language, itemNameResolver) {
         ?.replaceAll("_", " ") ?? String(itemHrid ?? "");
 }
 
-export function createSimulationPlanConsumableTransfer(player, itemNameResolver) {
+export function createSimulationPlanConsumableTransfer(player, itemNameResolver, { shortfall = false } = {}) {
     const items = Object.entries(player?.consumablesUsed ?? {})
         .map(([itemHrid, quantity]) => [itemHrid, Number(quantity)])
         .filter(([itemHrid, quantity]) => (
@@ -37,7 +37,8 @@ export function createSimulationPlanConsumableTransfer(player, itemNameResolver)
         }));
 
     return {
-        type: SIMULATION_PLAN_CONSUMABLE_TRANSFER_TYPE,
+        // Toolkit deducts inventory itself. A separate type prevents accidental double deduction.
+        type: shortfall ? 'mwi-simulation-plan-consumable-shortfall' : SIMULATION_PLAN_CONSUMABLE_TRANSFER_TYPE,
         schemaVersion: SIMULATION_PLAN_CONSUMABLE_TRANSFER_VERSION,
         source: "MWICombatSimulator",
         characterName: String(player?.name ?? "").trim(),
@@ -45,9 +46,9 @@ export function createSimulationPlanConsumableTransfer(player, itemNameResolver)
     };
 }
 
-export function serializeSimulationPlanConsumableTransfer(player, itemNameResolver) {
+export function serializeSimulationPlanConsumableTransfer(player, itemNameResolver, options) {
     return JSON.stringify(
-        createSimulationPlanConsumableTransfer(player, itemNameResolver),
+        createSimulationPlanConsumableTransfer(player, itemNameResolver, options),
         null,
         2,
     );
