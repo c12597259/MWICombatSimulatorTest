@@ -438,6 +438,23 @@ function calculateConsumableCraftMinutesPerHour({
     };
 }
 
+// preparation is calculated for ONE combat hour, just like plan preparation
+// divided by that character's combat duration. Never replace unknown time by 0.
+export function applyPreparationToFragmentTimeCosts(result, preparation) {
+    const minutes = preparation.complete && Number.isFinite(preparation.totalMinutes)
+        ? preparation.totalMinutes : null;
+    return { ...result, craftMinutesPerSimHour: minutes,
+        mode: minutes === null ? "incomplete" : minutes === 0 ? "exact" : "personalized",
+        issues: [...preparation.issues],
+        fragments: result.fragments.map(fragment => {
+            const totalMinutesPerFragment = minutes === null ? null
+                : fragment.combatMinutesPerFragment * (1 + minutes / 60);
+            return { ...fragment, totalMinutesPerFragment,
+                totalFragmentsPerDay: totalMinutesPerFragment === null ? null : 1440 / totalMinutesPerFragment };
+        }),
+    };
+}
+
 export function calculateFragmentTimeCosts({
     expectedDropMap,
     simulatedHours,

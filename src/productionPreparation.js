@@ -3,6 +3,11 @@
 export const PRODUCTION_ACTIONS = ['milking', 'foraging', 'woodcutting', 'cheesesmithing',
     'crafting', 'tailoring', 'cooking', 'brewing', 'alchemy'];
 export const DEFAULT_PRODUCTION_SETTINGS = Object.freeze({ gatheringPercent: 29.5, efficiencyPercent: 19.7, includeTeaSupply: false });
+// Rare gems come from general play rather than a dedicated production action.
+// User assumption: raw gems are already available; crushing/processing still costs time.
+export const PREPARED_PRODUCTION_MATERIALS = Object.freeze([
+    '/items/amber', '/items/amethyst', '/items/garnet', '/items/moonstone', '/items/pearl', '/items/sunstone',
+]);
 const number = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const emptyMinutes = () => ({ gathering: 0, cooking: 0, brewing: 0, other: 0 });
 
@@ -118,11 +123,13 @@ export function calculateProductionPreparation({ consumables = {}, snapshot, set
     const base = {};
     const usedActions = new Set();
     const externalMaterials = {};
+    const preparedMaterials = {};
     for (const [hrid, qty] of Object.entries(consumables)) if (number(qty) > 0) base[hrid] = number(qty);
     const ensure = hrid => {
         if (nodes.has(hrid)) return;
         // Mark before descending: teas can require themselves through brewing.
         const node = { dependencies: {}, minutes: 0, category: 'other' }; nodes.set(hrid, node);
+        if (PREPARED_PRODUCTION_MATERIALS.includes(hrid)) return;
         const sources = index.get(hrid) || [];
         const expectedName = (itemDetailMap[hrid]?.name || '').replace('Milk', 'Cow').replace('Rainbow Cow', 'Unicow').replace('Log', 'Tree');
         const source = sources.find(s => s.action.name === expectedName) || sources.find(s => !s.gathering) || sources[0];
@@ -175,10 +182,11 @@ export function calculateProductionPreparation({ consumables = {}, snapshot, set
         const node = nodes.get(hrid);
         if (node) minutes[node.category] += qty * node.minutes;
         if (issues.has(`missing-source:${hrid}`)) externalMaterials[hrid] = qty;
+        if (PREPARED_PRODUCTION_MATERIALS.includes(hrid)) preparedMaterials[hrid] = qty;
     }
     const knownMinutes = Object.values(minutes).reduce((a, b) => a + b, 0);
     return { minutes, knownMinutes, totalMinutes: issues.size ? null : knownMinutes,
-        complete: issues.size === 0, issues: [...issues], externalMaterials,
+        complete: issues.size === 0, issues: [...issues], externalMaterials, preparedMaterials,
         usedActions: [...usedActions], setups: profile.setups, capturedAt: profile.capturedAt };
 }
 

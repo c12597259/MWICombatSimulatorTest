@@ -17,8 +17,7 @@ import damageTypeDetailMap from "./combatsimulator/data/damageTypeDetailMap.json
 import combatStyleDetailMap from "./combatsimulator/data/combatStyleDetailMap.json";
 import achievementTierMap from "./combatsimulator/data/achievementTierDetailMap.json"
 import achievementDetailMap from "./combatsimulator/data/achievementDetailMap.json"
-import { calculateFragmentTimeCosts } from "./fragmentTimeCost.js";
-import { calculateProductionPreparation } from "./productionPreparation.js";
+import { calculateFragmentTimeCosts, applyPreparationToFragmentTimeCosts } from "./fragmentTimeCost.js";
 import { createProductionPreparationView } from "./productionPreparationView.js";
 import enhancementMultipliers from "./combatsimulator/data/enhancementLevelTotalBonusMultiplierTable.json";
 import {
@@ -4405,6 +4404,7 @@ function getPlayerFragmentProductionData(playerToDisplay) {
                     ?? importData.effectiveActionHridBuffs,
             },
             houseRooms: importData.houseRooms ?? {},
+            characterId: String(importData.characterId || ''),
             productionSnapshot: importData.productionSnapshot?.characterId === String(importData.characterId)
                 ? importData.productionSnapshot : null,
         };
@@ -4426,6 +4426,7 @@ function setFragmentTimeCostTranslation(element, key, fallback) {
 }
 
 function formatFragmentTimeCost(value) {
+    if (value === null || !Number.isFinite(value)) return '—';
     return value.toLocaleString(undefined, {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
@@ -4437,13 +4438,13 @@ function createFragmentTimeMetric(minutesPerFragment, fragmentsPerDay) {
     const minutesLine = createElement("div");
     minutesLine.append(`${formatFragmentTimeCost(minutesPerFragment)} `);
     const minutesUnit = createElement("span", "small text-muted", "min/fragment");
-    minutesUnit.setAttribute("data-i18n", "common:fragmentTimeCost.minutesPerFragment");
+    setFragmentTimeCostTranslation(minutesUnit, 'minutesPerFragment', 'min/fragment');
     minutesLine.appendChild(minutesUnit);
 
     const dailyLine = createElement("div", "small text-success fw-semibold");
     dailyLine.append(`${formatFragmentTimeCost(fragmentsPerDay)} `);
     const dailyUnit = createElement("span", "", "fragments/day");
-    dailyUnit.setAttribute("data-i18n", "common:fragmentTimeCost.fragmentsPerDay");
+    setFragmentTimeCostTranslation(dailyUnit, 'fragmentsPerDay', 'fragments/day');
     dailyLine.appendChild(dailyUnit);
 
     column.append(minutesLine, dailyLine);
@@ -4457,7 +4458,7 @@ function showFragmentTimeCosts(simResult, playerToDisplay, expectedDropMap, simu
     const note = document.getElementById("fragmentTimeCostNote");
     const craftMinutes = document.getElementById("fragmentTimeCostCraftMinutes");
     const productionData = getPlayerFragmentProductionData(playerToDisplay);
-    const result = calculateFragmentTimeCosts({
+    const baseResult = calculateFragmentTimeCosts({
         expectedDropMap,
         simulatedHours,
         consumablesUsed: simResult.consumablesUsed?.[playerToDisplay] ?? {},
@@ -4466,92 +4467,108 @@ function showFragmentTimeCosts(simResult, playerToDisplay, expectedDropMap, simu
         actionDetailMap,
         itemDetailMap,
     });
-    let preparation = null;
-    if (productionData.productionSnapshot && simulatedHours > 0) {
-        preparation = calculateProductionPreparation({
-            snapshot: productionData.productionSnapshot,
-            consumables: Object.fromEntries(Object.entries(simResult.consumablesUsed?.[playerToDisplay] || {})
-                .map(([item, amount]) => [item, amount / simulatedHours])),
-            actionDetailMap, itemDetailMap, enhancementMultipliers,
-        });
-        result.craftMinutesPerSimHour = preparation.totalMinutes ?? NaN;
-        result.mode = preparation.complete ? "personalized" : "estimated";
-        for (const fragment of result.fragments) {
-            fragment.totalMinutesPerFragment = preparation.complete
-                ? simulatedHours * (60 + preparation.totalMinutes) / fragment.expectedAmount : NaN;
-            fragment.totalFragmentsPerDay = 1440 / fragment.totalMinutesPerFragment;
-        }
-    }
-
-    if (result.fragments.length === 0) {
+    const detailsContainer = document.getElementById('fragmentTimeCostPreparation');
+    detailsContainer.replaceChildren();
+    if (baseResult.fragments.length === 0) {
         section.classList.add("d-none");
         resultDiv.replaceChildren();
         note.replaceChildren();
         return;
     }
 
-    const modeConfig = {
-        exact: { key: "modeExact", fallback: "exact", className: "bg-success" },
-        personalized: { key: "modePersonalized", fallback: "personal profile", className: "bg-success" },
-        estimated: { key: "modeEstimated", fallback: "default estimate", className: "bg-warning text-dark" },
-    }[result.mode];
-    modeBadge.className = `badge ${modeConfig.className}`;
-    setFragmentTimeCostTranslation(modeBadge, modeConfig.key, modeConfig.fallback);
+    function renderCosts(result, preparation = null) {
+        const modeConfig = {
+            exact: { key: "modeExact", fallback: "exact", className: "bg-success" },
+            personalized: { key: "modePersonalized", fallback: "personal profile", className: "bg-success" },
+            estimated: { key: "modeEstimated", fallback: "default estimate", className: "bg-warning text-dark" },
+            incomplete: { key: "modeIncomplete", fallback: "incomplete", className: "bg-warning text-dark" },
+        }[result.mode];
+        modeBadge.className = `badge ${modeConfig.className}`;
+        setFragmentTimeCostTranslation(modeBadge, modeConfig.key, modeConfig.fallback);
 
-    const rows = result.fragments.map((fragment) => {
-        const wrapper = createElement("div", "py-1 border-bottom");
-        const fragmentName = createElement(
-            "div",
-            "small",
-            itemDetailMap[fragment.itemHrid]?.name ?? fragment.itemHrid,
-        );
-        fragmentName.setAttribute("data-i18n", `itemNames.${fragment.itemHrid}`);
-        const values = createElement("div", "row");
-        values.append(
-            createFragmentTimeMetric(
-                fragment.combatMinutesPerFragment,
-                fragment.combatFragmentsPerDay,
-            ),
-            createFragmentTimeMetric(
-                fragment.totalMinutesPerFragment,
-                fragment.totalFragmentsPerDay,
-            ),
-        );
-        wrapper.append(fragmentName, values);
-        return wrapper;
-    });
-    resultDiv.replaceChildren(...rows);
-    craftMinutes.textContent = formatFragmentTimeCost(result.craftMinutesPerSimHour);
+        const rows = result.fragments.map((fragment) => {
+            const wrapper = createElement("div", "py-1 border-bottom");
+            const fragmentName = createElement(
+                "div",
+                "small",
+                getSimulationHistoryItemName(fragment.itemHrid),
+            );
+            fragmentName.setAttribute("data-i18n", `itemNames.${fragment.itemHrid}`);
+            const values = createElement("div", "row");
+            values.append(
+                createFragmentTimeMetric(
+                    fragment.combatMinutesPerFragment,
+                    fragment.combatFragmentsPerDay,
+                ),
+                createFragmentTimeMetric(
+                    fragment.totalMinutesPerFragment,
+                    fragment.totalFragmentsPerDay,
+                ),
+            );
+            wrapper.append(fragmentName, values);
+            return wrapper;
+        });
+        resultDiv.replaceChildren(...rows);
+        craftMinutes.textContent = formatFragmentTimeCost(result.craftMinutesPerSimHour);
 
-    const noteDefinitions = result.mode === "exact"
-        ? [["noteExact", "No consumables were used, so both values are identical."]]
-        : result.mode === "personalized"
-            ? [["notePersonalized", "Calculated with the complete production profile imported for this character."]]
-            : [[
-                "noteEstimated",
-                "A complete production profile has not been imported, so default production assumptions are in use.",
-            ]];
-    if (result.issues.some((issue) => issue.startsWith("missingAction:"))) {
-        noteDefinitions.push([
-            "noteEstimatedMissing",
-            "Some materials have no calculable production source, so the value including crafting may be underestimated.",
-        ]);
-    }
-    const noteChildren = [];
-    noteDefinitions.forEach(([key, fallback], index) => {
-        if (index > 0) {
-            noteChildren.push(document.createElement("br"));
+        const noteDefinitions = result.mode === "exact"
+            ? [["noteExact", "No consumables were used, so both values are identical."]]
+            : result.mode === "personalized"
+                ? [["notePersonalized", "Calculated with the complete production profile imported for this character."]]
+                : [[
+                    "noteEstimated",
+                    "A complete production profile has not been imported, so default production assumptions are in use.",
+                ]];
+        if (result.issues.some((issue) => issue.startsWith("missingAction:"))) {
+            noteDefinitions.push([
+                "noteEstimatedMissing",
+                "Some materials have no calculable production source, so the value including crafting may be underestimated.",
+            ]);
         }
-        const span = document.createElement("span");
-        setFragmentTimeCostTranslation(span, key, fallback);
-        noteChildren.push(span);
-    });
-    note.replaceChildren(...noteChildren);
-    if (preparation) {
-        const zh = typeof i18next === "undefined" || i18next.language.startsWith("zh");
-        note.textContent = preparation.complete
-            ? (zh ? "已按专业配装重算；专业饮料假设提前备好。社区采集 29.5%、生产效率 19.7%；个人卷轴和迷宫升级不计入。计划汇总中可调整配装与固定增益。" : "Rebuilt from profession loadouts; professional tea assumed already prepared. Fixed community gathering 29.5%, production efficiency 19.7%; no scrolls or labyrinth upgrades. Adjust these in plan summaries.")
-            : (zh ? "专业资料或材料来源不完整，暂不提供含制作耗时的碎片速度。请在计划角色汇总中查看缺项。" : "Production data or sources are incomplete; crafting-inclusive fragment rates are unavailable. See the plan character summary for details.");
+        const noteChildren = [];
+        noteDefinitions.forEach(([key, fallback], index) => {
+            if (index > 0) {
+                noteChildren.push(document.createElement("br"));
+            }
+            const span = document.createElement("span");
+            setFragmentTimeCostTranslation(span, key, fallback);
+            noteChildren.push(span);
+        });
+        note.replaceChildren(...noteChildren);
+        if (preparation) {
+            const zh = typeof i18next === "undefined" || i18next.language.startsWith("zh");
+            note.textContent = preparation.complete
+                ? (zh ? "已按专业配装计算采集和制作耗时。可展开下方明细调整配装、饮料与社区增益；修改后立即重算。" : "Gathering and crafting use profession loadouts. Open details below to adjust loadouts, drinks and community buffs; estimates update immediately.")
+                : (zh ? `有 ${preparation.issues.length} 项制作条件待处理。展开下方「制作明细 / 设置」查看具体材料或专业，纯战斗速度不受影响。` : `${preparation.issues.length} production issues need attention. Open Preparation details / settings below; combat-only rates are unaffected.`);
+            if (Object.keys(preparation.preparedMaterials || {}).length) note.append(zh
+                ? ' 宝石类原料按提前备好计算，获取耗时不计入。' : ' Raw gems are assumed prepared; acquisition time is excluded.');
+        }
+    }
+    renderCosts(baseResult);
+    if (productionData.productionSnapshot && simulatedHours > 0) {
+        const storageKey = 'mwiFragmentProductionSettings_v1';
+        let settings = {};
+        try { settings = JSON.parse(localStorage.getItem(storageKey) || '{}')[productionData.characterId] || {}; }
+        catch { /* Keep usable defaults when saved settings are malformed. */ }
+        const zh = typeof i18next === 'undefined' || i18next.language.startsWith('zh');
+        const details = createElement('details', 'mt-2');
+        details.append(createElement('summary', '', zh ? '制作明细 / 设置' : 'Preparation details / settings'));
+        details.append(createProductionPreparationView({
+            snapshot: productionData.productionSnapshot, context: 'result', combatHours: 1, settings,
+            consumables: Object.fromEntries(Object.entries(simResult.consumablesUsed?.[playerToDisplay] || {})
+                .map(([item, amount]) => [item, amount / simulatedHours])),
+            data: { actionDetailMap, itemDetailMap, enhancementMultipliers },
+            language: zh ? 'zh' : 'en', itemName: getSimulationHistoryItemName,
+            onResult: preparation => renderCosts(applyPreparationToFragmentTimeCosts(baseResult, preparation), preparation),
+            onChange: updated => {
+                try {
+                    const saved = JSON.parse(localStorage.getItem(storageKey) || '{}');
+                    saved[productionData.characterId] = updated;
+                    localStorage.setItem(storageKey, JSON.stringify(saved));
+                } catch (error) { console.warn('Unable to save fragment production settings.', error); }
+            },
+        }));
+        detailsContainer.append(details);
     }
     section.classList.remove("d-none");
 }

@@ -292,6 +292,7 @@
         "modeExact": "exact",
         "modePersonalized": "personal profile",
         "modeEstimated": "default estimate",
+        "modeIncomplete": "production conditions incomplete",
         "noteExact": "No consumables were used, so both values are identical.",
         "notePersonalized": "Calculated with the complete production profile imported for this character.",
         "noteEstimated": "A complete production profile has not been imported. Life skills use recipe minimums, tools and production drinks use none, current house levels are used, and ICKeyTool-compatible default buffs are applied.",

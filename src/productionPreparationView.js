@@ -1,7 +1,7 @@
 import { calculateProductionPreparation, DEFAULT_PRODUCTION_SETTINGS } from './productionPreparation.js';
 
 // Keep controls mounted while typing/selecting. Only replace calculated output.
-export function createProductionPreparationView({ snapshot, consumables, combatHours = 0, settings = {}, onChange,
+export function createProductionPreparationView({ snapshot, consumables, combatHours = 0, settings = {}, onChange, onResult, context = 'plan',
     data, language = 'zh', itemName = value => value }) {
     const zh = language.startsWith('zh');
     const t = (cn, en) => zh ? cn : en;
@@ -14,7 +14,9 @@ export function createProductionPreparationView({ snapshot, consumables, combatH
             'This history has no production snapshot. Update the simulator userscript, reimport and simulate, then select the new record.')));
         return root;
     }
-    root.append(el('p', 'small text-secondary', t('来源：该角色首次选中记录的专业快照。采集于：', 'Source: first selected history snapshot. Captured: ') + new Date(snapshot.capturedAt).toLocaleString()));
+    root.append(el('p', 'small text-secondary', (context === 'result'
+        ? t('来源：本次模拟时的专业快照；以下按每战斗 1 小时所需补给计算。采集于：', 'Source: simulation snapshot; supplies per combat hour. Captured: ')
+        : t('来源：该角色首次选中记录的专业快照。采集于：', 'Source: first selected history snapshot. Captured: ')) + new Date(snapshot.capturedAt).toLocaleString()));
     const output = el('div');
     const details = el('details', 'mt-2');
     details.append(el('summary', '', t('专业配装与社区增益设置', 'Profession loadouts and fixed community buffs')));
@@ -81,11 +83,15 @@ export function createProductionPreparationView({ snapshot, consumables, combatH
     }
     root.append(output, details);
     root.append(el('p', 'small text-secondary mt-2 mb-0', t(
-        '按期望连续生产计时，专业饮料补给可选；房屋、成就、公会神龛和哞卡使用快照。社区增益为固定百分比；不计个人卷轴、迷宫升级、库存和换装操作时间。各材料独立采集，不抵扣副产物；加工茶按连续期望扣减原料产出。设置仅修改本计划，不改历史。',
-        'Continuous expectations; optional tea supply. Permanent bonuses use the snapshot; community percentages are fixed. Excludes scrolls, labyrinth upgrades, inventory and switching time. Independent gathering, no coproduct credit; processing reduces raw output in expectation. Settings affect this plan only, never history.')));
+        '按期望连续生产计时，专业饮料补给可选；房屋、成就、公会神龛和哞卡使用快照。社区增益为固定百分比；不计个人卷轴、迷宫升级、库存和换装操作时间。各材料独立采集，不抵扣副产物；加工茶按连续期望扣减原料产出。',
+        'Continuous expectations; optional tea supply. Permanent bonuses use the snapshot; community percentages are fixed. Excludes scrolls, labyrinth upgrades, inventory and switching time. Independent gathering, no coproduct credit; processing reduces raw output in expectation.') + (context === 'result'
+        ? t('设置按角色保存在本机，用于主界面碎片估计；不修改历史或已有计划。', 'Settings are saved per character for main-page estimates, without changing history or existing plans.')
+        : t('设置仅修改本计划，不改历史。', 'Settings affect this plan only, never history.'))));
     function render() {
         const result = calculateProductionPreparation({ snapshot, settings, consumables, ...data });
-        const duration = minutes => minutes === null || !Number.isFinite(minutes) ? '—' : `${(minutes / 60).toLocaleString(undefined, { maximumFractionDigits: 2 })} h`;
+        const duration = minutes => minutes === null || !Number.isFinite(minutes) ? '—'
+            : context === 'result' ? `${minutes.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${t('分钟', 'min')}`
+                : `${(minutes / 60).toLocaleString(undefined, { maximumFractionDigits: 2 })} h`;
         const grid = el('div', 'row g-2');
         for (const [label, value] of [
             [t('战斗耗时', 'Combat'), combatHours * 60], [t('采集原料', 'Gathering'), result.minutes.gathering],
@@ -94,6 +100,9 @@ export function createProductionPreparationView({ snapshot, consumables, combatH
         ]) { const cell = el('div', 'col-6 col-lg-4'); cell.append(el('div', 'small text-secondary', label), el('strong', '', duration(value))); grid.append(cell); }
         output.replaceChildren(grid);
         if (settings.includeTeaSupply !== true) output.append(el('p', 'small text-warning mt-2 mb-0', t('当前假设：专业饮料提前备好，未计补给时间。', 'Assumption: professional tea is already prepared; its supply time is excluded.')));
+        if (Object.keys(result.preparedMaterials).length) output.append(el('p', 'small text-warning mt-2 mb-0',
+            t('以下材料视为提前备好，未计获取耗时（不代表库存充足）：', 'Assumed already prepared; acquisition time excluded (inventory not checked): ')
+            + Object.entries(result.preparedMaterials).map(([hrid, qty]) => `${itemName(hrid)} × ${qty.toLocaleString(undefined, { maximumSignificantDigits: 4 })}`).join('、')));
         const description = result.usedActions.map(hrid => {
             const setup = result.setups[hrid];
             const action = hrid.split('/').pop();
@@ -115,6 +124,7 @@ export function createProductionPreparationView({ snapshot, consumables, combatH
             for (const issue of result.issues) { const [key, ...rest] = issue.split(':'); const value = rest.join(':'); list.append(el('li', '', (issueNames[key]?.[zh ? 0 : 1] || key) + (value ? `: ${itemName(value)}` : ''))); }
             warning.append(list); output.append(warning);
         }
+        onResult?.(result);
     }
     render();
     return root;

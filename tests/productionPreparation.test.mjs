@@ -92,6 +92,20 @@ test('fixed community values change estimates without personal or labyrinth buff
     assert.ok(b.minutes.gathering<a.minutes.gathering);assert.ok(b.minutes.cooking<a.minutes.cooking);
 });
 
+test('raw gems are prepared in advance, but crushing and brewing are still counted',()=>{
+    const p=profile(),d=data();p.equipment=[];
+    d.actionDetailMap.tea.inputItems=[{itemHrid:'/items/crushed_sunstone',count:2}];
+    d.actionDetailMap.crush={hrid:'/actions/brewing/crush',type:action('brewing'),baseTimeCost:10e9,
+        levelRequirement:{level:100},inputItems:[{itemHrid:'/items/sunstone',count:1}],
+        outputItems:[{itemHrid:'/items/crushed_sunstone',count:10}]};
+    const r=calculateProductionPreparation({snapshot:p,settings,consumables:{'/items/tea':100},...d});
+    assert.equal(r.complete,true);assert.equal(r.preparedMaterials['/items/sunstone'],20);
+    assert.ok(Math.abs(r.minutes.brewing-120*10/60)<1e-8);
+    d.actionDetailMap.crush.inputItems=[{itemHrid:'/items/unknown',count:1}];
+    const unknown=calculateProductionPreparation({snapshot:p,settings,consumables:{'/items/tea':100},...d});
+    assert.equal(unknown.totalMinutes,null);assert.ok(unknown.issues.includes('missing-source:/items/unknown'));
+});
+
 test('processing tea reduces usable raw gathering output without crediting coproducts',()=>{
     const p=profile(), d=data();
     d.itemDetailMap['/items/processing_tea']={consumableDetail:{usableInActionTypeMap:{[action('foraging')]:true},

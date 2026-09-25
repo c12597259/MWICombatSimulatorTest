@@ -7,7 +7,23 @@ const calculatorSource = await readFile(
     "utf8",
 );
 const calculatorModuleUrl = `data:text/javascript;base64,${Buffer.from(calculatorSource).toString("base64")}`;
-const { calculateFragmentTimeCosts } = await import(calculatorModuleUrl);
+const { calculateFragmentTimeCosts, applyPreparationToFragmentTimeCosts } = await import(calculatorModuleUrl);
+
+test('fragment cost shares preparation time without changing combat rates or mutating results', () => {
+    const base = { fragments: [{ combatMinutesPerFragment: 120, combatFragmentsPerDay: 12 }], mode: 'estimated' };
+    const result = applyPreparationToFragmentTimeCosts(base, { complete: true, totalMinutes: 30, issues: [] });
+    assert.equal(result.fragments[0].totalMinutesPerFragment, 180);
+    assert.equal(result.fragments[0].totalFragmentsPerDay, 8);
+    assert.equal(result.fragments[0].combatFragmentsPerDay, 12);
+    assert.equal(base.fragments[0].totalMinutesPerFragment, undefined);
+    const missing = applyPreparationToFragmentTimeCosts(base, { complete: false, totalMinutes: null, issues: ['missing-source:x'] });
+    assert.equal(missing.mode, 'incomplete');
+    assert.equal(missing.craftMinutesPerSimHour, null);
+    assert.equal(missing.fragments[0].totalFragmentsPerDay, null);
+    const none = applyPreparationToFragmentTimeCosts(base, { complete: true, totalMinutes: 0, issues: [] });
+    assert.equal(none.mode, 'exact');
+    assert.equal(none.fragments[0].totalFragmentsPerDay, 12);
+});
 
 const zeroBuffProfile = {
     complete: true,
