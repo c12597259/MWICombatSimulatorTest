@@ -422,21 +422,69 @@ export function setSimulationPlanStepHistorySource(step, mapKey, historySource) 
     return step;
 }
 
-function calculateSimulationPlanSource(source, targetQuantity) {
+function fragmentLedgerKey(player) {
+    const id = player.productionSnapshot?.characterId;
+    return id ? `character:${id}` : `history:${player.identity}`;
+}
+
+function getFragmentBalance(ledger, player, itemHrid, inventories, enabled) {
+    const key = fragmentLedgerKey(player);
+    if (!ledger.has(key)) ledger.set(key, new Map());
+    const items = ledger.get(key);
+    if (!items.has(itemHrid)) {
+        const id = String(player.productionSnapshot?.characterId || '');
+        const inventory = inventories.get(id);
+        const known = Boolean(id && inventory?.complete === true
+            && inventory.schemaVersion === 1 && String(inventory.characterId) === id
+            && Number.isFinite(Date.parse(inventory.capturedAt)) && inventory.items);
+        const amount = known ? Number(inventory.items[itemHrid] || 0) : 0;
+        const available = known && Number.isFinite(amount) && amount >= 0 ? amount : null;
+        items.set(itemHrid, { itemHrid, available, capturedAt: known ? inventory.capturedAt : null,
+            deductionEnabled: enabled, remaining: enabled ? available || 0 : 0,
+            surplus: 0, required: 0, inventoryUsed: 0, gathered: 0, hours: 0, keyConsumption: 0 });
+    }
+    return items.get(itemHrid);
+}
+
+function calculateSimulationPlanSource(source, targetQuantity, context) {
     const requiredQuantity = roundNumber(
         Math.max(0, targetQuantity) * Math.max(0, toFiniteNumber(source.quantityPerTarget)),
     );
     const historyRecord = source.historyRecord;
-    const players = historyRecord?.players ?? [];
+    const players = (historyRecord?.players ?? []).map(player => {
+        if (!context) return { ...player, missingQuantity: requiredQuantity };
+        const balance = getFragmentBalance(context.ledger, player, source.itemHrid,
+            context.inventories, context.enabled);
+        const inventoryUsed = Math.min(requiredQuantity, balance.remaining);
+        const previousSurplusUsed = Math.min(requiredQuantity - inventoryUsed, balance.surplus);
+        return { ...player, requiredQuantity, inventoryAvailable: balance.available, inventoryUsed,
+            previousSurplusUsed, missingQuantity: roundNumber(requiredQuantity - inventoryUsed - previousSurplusUsed) };
+    });
     const missingRatePlayers = players.filter(
-        (player) => toFiniteNumber(player.itemRatePerHour) <= 0,
+        (player) => player.missingQuantity > 0 && toFiniteNumber(player.itemRatePerHour) <= 0,
     );
     const selected = Boolean(historyRecord);
     const durationHours = selected && players.length > 0 && missingRatePlayers.length === 0
         ? Math.max(...players.map(
-            (player) => requiredQuantity / toFiniteNumber(player.itemRatePerHour),
+            (player) => player.missingQuantity === 0 ? 0 : player.missingQuantity / toFiniteNumber(player.itemRatePerHour),
         ))
         : Number.POSITIVE_INFINITY;
+
+    if (context && Number.isFinite(durationHours)) {
+        for (const player of players) {
+            const balance = getFragmentBalance(context.ledger, player, source.itemHrid,
+                context.inventories, context.enabled);
+            const gathered = Math.max(0, toFiniteNumber(player.itemRatePerHour)) * durationHours;
+            balance.remaining = roundNumber(balance.remaining - player.inventoryUsed);
+            balance.surplus = roundNumber(balance.surplus - player.previousSurplusUsed + gathered - player.missingQuantity);
+            balance.required = roundNumber(balance.required + requiredQuantity);
+            balance.inventoryUsed = roundNumber(balance.inventoryUsed + player.inventoryUsed);
+            balance.gathered = roundNumber(balance.gathered + gathered);
+            balance.hours = roundNumber(balance.hours + durationHours);
+            if (context.isKey) balance.keyConsumption = roundNumber(balance.keyConsumption
+                + player.previousSurplusUsed + player.missingQuantity);
+        }
+    }
 
     return {
         ...source,
@@ -448,7 +496,7 @@ function calculateSimulationPlanSource(source, targetQuantity) {
         players: players.map((player) => ({
             ...player,
             gatheredAmount: Number.isFinite(durationHours)
-                ? roundNumber(toFiniteNumber(player.itemRatePerHour) * durationHours)
+                ? roundNumber(Math.max(0, toFiniteNumber(player.itemRatePerHour)) * durationHours)
                 : 0,
             experienceGained: Number.isFinite(durationHours)
                 ? Object.fromEntries(Object.entries(player.experiencePerHour ?? {}).map(
@@ -464,7 +512,9 @@ function calculateSimulationPlanSource(source, targetQuantity) {
     };
 }
 
-export function calculateSimulationPlanStep(step) {
+export function calculateSimulationPlanStep(step, {
+    inventories = new Map(), deductFragmentInventory = true, fragmentLedger = new Map(),
+} = {}) {
     const definition = getSimulationPlanTargetDefinition(step?.targetId);
     const targetQuantity = Math.max(0, toFiniteNumber(step?.targetQuantity));
     if (!definition) {
@@ -479,8 +529,13 @@ export function calculateSimulationPlanStep(step) {
         };
     }
 
+    // Invalid/incomplete steps must never consume stock needed by a later step.
+    const ledger = new Map([...fragmentLedger].map(([key, items]) => [key,
+        new Map([...items].map(([item, balance]) => [item, { ...balance }]))]));
+    const context = definition.type === 'fragment' || definition.type === 'key'
+        ? { ledger, inventories, enabled: deductFragmentInventory, isKey: definition.type === 'key' } : null;
     const sources = (step.sources ?? []).map((source) => (
-        calculateSimulationPlanSource(source, targetQuantity)
+        calculateSimulationPlanSource(source, targetQuantity, context)
     ));
     const allSourcesValid = sources.length === definition.sources.length
         && sources.every((source) => source.valid);
@@ -495,6 +550,7 @@ export function calculateSimulationPlanStep(step) {
     const playerMap = new Map();
 
     if (valid) {
+        for (const [key, items] of ledger) fragmentLedger.set(key, items);
         for (const source of sources) {
             for (const player of source.players) {
                 const summary = getOrCreatePlayerSummary(playerMap, player);
@@ -526,8 +582,9 @@ export function calculateSimulationPlanStep(step) {
                     [definition.itemHrid]: targetQuantity,
                 });
                 for (const source of sources) {
+                    const player = source.players.find(entry => entry.identity === summary.identity);
                     addRateMap(summary.expectedDrops, {
-                        [source.itemHrid]: -source.requiredQuantity,
+                        [source.itemHrid]: -(player?.missingQuantity ?? source.requiredQuantity),
                     });
                 }
             }
@@ -554,8 +611,11 @@ export function calculateSimulationPlanStep(step) {
     };
 }
 
-export function calculateSimulationPlan(plan) {
-    const steps = (plan?.steps ?? []).map(calculateSimulationPlanStep);
+export function calculateSimulationPlan(plan, { inventories = new Map() } = {}) {
+    const fragmentLedger = new Map();
+    const deductFragmentInventory = plan?.deductFragmentInventory !== false;
+    const steps = (plan?.steps ?? []).map(step => calculateSimulationPlanStep(step,
+        { inventories, deductFragmentInventory, fragmentLedger }));
     const valid = steps.every((step) => step.valid);
     const totalHours = valid
         ? roundNumber(steps.reduce((total, step) => total + step.durationHours, 0))
@@ -577,23 +637,49 @@ export function calculateSimulationPlan(plan) {
         }
     }
 
-    const players = [...playerMap.values()].map((summary) => ({
-        ...summary,
-        skills: Object.fromEntries(SIMULATION_PLAN_SKILLS.map((skill) => [
-            skill,
-            calculateLevelAfterExperience({
-                currentLevel: summary.startingLevels[skill],
-                currentExperience: summary.startingSkillExperience?.[skill]?.startingExperience,
-                gainedExperience: toFiniteNumber(summary.experienceGained[skill]),
-            }),
-        ])),
-    }));
+    // A zero-rate record can become usable once stock is loaded. Keep its
+    // characters reachable by the inventory bridge even while the plan is invalid.
+    for (const step of steps.filter(entry => !entry.valid)) {
+        for (const source of step.sources) {
+            for (const player of source.players) getOrCreatePlayerSummary(playerMap, player);
+        }
+    }
+
+    const players = [...playerMap.values()].map((summary) => {
+        const fragmentRequirements = [...(fragmentLedger.get(fragmentLedgerKey(summary))?.values() || [])]
+            .map(balance => ({ itemHrid: balance.itemHrid, required: balance.required,
+                available: balance.available, inventoryUsed: balance.inventoryUsed,
+                missing: balance.available === null && deductFragmentInventory ? null
+                    : roundNumber(Math.max(0, balance.required - (deductFragmentInventory ? balance.available : 0))),
+                gathered: balance.gathered, hours: balance.hours, capturedAt: balance.capturedAt }));
+        // Previously over-produced fragments may be used by later key targets.
+        for (const balance of fragmentLedger.get(fragmentLedgerKey(summary))?.values() || []) {
+            const retained = roundNumber(Math.max(0, balance.gathered - balance.keyConsumption));
+            if (retained > 0) summary.expectedDrops[balance.itemHrid] = retained;
+            else delete summary.expectedDrops[balance.itemHrid];
+        }
+        return {
+            ...summary,
+            fragmentRequirements,
+            skills: Object.fromEntries(SIMULATION_PLAN_SKILLS.map((skill) => [
+                skill,
+                calculateLevelAfterExperience({
+                    currentLevel: summary.startingLevels[skill],
+                    currentExperience: summary.startingSkillExperience?.[skill]?.startingExperience,
+                    gainedExperience: toFiniteNumber(summary.experienceGained[skill]),
+                }),
+            ])),
+        };
+    });
 
     return {
         valid,
         totalHours,
         steps,
         players,
+        deductFragmentInventory,
+        fragmentInventoryComplete: !deductFragmentInventory || players.every(player =>
+            player.fragmentRequirements.every(row => row.available !== null)),
     };
 }
 
@@ -648,6 +734,7 @@ export function normalizeSimulationPlans(value) {
             createdAt: String(plan.createdAt ?? ""),
             updatedAt: String(plan.updatedAt ?? ""),
             productionSettings: JSON.parse(JSON.stringify(plan.productionSettings || {})),
+            deductFragmentInventory: plan.deductFragmentInventory !== false,
             steps: Array.isArray(plan.steps)
                 ? plan.steps.map(normalizeStep).filter(Boolean)
                 : [],

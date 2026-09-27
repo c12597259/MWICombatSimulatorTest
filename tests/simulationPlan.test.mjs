@@ -325,3 +325,163 @@ test("drops old-schema and unsupported steps while normalizing saved plans", () 
     assert.equal(plan.steps.length, 1);
     assert.equal(plan.steps[0].targetId, validStep.targetId);
 });
+
+function inventoryFor(items, characterId = 'alice') {
+    return { schemaVersion: 1, complete: true, characterId,
+        capturedAt: '2026-09-27T00:00:00Z', items };
+}
+
+function stockedStep(targetId, quantity = 100, rates = [10]) {
+    const step = createSimulationPlanStep(targetId, { targetQuantity: quantity });
+    for (const source of step.sources) {
+        const record = createZoneRecord(source.mapKey, rates);
+        record.players.forEach((player, i) => {
+            player.expectedDropsPerHour = { [source.itemHrid]: rates[i] };
+        });
+        setSimulationPlanStepHistorySource(step, source.mapKey, createSimulationPlanHistorySource(record, {
+            productionSnapshotsBySlot: { 1: { characterId: 'alice' }, 2: { characterId: 'bob' } },
+        }));
+    }
+    return step;
+}
+
+test('shares fragment inventory across D1 and D2 key targets and recomputes all outputs', () => {
+    const steps = [stockedStep('/items/chimerical_chest_key'), stockedStep('/items/sinister_chest_key')];
+    const inventory = inventoryFor({ '/items/purple_key_fragment': 100 });
+    const inventories = new Map([['alice', inventory]]);
+    const original = JSON.stringify({ steps, inventory });
+    const result = calculateSimulationPlan({ steps }, { inventories });
+    assert.equal(result.totalHours, 62); // 8 * 90 / 10 minus 100 / 10.
+    assert.deepEqual(result.steps.map(step => step.durationHours), [27, 35]);
+    const player = result.players[0];
+    const purple = player.fragmentRequirements.find(row => row.itemHrid === '/items/purple_key_fragment');
+    assert.deepEqual([purple.required, purple.available, purple.missing, purple.inventoryUsed, purple.gathered, purple.hours],
+        [180, 100, 80, 100, 80, 8]);
+    assert.equal(player.consumablesUsed['/items/food'], 124);
+    assert.equal(player.experienceGained.stamina, 62 * 33);
+    assert.equal(player.expectedDrops['/items/chimerical_chest_key'], 100);
+    assert.equal(player.expectedDrops['/items/purple_key_fragment'], undefined);
+    assert.equal(result.fragmentInventoryComplete, true);
+    assert.equal(JSON.stringify({ steps, inventory }), original);
+});
+
+test('team duration uses per-character shortfalls and reuses earlier overproduction', () => {
+    const steps = [stockedStep('/items/blue_key_fragment', 100, [10, 5]),
+        stockedStep('/items/blue_key_fragment', 100, [10, 5])];
+    const inventories = new Map([
+        ['alice', inventoryFor({ '/items/blue_key_fragment': 0 })],
+        ['bob', inventoryFor({ '/items/blue_key_fragment': 100 }, 'bob')],
+    ]);
+    const result = calculateSimulationPlan({ steps }, { inventories });
+    assert.deepEqual(result.steps.map(step => step.durationHours), [10, 10]);
+    assert.equal(result.totalHours, 20);
+    assert.equal(result.steps[1].sources[0].players[1].previousSurplusUsed, 50);
+    assert.equal(result.players[0].fragmentRequirements[0].missing, 200);
+    assert.equal(result.players[1].fragmentRequirements[0].missing, 100);
+    assert.equal(result.players[1].expectedDrops['/items/blue_key_fragment'], 100);
+});
+
+test('fully stocked targets take zero time even with zero drop rate; no negative drops', () => {
+    const step = stockedStep('/items/chimerical_chest_key', 100, [0]);
+    const items = Object.fromEntries(step.sources.map(source => [source.itemHrid, 100]));
+    const result = calculateSimulationPlan({ steps: [step] }, {
+        inventories: new Map([['alice', inventoryFor(items)]]),
+    });
+    assert.equal(result.valid, true);
+    assert.equal(result.totalHours, 0);
+    assert.deepEqual(result.players[0].expectedDrops, { '/items/chimerical_chest_key': 100 });
+    assert.ok(Object.values(result.players[0].consumablesUsed).every(qty => qty === 0));
+    assert.ok(result.players[0].fragmentRequirements.every(row => row.missing === 0 && row.gathered === 0));
+});
+
+test('unknown inventories are explicit and never borrowed from another character', () => {
+    const step = stockedStep('/items/blue_key_fragment', 100, [10, 5]);
+    const inventories = new Map([['alice', inventoryFor({ '/items/blue_key_fragment': 500 })]]);
+    const result = calculateSimulationPlan({ steps: [step] }, { inventories });
+    assert.equal(result.totalHours, 20);
+    assert.equal(result.fragmentInventoryComplete, false);
+    assert.equal(result.players[1].fragmentRequirements[0].available, null);
+    assert.equal(result.players[1].fragmentRequirements[0].missing, null);
+    inventories.set('bob', inventoryFor({ '/items/blue_key_fragment': 500 }, 'someone-else'));
+    assert.equal(calculateSimulationPlan({ steps: [step] }, { inventories }).totalHours, 20);
+});
+
+test('disabling stock deduction is persisted and restores full farming demand', () => {
+    const plan = { id: 'p', name: 'P', deductFragmentInventory: false,
+        steps: [stockedStep('/items/blue_key_fragment', 100)] };
+    const [persisted] = normalizeSimulationPlans([plan]);
+    assert.equal(persisted.deductFragmentInventory, false);
+    const result = calculateSimulationPlan(persisted, {
+        inventories: new Map([['alice', inventoryFor({ '/items/blue_key_fragment': 100 })]]),
+    });
+    assert.equal(result.totalHours, 10);
+    assert.equal(result.players[0].fragmentRequirements[0].missing, 100);
+    assert.equal(result.players[0].fragmentRequirements[0].inventoryUsed, 0);
+    assert.equal(normalizeSimulationPlans([{ ...plan, deductFragmentInventory: undefined }])[0].deductFragmentInventory, true);
+});
+
+test('invalid steps do not reserve stock and zero-rate characters remain available for inventory refresh', () => {
+    const invalid = stockedStep('/items/chimerical_chest_key');
+    invalid.sources[1].historyRecord = null;
+    const next = stockedStep('/items/blue_key_fragment', 100);
+    const result = calculateSimulationPlan({ steps: [invalid, next] }, {
+        inventories: new Map([['alice', inventoryFor({ '/items/blue_key_fragment': 100 })]]),
+    });
+    assert.equal(result.valid, false);
+    assert.equal(result.steps[1].durationHours, 0);
+    assert.equal(result.players[0].fragmentRequirements[0].required, 100);
+    const zero = calculateSimulationPlan({ steps: [stockedStep('/items/blue_key_fragment', 100, [0])] });
+    assert.equal(zero.valid, false);
+    assert.equal(zero.players[0].productionSnapshot.characterId, 'alice');
+});
+
+test('updating quantities recalculates later stock allocations without retaining prior calculation state', () => {
+    const plan = { steps: [stockedStep('/items/blue_key_fragment', 100), stockedStep('/items/blue_key_fragment', 100)] };
+    const options = { inventories: new Map([['alice', inventoryFor({ '/items/blue_key_fragment': 150 })]]) };
+    assert.deepEqual(calculateSimulationPlan(plan, options).steps.map(s => s.durationHours), [0, 5]);
+    plan.steps[0].targetQuantity = 200;
+    assert.deepEqual(calculateSimulationPlan(plan, options).steps.map(s => s.durationHours), [5, 10]);
+    plan.steps.reverse();
+    assert.deepEqual(calculateSimulationPlan(plan, options).steps.map(s => s.durationHours), [0, 15]);
+});
+
+test('dungeon chest farming is unaffected by fragment or chest inventory', () => {
+    const step = createSimulationPlanStep('/items/chimerical_chest', { targetQuantity: 80 });
+    setSimulationPlanStepHistorySource(step, step.sources[0].mapKey,
+        createSimulationPlanHistorySource(createDungeonRecord(1), { productionSnapshotsBySlot: { 1: { characterId: 'alice' } } }));
+    const result = calculateSimulationPlan({ steps: [step] }, {
+        inventories: new Map([['alice', inventoryFor({ '/items/chimerical_chest': 800, '/items/blue_key_fragment': 500 })]]),
+    });
+    assert.equal(result.totalHours, 10);
+    assert.equal(result.players[0].requiredKeys['/items/chimerical_chest_key'], 106.4);
+    assert.deepEqual(result.players[0].fragmentRequirements, []);
+});
+
+test('key targets consume earlier surplus without reporting the same leftover twice', () => {
+    const steps = [stockedStep('/items/chimerical_chest_key', 100, [20, 10]),
+        stockedStep('/items/sinister_chest_key', 100, [20, 10])];
+    const result = calculateSimulationPlan({ steps }, { inventories: new Map([
+        ['alice', inventoryFor({})],
+        ['bob', inventoryFor({ '/items/purple_key_fragment': 90 }, 'bob')],
+    ]) });
+    assert.equal(result.totalHours, 63);
+    const shared = result.steps[1].sources.find(s => s.itemHrid === '/items/purple_key_fragment');
+    assert.equal(shared.players[1].previousSurplusUsed, 45);
+    for (const player of result.players) {
+        assert.equal(player.expectedDrops['/items/purple_key_fragment'], undefined);
+        assert.ok(Object.values(player.expectedDrops).every(amount => amount >= 0));
+    }
+});
+
+test('standalone fragment goals reserve their quantity instead of reusing it to craft keys', () => {
+    const steps = [stockedStep('/items/blue_key_fragment', 100), stockedStep('/items/chimerical_chest_key', 100)];
+    const result = calculateSimulationPlan({ steps }, {
+        inventories: new Map([['alice', inventoryFor({ '/items/blue_key_fragment': 50 })]]),
+    });
+    const blue = result.players[0].fragmentRequirements.find(row => row.itemHrid === '/items/blue_key_fragment');
+    assert.equal(blue.required, 190);
+    assert.equal(blue.missing, 140);
+    assert.equal(blue.gathered, 140);
+    assert.equal(result.players[0].expectedDrops['/items/blue_key_fragment'], 50);
+    assert.equal(result.players[0].expectedDrops['/items/chimerical_chest_key'], 100);
+});

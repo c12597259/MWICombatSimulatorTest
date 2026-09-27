@@ -3723,6 +3723,15 @@ function updateSimulationPlanHistorySourceControl(container, source, sourceResul
                 time: formatSimulationPlanDuration(sourceResult.durationHours),
             },
         );
+        for (const player of sourceResult.players) {
+            if (player.inventoryUsed === undefined) continue;
+            const fmt = value => formatSimulationHistoryNumber(value, 2);
+            const stock = player.inventoryAvailable === null ? '库存未知，按未抵扣估算'
+                : `本步库存抵扣 ${fmt(player.inventoryUsed)}`;
+            details.append(createElement('div', '', `${player.name}：${stock}`
+                + (player.previousSurplusUsed > 0 ? `，前序富余 ${fmt(player.previousSurplusUsed)}` : '')
+                + `，还需刷 ${fmt(player.missingQuantity)}`));
+        }
     } else if (records.length === 0) {
         details.className += " text-warning";
         details.textContent = getSimulationPlanText(
@@ -4034,6 +4043,37 @@ function createPlanConsumableInventoryTable(rows) {
     table.append(body); wrapper.append(table); return wrapper;
 }
 
+function createPlanFragmentInventorySummary(player) {
+    const section = createElement('section', 'mb-3');
+    if (!player.fragmentRequirements?.length) return section;
+    section.append(createElement('h6', '', '钥匙碎片：整个计划合并需求'));
+    const wrapper = createElement('div', 'table-responsive');
+    const table = createElement('table', 'table table-sm');
+    const head = createElement('thead');
+    const header = createElement('tr');
+    for (const title of ['碎片', '计划总需求', '库存已有', '剩余需刷', '预计刷得', '刷图时间']) {
+        header.append(createElement('th', '', title));
+    }
+    head.append(header); table.append(head);
+    const body = createElement('tbody');
+    for (const row of player.fragmentRequirements) {
+        const tr = createElement('tr');
+        tr.append(createElement('td', '', getSimulationHistoryItemName(row.itemHrid)));
+        for (const value of [row.required, row.available, row.missing, row.gathered]) {
+            tr.append(createElement('td', '', value === null ? '未知' : formatSimulationHistoryNumber(value, 2)));
+        }
+        tr.append(createElement('td', '', formatSimulationPlanDuration(row.hours)));
+        body.append(tr);
+    }
+    table.append(body); wrapper.append(table); section.append(wrapper);
+    const stockNote = getActiveSimulationPlan().deductFragmentInventory === false
+        ? '已关闭碎片库存抵扣，按完整需求计算。'
+        : '同一角色的共享碎片合并抵扣一次；各角色库存独立，按步骤顺序分配库存。';
+    section.append(createElement('p', 'small text-secondary', stockNote
+        + '前序刷图富余可供后续步骤使用。组队时间取缺口÷各自掉率的最大值，因此预计刷得可能超过个人缺口。未完成历史选择的目标不计入汇总。'));
+    return section;
+}
+
 function createSimulationPlanPlayerSummary(player, index, groupId, onPreparation) {
     const pane = document.createElement("div");
     pane.className = `tab-pane fade${index === 0 ? " show active" : ""}`;
@@ -4045,6 +4085,7 @@ function createSimulationPlanPlayerSummary(player, index, groupId, onPreparation
     const preparationSettings = plan.productionSettings[player.identity] || {};
     const inventory = planInventories.get(String(player.productionSnapshot?.characterId || '')) || null;
     const shortfall = calculateConsumableShortfall(player.consumablesUsed, inventory);
+    pane.append(createPlanFragmentInventorySummary(player));
     pane.appendChild(createProductionPreparationView({
         snapshot: player.productionSnapshot, consumables: player.consumablesUsed, combatHours: player.combatHours,
         settings: preparationSettings, inventory,
@@ -4155,6 +4196,19 @@ function renderSimulationPlanPlayerSummaries(players) {
     refresh.type = 'button'; refresh.disabled = planInventoryLoading || !players.some(p => p.productionSnapshot?.characterId);
     refresh.addEventListener('click', () => { refresh.disabled = true; refresh.textContent = '正在读取库存…'; void refreshPlanInventories(players, true); });
     inventoryBar.append(refresh, createElement('span', 'small text-secondary', planInventoryMessage || '库存来自插件缓存，可手动从服务器刷新。仅用于本次估计，不会扣除游戏中的实际物品。'));
+    const fragmentLabel = createElement('label', 'd-flex align-items-center gap-2 small');
+    const fragmentToggle = createElement('input', 'form-check-input mt-0');
+    fragmentToggle.type = 'checkbox';
+    fragmentToggle.checked = getActiveSimulationPlan().deductFragmentInventory !== false;
+    fragmentToggle.addEventListener('change', () => {
+        const plan = getActiveSimulationPlan();
+        plan.deductFragmentInventory = fragmentToggle.checked;
+        plan.updatedAt = new Date().toISOString();
+        persistSimulationPlans();
+        renderSimulationPlan();
+    });
+    fragmentLabel.append(fragmentToggle, document.createTextNode('刷图目标抵扣已有钥匙碎片'));
+    inventoryBar.append(fragmentLabel);
     const readiness = createElement('div', 'small mb-3');
     const preparationByPlayer = new Map();
     const updateReadiness = (identity, minutes) => {
@@ -4206,7 +4260,8 @@ function renderSimulationPlanSummary(plan, calculation) {
     }
 
     document.getElementById("simulationPlanTotalTime").textContent =
-        formatSimulationPlanDuration(calculation.totalHours);
+        formatSimulationPlanDuration(calculation.totalHours)
+        + (calculation.fragmentInventoryComplete ? '' : '（部分碎片库存未知，按未抵扣估算）');
     const invalidSteps = calculation.steps.filter((step) => !step.valid);
     const warning = document.getElementById("simulationPlanWarning");
     warning.classList.toggle("d-none", invalidSteps.length === 0);
@@ -4230,7 +4285,7 @@ function renderSimulationPlanSummary(plan, calculation) {
 
 function renderSimulationPlan() {
     const plan = ensureActiveSimulationPlan();
-    const calculation = calculateSimulationPlan(plan);
+    const calculation = calculateSimulationPlan(plan, { inventories: planInventories });
     renderSimulationPlanSelector(plan);
     renderSimulationPlanSteps(plan, calculation);
     renderSimulationPlanSummary(plan, calculation);
@@ -4341,8 +4396,8 @@ async function handleSimulationPlanStepAction(event) {
         plan.steps[stepIndex].targetQuantity = quantity;
         plan.updatedAt = new Date().toISOString();
         persistSimulationPlans();
-        const calculation = calculateSimulationPlan(plan);
-        updateSimulationPlanStepRow(plan.steps[stepIndex], calculation.steps[stepIndex]);
+        const calculation = calculateSimulationPlan(plan, { inventories: planInventories });
+        plan.steps.forEach((step, index) => updateSimulationPlanStepRow(step, calculation.steps[index]));
         renderSimulationPlanSummary(plan, calculation);
         return;
     } else if (action === "history-source") {
