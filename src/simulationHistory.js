@@ -676,6 +676,15 @@ export function deleteSimulationHistoryRecord(id, indexedDb = window.indexedDB) 
     return runHistoryTransaction(indexedDb, "readwrite", (store) => store.delete(id));
 }
 
+export function deleteSimulationHistoryRecords(ids, indexedDb = window.indexedDB) {
+    const uniqueIds = [...new Set(ids)].filter(id => typeof id === "string" && id.length > 0);
+    if (uniqueIds.length === 0) return Promise.resolve(0);
+    return runHistoryTransaction(indexedDb, "readwrite", store => {
+        uniqueIds.forEach(id => store.delete(id));
+        return uniqueIds.length;
+    });
+}
+
 export async function deleteSimulationHistoryMap(mapKey, indexedDb = window.indexedDB) {
     const database = await openSimulationHistoryDatabase(indexedDb);
     return new Promise((resolve, reject) => {

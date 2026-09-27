@@ -171,6 +171,16 @@
             overflow: auto;
         }
 
+        #simulationHistoryDeleteDialog {
+            width: min(440px, calc(100vw - 32px));
+            border: 1px solid #bbb;
+            border-radius: 8px;
+            padding: 24px;
+        }
+
+        #simulationHistoryDeleteDialog::backdrop { background: rgba(0, 0, 0, 0.45); }
+        body.dark-mode #simulationHistoryDeleteDialog { background: #444; color: #f0f0f0; border-color: #999; }
+
         @media (min-width: 1200px) {
             #simulationHistoryModal .history-modal-dialog {
                 max-width: min(96vw, 1720px);
@@ -1976,11 +1986,18 @@
                         </div>
                     </div>
 
-                    <h6 data-i18n="common:simulationHistory.recordList">History Records</h6>
+                    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                        <h6 class="mb-0 me-auto" data-i18n="common:simulationHistory.recordList">History Records</h6>
+                        <button id="buttonClearSimulationHistorySelection" type="button" class="btn btn-outline-secondary btn-sm" disabled
+                            data-i18n="common:simulationHistory.clearSelection">Clear selection</button>
+                        <button id="buttonDeleteSelectedSimulationHistory" type="button" class="btn btn-outline-danger btn-sm" disabled>Delete selected (0)</button>
+                    </div>
+                    <p class="small text-secondary" data-i18n="common:simulationHistory.selectionHint">The header selects the current map; selections are kept when switching maps.</p>
                     <div class="table-responsive history-record-scroll border rounded mb-4">
                         <table class="table table-striped table-hover align-middle history-record-table mb-0">
                             <thead class="table-light">
                                 <tr>
+                                    <th><input id="selectAllSimulationHistoryRecords" type="checkbox" class="form-check-input" aria-label="Select all records on this map"></th>
                                     <th data-i18n="common:simulationHistory.date">Date</th>
                                     <th data-i18n="common:simulationHistory.difficulty">Difficulty</th>
                                     <th data-i18n="common:simulationHistory.loadouts">Loadouts</th>
@@ -1997,6 +2014,20 @@
                     <div id="simulationHistoryRecordDetails"></div>
                     <div id="simulationHistoryComparisonResults"></div>
                 </div>
+                <dialog id="simulationHistoryDeleteDialog" aria-labelledby="simulationHistoryDeleteTitle" aria-describedby="simulationHistoryDeleteMessage">
+                    <form method="dialog">
+                        <h5 id="simulationHistoryDeleteTitle" data-i18n="common:simulationHistory.deleteTitle">Delete history</h5>
+                        <p id="simulationHistoryDeleteMessage"></p>
+                        <label class="d-flex align-items-center gap-2 mb-3">
+                            <input id="skipSimulationHistoryDeleteConfirmation" type="checkbox" class="form-check-input mt-0">
+                            <span data-i18n="common:simulationHistory.skipDeleteConfirmation">Do not ask again until history is reopened</span>
+                        </label>
+                        <div class="d-flex justify-content-end gap-2">
+                            <button type="submit" value="cancel" class="btn btn-secondary" autofocus data-i18n="common:simulationHistory.cancelDelete">Cancel</button>
+                            <button type="submit" value="delete" class="btn btn-danger" data-i18n="common:simulationHistory.delete">Delete</button>
+                        </div>
+                    </form>
+                </dialog>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"
                         data-i18n="common:controls.close">Close</button>

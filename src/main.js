@@ -45,11 +45,9 @@ import {
 } from "./privateLoadoutBaseline.js";
 import {
     buildSimulationHistoryRecord,
-    clearSimulationHistory,
     compareSimulationHistoryRecords,
     decodeSimulationHistorySnapshot,
-    deleteSimulationHistoryMap,
-    deleteSimulationHistoryRecord,
+    deleteSimulationHistoryRecords,
     encodeSimulationHistorySnapshot,
     getSimulationHistoryStorageSummary,
     loadSimulationHistoryRecords,
@@ -116,6 +114,9 @@ let modalTriggers = [];
 let currentSimResults = {};
 let pendingSimulationHistoryContext = null;
 let simulationHistoryRecords = [];
+const selectedSimulationHistoryIds = new Set();
+let skipSimulationHistoryDeleteConfirmation = false;
+let simulationHistoryDeletionPending = false;
 let simulationHistoryPlayerTabSequence = 0;
 let experienceLevelCalculatorContext = null;
 let lastSimulationExperienceSnapshot = {};
@@ -2257,7 +2258,7 @@ function renderSimulationHistoryRecordRows(records) {
             getSimulationHistoryText("emptyMap", "There are no records for this map."),
             "text-center text-muted py-4",
         );
-        cell.colSpan = 7;
+        cell.colSpan = 8;
         row.appendChild(cell);
         rows.appendChild(row);
         return;
@@ -2265,6 +2266,16 @@ function renderSimulationHistoryRecordRows(records) {
 
     for (const record of records) {
         const row = document.createElement("tr");
+        const selectionCell = document.createElement("td");
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.className = "form-check-input";
+        checkbox.dataset.historySelection = record.id;
+        checkbox.checked = selectedSimulationHistoryIds.has(record.id);
+        checkbox.setAttribute("aria-label", getSimulationHistoryText("selectRecordForDeletion",
+            "Select {{record}}", { record: getSimulationHistoryRecordOptionText(record) }));
+        selectionCell.appendChild(checkbox);
+        row.appendChild(selectionCell);
         row.appendChild(createSimulationHistoryCell(formatSimulationHistoryDate(record.createdAt)));
         row.appendChild(createSimulationHistoryCell(getSimulationHistoryDifficulty(record)));
         row.appendChild(createSimulationHistoryCell(getSimulationHistoryLoadoutSummary(record)));
@@ -2307,6 +2318,66 @@ function renderSimulationHistoryRecordRows(records) {
         actionCell.appendChild(deleteButton);
         row.appendChild(actionCell);
         rows.appendChild(row);
+    }
+}
+
+function updateSimulationHistorySelection() {
+    const validIds = new Set(simulationHistoryRecords.map(record => record.id));
+    for (const id of selectedSimulationHistoryIds) {
+        if (!validIds.has(id)) selectedSimulationHistoryIds.delete(id);
+    }
+    const checkboxes = [...document.querySelectorAll('#simulationHistoryRecordRows input[data-history-selection]')];
+    checkboxes.forEach(input => { input.checked = selectedSimulationHistoryIds.has(input.dataset.historySelection); });
+    const selectedVisibleCount = checkboxes.filter(input => input.checked).length;
+    const selectAll = document.getElementById('selectAllSimulationHistoryRecords');
+    selectAll.checked = checkboxes.length > 0 && selectedVisibleCount === checkboxes.length;
+    selectAll.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < checkboxes.length;
+    selectAll.disabled = checkboxes.length === 0;
+    selectAll.setAttribute('aria-label', getSimulationHistoryText('selectCurrentMap', 'Select all records on this map'));
+    const selectedButton = document.getElementById('buttonDeleteSelectedSimulationHistory');
+    selectedButton.textContent = getSimulationHistoryText('deleteSelected', 'Delete selected ({{count}})',
+        { count: selectedSimulationHistoryIds.size });
+    selectedButton.disabled = simulationHistoryDeletionPending || selectedSimulationHistoryIds.size === 0;
+    document.getElementById('buttonClearSimulationHistorySelection').disabled = selectedSimulationHistoryIds.size === 0;
+    document.getElementById('buttonDeleteSimulationHistoryMap').disabled = simulationHistoryDeletionPending || checkboxes.length === 0;
+    document.getElementById('buttonClearSimulationHistory').disabled = simulationHistoryDeletionPending || simulationHistoryRecords.length === 0;
+    document.querySelectorAll('#simulationHistoryRecordRows button[data-history-action="delete"]')
+        .forEach(button => { button.disabled = simulationHistoryDeletionPending; });
+}
+
+function confirmSimulationHistoryDeletion(message) {
+    if (skipSimulationHistoryDeleteConfirmation) return Promise.resolve(true);
+    const dialog = document.getElementById('simulationHistoryDeleteDialog');
+    const skip = document.getElementById('skipSimulationHistoryDeleteConfirmation');
+    document.getElementById('simulationHistoryDeleteMessage').textContent = message;
+    skip.checked = false;
+    dialog.returnValue = 'cancel';
+    return new Promise(resolve => {
+        dialog.addEventListener('close', () => {
+            const confirmed = dialog.returnValue === 'delete';
+            if (confirmed && skip.checked) skipSimulationHistoryDeleteConfirmation = true;
+            resolve(confirmed);
+        }, { once: true });
+        dialog.showModal();
+    });
+}
+
+async function deleteSimulationHistorySelection(ids, message) {
+    if (simulationHistoryDeletionPending || ids.length === 0) return;
+    simulationHistoryDeletionPending = true;
+    updateSimulationHistorySelection();
+    const mapKey = document.getElementById('selectSimulationHistoryMap').value;
+    try {
+        if (!await confirmSimulationHistoryDeletion(message)) return;
+        await deleteSimulationHistoryRecords(ids);
+        ids.forEach(id => selectedSimulationHistoryIds.delete(id));
+        await reloadSimulationHistory({ preferredMapKey: mapKey });
+    } catch (error) {
+        console.warn('Unable to delete simulation history.', error);
+        setSimulationHistoryStatus(getSimulationHistoryText('loadError', 'Simulation history could not be updated.'), 'danger');
+    } finally {
+        simulationHistoryDeletionPending = false;
+        updateSimulationHistorySelection();
     }
 }
 
@@ -2373,6 +2444,7 @@ function renderSimulationHistory({ preferredMapKey = null, clearResults = true }
     document.getElementById("buttonCompareSimulationHistory").disabled = records.length < 2;
     document.getElementById("buttonDeleteSimulationHistoryMap").disabled = records.length === 0;
     document.getElementById("buttonClearSimulationHistory").disabled = simulationHistoryRecords.length === 0;
+    updateSimulationHistorySelection();
     updateSimulationHistoryCount();
 
     if (clearResults) {
@@ -3113,21 +3185,8 @@ async function handleSimulationHistoryRecordAction(event) {
     }
 
     if (button.dataset.historyAction === "delete") {
-        if (!confirm(getSimulationHistoryText("deleteRecordConfirm", "Delete this simulation history record?"))) {
-            return;
-        }
-        button.disabled = true;
-        try {
-            await deleteSimulationHistoryRecord(record.id);
-            await reloadSimulationHistory({ preferredMapKey: record.mapKey });
-        } catch (error) {
-            console.warn("Unable to delete simulation history record.", error);
-            setSimulationHistoryStatus(
-                getSimulationHistoryText("loadError", "Simulation history could not be updated."),
-                "danger",
-            );
-            button.disabled = false;
-        }
+        await deleteSimulationHistorySelection([record.id],
+            getSimulationHistoryText("deleteRecordConfirm", "Delete this simulation history record?"));
     }
 }
 
@@ -3230,50 +3289,14 @@ async function importSimulationHistoryTeam(record) {
 
 async function deleteCurrentSimulationHistoryMap() {
     const mapKey = document.getElementById("selectSimulationHistoryMap").value;
-    const records = simulationHistoryRecords.filter((record) => record.mapKey === mapKey);
-    if (records.length === 0) {
-        return;
-    }
-    const message = getSimulationHistoryText(
-        "deleteMapConfirm",
-        "Delete all {{count}} records for the current map?",
-        { count: records.length },
-    );
-    if (!confirm(message)) {
-        return;
-    }
-    try {
-        await deleteSimulationHistoryMap(mapKey);
-        await reloadSimulationHistory();
-    } catch (error) {
-        console.warn("Unable to delete simulation history map.", error);
-        setSimulationHistoryStatus(
-            getSimulationHistoryText("loadError", "Simulation history could not be updated."),
-            "danger",
-        );
-    }
+    const ids = simulationHistoryRecords.filter(record => record.mapKey === mapKey).map(record => record.id);
+    await deleteSimulationHistorySelection(ids, getSimulationHistoryText("deleteMapConfirm",
+        "Delete all {{count}} records for the current map?", { count: ids.length }));
 }
 
 async function clearAllSimulationHistoryRecords() {
-    if (simulationHistoryRecords.length === 0) {
-        return;
-    }
-    if (!confirm(getSimulationHistoryText(
-        "clearAllConfirm",
-        "Clear all simulation history? This cannot be undone.",
-    ))) {
-        return;
-    }
-    try {
-        await clearSimulationHistory();
-        await reloadSimulationHistory();
-    } catch (error) {
-        console.warn("Unable to clear simulation history.", error);
-        setSimulationHistoryStatus(
-            getSimulationHistoryText("loadError", "Simulation history could not be updated."),
-            "danger",
-        );
-    }
+    await deleteSimulationHistorySelection(simulationHistoryRecords.map(record => record.id),
+        getSimulationHistoryText("clearAllConfirm", "Clear all simulation history? This cannot be undone."));
 }
 
 function compareSelectedSimulationHistoryRecords() {
@@ -3309,10 +3332,45 @@ function compareSelectedSimulationHistoryRecords() {
 }
 
 function initSimulationHistory() {
+    document.getElementById('simulationHistoryDeleteDialog').addEventListener('keydown', event => {
+        // Let the native dialog cancel itself without also dismissing Bootstrap's history modal.
+        if (event.key === 'Escape') event.stopPropagation();
+    });
     document.getElementById("simulationHistoryModal").addEventListener("show.bs.modal", () => {
+        skipSimulationHistoryDeleteConfirmation = false;
+        selectedSimulationHistoryIds.clear();
         document.getElementById("selectSimulationHistoryBaseline").value = "";
         document.getElementById("selectSimulationHistoryComparison").value = "";
         void reloadSimulationHistory({ preferredMapKey: getCurrentSimulationHistoryMapKey() });
+    });
+    document.getElementById('simulationHistoryModal').addEventListener('hide.bs.modal', () => {
+        const dialog = document.getElementById('simulationHistoryDeleteDialog');
+        if (dialog.open) dialog.close('cancel');
+        skipSimulationHistoryDeleteConfirmation = false;
+    });
+    document.getElementById('simulationHistoryRecordRows').addEventListener('change', event => {
+        const id = event.target.dataset.historySelection;
+        if (!id) return;
+        if (event.target.checked) selectedSimulationHistoryIds.add(id);
+        else selectedSimulationHistoryIds.delete(id);
+        updateSimulationHistorySelection();
+    });
+    document.getElementById('selectAllSimulationHistoryRecords').addEventListener('change', event => {
+        const mapKey = document.getElementById('selectSimulationHistoryMap').value;
+        for (const record of simulationHistoryRecords.filter(entry => entry.mapKey === mapKey)) {
+            if (event.target.checked) selectedSimulationHistoryIds.add(record.id);
+            else selectedSimulationHistoryIds.delete(record.id);
+        }
+        updateSimulationHistorySelection();
+    });
+    document.getElementById('buttonClearSimulationHistorySelection').addEventListener('click', () => {
+        selectedSimulationHistoryIds.clear();
+        updateSimulationHistorySelection();
+    });
+    document.getElementById('buttonDeleteSelectedSimulationHistory').addEventListener('click', () => {
+        const ids = [...selectedSimulationHistoryIds];
+        void deleteSimulationHistorySelection(ids, getSimulationHistoryText('deleteSelectedConfirm',
+            'Delete the {{count}} selected records (including selections on other maps)?', { count: ids.length }));
     });
     document.getElementById("selectSimulationHistoryMap").addEventListener("change", (event) => {
         renderSimulationHistory({ preferredMapKey: event.target.value });
