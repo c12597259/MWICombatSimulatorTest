@@ -1,8 +1,8 @@
 # 战斗模拟器 Rust / WebAssembly 改造计划
 
-日期：2026-09-30。状态：已进入分步实施，P0 基准准备完成，P1 Rust/WASM 原型待执行。
+日期：2026-09-30。状态：P0 基准准备与 P1 Rust/WASM 浏览器原型已完成，下一步为 P2 完整单图实现。
 
-代码依据：`testing` 分支 `2783b09784133c7618149f852c91309e0d8da6c3`。实施前重新核对工作树、数据版本和基准。本文中的新增目录、接口与命令都是计划项，不能当成已实现功能。
+代码依据：`testing` 分支 `2783b09784133c7618149f852c91309e0d8da6c3`。实施前重新核对工作树、数据版本和基准。P0/P1 的已实现内容见阶段报告，其余目录、接口与命令仍是计划项。
 
 ## 1. 这次改造要做到什么
 
@@ -51,9 +51,9 @@
 
 选择稳定版 Rust、Cargo、`wasm32-unknown-unknown` 目标、`wasm-bindgen` 与 `wasm-pack`，继续使用现有 Webpack 5。核心数据结构使用 Rust 标准库，输入输出用 `serde` / `serde_json`。第一版采用 JSON 字符串边界，方便复用 Node 基准与定位差异。
 
-Rust 版本在原型首次构建成功后写入 `rust-toolchain.toml`；依赖锁定到 `Cargo.lock`；构建工具的精确版本写入构建脚本和说明。选择当时可用的稳定发布版本，验证后固定，不依赖会变化的 `latest` 或 nightly。`rust-version` 仅声明最低版本，不能代替精确工具链锁定。[Rust 工具链配置](https://rust-lang.github.io/rustup/overrides.html#the-toolchain-file)、[Cargo 版本声明](https://doc.rust-lang.org/cargo/reference/rust-version.html)
+P1 已在 `rust-toolchain.toml` 固定 Rust 1.98.1，依赖锁定到 `rust/Cargo.lock`，构建脚本固定 wasm-pack 0.15.0，包装依赖固定 wasm-bindgen 0.2.129，不依赖会变化的 `latest` 或 nightly。`rust-version` 仅声明最低版本，不能代替精确工具链锁定。[Rust 工具链配置](https://rust-lang.github.io/rustup/overrides.html#the-toolchain-file)、[Cargo 版本声明](https://doc.rust-lang.org/cargo/reference/rust-version.html)
 
-本机已确认 Node v18.16.1、npm 9.5.1 可用；当前 PATH 没有找到 `rustc`、`cargo`、`wasm-pack`。实施时先检查是否存在未加入 PATH 的安装，再准备工具。浏览器 WASM 的编译与 Windows 本地 Rust 测试是两件事：前者使用 WASM 目标，后者需要可用的 Windows MSVC 工具链。不要为这次计划改动现有 Node 或系统环境。[WASM 目标说明](https://doc.rust-lang.org/stable/rustc/platform-support/wasm32-unknown-unknown.html)、[Windows 目标说明](https://doc.rust-lang.org/rustc/platform-support/windows-msvc.html)
+本机沿用 Node v18.16.1、npm 9.5.1；P1 已安装固定 Rust、wasm-pack 和 WASM 目标，并使用已有 C++ Build Tools 通过本地测试。浏览器 WASM 的编译与 Windows 本地 Rust 测试是两件事：前者使用 WASM 目标，后者需要可用的 Windows MSVC 工具链。[WASM 目标说明](https://doc.rust-lang.org/stable/rustc/platform-support/wasm32-unknown-unknown.html)、[Windows 目标说明](https://doc.rust-lang.org/rustc/platform-support/windows-msvc.html)
 
 第一版不引入 Rust 线程、Rayon、共享内存或 SIMD 专项优化。现有 Worker 池已经解决多任务并行；先把单次模拟算对并测快，避免同时增加新的部署和兼容性要求。
 
@@ -286,7 +286,7 @@ WASM 不支持、初始化/网络失败或资源指纹不符时，在战斗开�
 
 ## 10. 拟增加的开发入口
 
-以下脚本由 P0–P4 逐步加入，当前仓库尚不存在新增命令。调用者始终在正式模拟器目录执行，不在 `test1` 执行构建。
+以下脚本由 P0–P4 逐步加入。P0/P1 已实现测试、冻结参考与原型构建入口；完整 WASM 战斗对照和性能入口仍待实现。调用者始终在正式模拟器目录执行，不在 `test1` 执行构建。
 
 | 命令 | 用途 |
 | --- | --- |
@@ -294,7 +294,11 @@ WASM 不支持、初始化/网络失败或资源指纹不符时，在战斗开�
 | `npm run test:combat` | 现有 JS 核心与 Worker 调度回归 |
 | `npm run test:rust` | Rust 核心测试、格式检查、Clippy；固定依赖 |
 | `npm run build:wasm` | 验证工具后生成数据、WASM 和包装中间产物 |
-| `npm run test:parity` | JS / Rust / WASM 的公开人工队伍对照 |
+| `npm run build:wasm-prototype` | P1 已实现：构建独立浏览器 Worker 原型 |
+| `npm run test:wasm` | P1 已实现：Node 加载实际 WASM 的算法对照 |
+| `npm run start:wasm-prototype` | P1 已实现：启动本机自动浏览器验收页面 |
+| `npm run test:wasm-browser-reports` | P1 已实现：核对根路径与 Pages 路径验收报告 |
+| `npm run test:parity` | P0 已实现 JS 与冻结 JS 对照；完整 Rust/WASM 队伍对照待 P2 扩展 |
 | `npm run bench:wasm -- --input "仓库外的私人队伍文件" ...` | 私人代表场景的端到端对照，报告只保存在本机 |
 | `npm run build:production` | 统一发布入口，迁移完成后包含 WASM 构建和 Webpack |
 
@@ -314,4 +318,4 @@ WASM 不支持、初始化/网络失败或资源指纹不符时，在战斗开�
 
 后续可单独评估：共用 Rust 属性计算以减少编辑端重复、二进制输入输出、进一步的数据裁剪、多线程/SIMD。这些都以实测热点和维护收益为依据，先完成当前范围。
 
-P0 已完成冻结 JS、人工对照队伍、比较工具和 72h 重复基准，见 [P0 结果](./rust-wasm-combat-p0-results.zh-CN.md) 与 [规则检查表](./rust-wasm-combat-rule-checklist.zh-CN.md)。下一次执行 P1：准备并固定 Rust 工具链，验证浏览器 Worker 内的 WASM 原型。正式页面继续使用原 JS 引擎。
+P0 已完成冻结 JS、人工对照队伍、比较工具和 72h 重复基准，见 [P0 结果](./rust-wasm-combat-p0-results.zh-CN.md)。P1 已完成工具链、RNG/队列/数值小型对照和两条真实浏览器路径的 Worker 验收，见 [P1 结果](./rust-wasm-combat-p1-results.zh-CN.md) 与 [规则检查表](./rust-wasm-combat-rule-checklist.zh-CN.md)。下一次执行 P2：完整单图纵向实现。正式页面继续使用原 JS 引擎。
