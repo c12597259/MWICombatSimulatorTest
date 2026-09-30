@@ -1,4 +1,4 @@
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct UnitId(usize);
 
 /// IDs identify objects, not HRIDs or positions. Replacements allocate a new ID;
@@ -13,6 +13,27 @@ impl<T> Default for UnitArena<T> {
     }
 }
 impl<T> UnitArena<T> {
+    pub fn iter(&self) -> impl Iterator<Item = (UnitId, &T)> {
+        self.units
+            .iter()
+            .enumerate()
+            .map(|(index, unit)| (UnitId(index), unit))
+    }
+    pub fn id_at(&self, index: usize) -> Option<UnitId> {
+        (index < self.units.len()).then_some(UnitId(index))
+    }
+    pub fn pair_mut(&mut self, first: UnitId, second: UnitId) -> Option<(&mut T, &mut T)> {
+        if first == second || first.0 >= self.units.len() || second.0 >= self.units.len() {
+            return None;
+        }
+        if first.0 < second.0 {
+            let (left, right) = self.units.split_at_mut(second.0);
+            Some((&mut left[first.0], &mut right[0]))
+        } else {
+            let (left, right) = self.units.split_at_mut(first.0);
+            Some((&mut right[0], &mut left[second.0]))
+        }
+    }
     pub fn spawn(&mut self, unit: T) -> UnitId {
         let id = UnitId(self.units.len());
         self.units.push(unit);

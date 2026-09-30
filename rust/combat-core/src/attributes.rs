@@ -91,7 +91,7 @@ pub struct CombatBuff {
     pub start_time: Option<f64>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AttributeStep {
     Update,
@@ -106,7 +106,7 @@ pub enum AttributeStep {
     Shrines { levels: [f64; 5] },
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AttributeCase {
     pub input: UnitInput,
@@ -123,7 +123,7 @@ pub struct AttributeCase {
 pub struct AttributeSnapshot {
     base_levels: [f64; 7],
     experience: f64,
-    combat_details: CombatDetails,
+    combat_details: Value,
     buff_keys: Vec<String>,
 }
 
@@ -141,6 +141,7 @@ pub struct AttributeUnit {
     pub experience: f64,
     buffs: Vec<BuffEntry>,
     permanent: Vec<BuffEntry>,
+    initialized: bool,
 }
 
 fn number(value: &Value, key: &str) -> f64 {
@@ -154,7 +155,7 @@ fn lookup<'a>(data: &'a DefinitionSet, table: &str, key: &str) -> Result<&'a Val
         .get(key)
         .ok_or_else(|| format!("Unknown {table} entry: {key}"))
 }
-fn buff_definition(value: &Value, level: f64) -> Result<CombatBuff, String> {
+pub fn buff_definition(value: &Value, level: f64) -> Result<CombatBuff, String> {
     Ok(CombatBuff {
         unique_hrid: string(value, "uniqueHrid").ok_or("Missing buff identity")?,
         type_hrid: string(value, "typeHrid").ok_or("Missing buff type")?,
@@ -177,6 +178,57 @@ fn ordered_buffs(buffs: &[BuffEntry]) -> Vec<&BuffEntry> {
 }
 
 impl AttributeUnit {
+    pub fn constructor_monster_state(&mut self) {
+        self.base_levels = [1.0; 7];
+        self.experience = 0.0;
+        self.details = CombatDetails::default();
+        self.initialized = false;
+    }
+    pub fn buffs_snapshot(&self) -> Vec<Value> {
+        ordered_buffs(&self.buffs).iter().map(|entry| json!({ "key": entry.key, "uniqueHrid": entry.buff.unique_hrid,
+            "typeHrid": entry.buff.type_hrid, "ratioBoost": entry.buff.ratio_boost, "flatBoost": entry.buff.flat_boost,
+            "duration": entry.buff.duration, "startTime": entry.buff.start_time })).collect()
+    }
+    pub fn has_buff(&self, key: &str, prefix: bool) -> bool {
+        self.buffs.iter().any(|entry| {
+            if prefix {
+                entry.key.starts_with(key)
+            } else {
+                entry.key == key
+            }
+        })
+    }
+    pub fn add_buffs(
+        &mut self,
+        buffs: &[CombatBuff],
+        time: Option<f64>,
+        data: &DefinitionSet,
+    ) -> Result<(), String> {
+        let mut changed = false;
+        for buff in buffs {
+            let mut buff = buff.clone();
+            buff.start_time = time;
+            if let Some(entry) = self
+                .buffs
+                .iter_mut()
+                .find(|entry| entry.key == buff.unique_hrid)
+            {
+                changed |= entry.buff.ratio_boost != buff.ratio_boost
+                    || entry.buff.flat_boost != buff.flat_boost;
+                entry.buff = buff;
+            } else {
+                changed = true;
+                self.buffs.push(BuffEntry {
+                    key: buff.unique_hrid.clone(),
+                    buff,
+                });
+            }
+        }
+        if changed {
+            self.update(data)?;
+        }
+        Ok(())
+    }
     pub fn new(input: UnitInput, data: &DefinitionSet) -> Result<Self, String> {
         let mut equipment: Vec<_> = DEFAULT_SLOTS
             .iter()
@@ -242,6 +294,7 @@ impl AttributeUnit {
             experience: 0.0,
             buffs: Vec::new(),
             permanent: Vec::new(),
+            initialized: true,
         };
         unit.update(data)?;
         Ok(unit)
@@ -425,6 +478,7 @@ impl AttributeUnit {
     }
 
     pub fn update(&mut self, data: &DefinitionSet) -> Result<(), String> {
+        self.initialized = true;
         let mut stats = self.initial_stats(data)?;
         let mut levels = self.base_levels;
         for (index, key) in LEVELS.iter().enumerate() {
@@ -750,7 +804,7 @@ impl AttributeUnit {
         });
         self.update(data)
     }
-    fn apply(
+    pub fn apply(
         &mut self,
         step: &AttributeStep,
         case: &AttributeCase,
@@ -770,29 +824,7 @@ impl AttributeUnit {
                 self.update(data)?;
             }
             AttributeStep::Add { buffs, time } => {
-                let mut changed = false;
-                for buff in buffs {
-                    let mut buff = buff.clone();
-                    buff.start_time = Some(*time);
-                    if let Some(entry) = self
-                        .buffs
-                        .iter_mut()
-                        .find(|entry| entry.key == buff.unique_hrid)
-                    {
-                        changed |= entry.buff.ratio_boost != buff.ratio_boost
-                            || entry.buff.flat_boost != buff.flat_boost;
-                        entry.buff = buff;
-                    } else {
-                        changed = true;
-                        self.buffs.push(BuffEntry {
-                            key: buff.unique_hrid.clone(),
-                            buff,
-                        });
-                    }
-                }
-                if changed {
-                    self.update(data)?;
-                }
+                self.add_buffs(buffs, Some(*time), data)?;
             }
             AttributeStep::Remove { keys } => {
                 let before = self.buffs.len();
@@ -847,11 +879,19 @@ impl AttributeUnit {
         }
         Ok(())
     }
-    fn snapshot(&self) -> AttributeSnapshot {
+    pub fn snapshot(&self) -> AttributeSnapshot {
+        let mut combat_details = json!(self.details);
+        if !self.initialized {
+            let stats = combat_details["combatStats"]
+                .as_object_mut()
+                .expect("serialized stats");
+            stats.remove("abilityHaste");
+            stats.remove("tenacity");
+        }
         AttributeSnapshot {
             base_levels: self.base_levels,
             experience: self.experience,
-            combat_details: self.details.clone(),
+            combat_details,
             buff_keys: ordered_buffs(&self.buffs)
                 .iter()
                 .map(|entry| entry.key.clone())

@@ -1,4 +1,4 @@
-import init, { PrototypeEngine, module_info, live_engines, live_probes, js_round, js_remainder } from '../.wasm-build/pkg/combat_wasm.js';
+import init, { PrototypeEngine, module_info, live_engines, live_probes, live_encounters, js_round, js_remainder } from '../.wasm-build/pkg/combat_wasm.js';
 import wasmUrl from '../.wasm-build/pkg/combat_wasm_bg.wasm';
 import dataUrl from '../.wasm-build/data/combat-data.json?asset';
 import manifest from '../.wasm-build/manifest.json';
@@ -45,6 +45,7 @@ async function ensureEngine(options = {}) {
 function stats() {
     return { moduleInitCount, engineInitCount, dataFetchCount, loadMode,
         liveEngines: wasm ? live_engines() : 0, liveProbes: wasm ? live_probes() : 0,
+        liveEncounters: wasm ? live_encounters() : 0,
         memoryBytes: wasm?.memory.buffer.byteLength ?? 0,
         info: engine ? JSON.parse(engine.info()) : null,
         module: wasm ? JSON.parse(module_info()) : null,
@@ -58,6 +59,27 @@ async function execute(message) {
     if (message.command === 'init') return stats();
     if (message.command === 'queue') return JSON.parse(engine.queue_trace(message.actionsJson));
     if (message.command === 'attributes') return JSON.parse(engine.attribute_trace(message.inputJson));
+    if (message.command === 'math') return JSON.parse(engine.math_trace(message.inputJson));
+    if (message.command === 'encounters') {
+        const cases = JSON.parse(message.inputJson), chunk = message.chunk ?? 1000;
+        if (!Array.isArray(cases) || cases.length > 1000 || cases.reduce((sum, value) => sum + value.maxEvents, 0) > 100_000 ||
+            !Number.isInteger(chunk) || chunk < 1 || chunk > 10_000) throw failure('INVALID_INPUT', 'Invalid encounter batch or chunk');
+        const output = [];
+        let notified = false;
+        for (const value of cases) {
+            const probe = engine.create_encounter(JSON.stringify(value));
+            try {
+                const frames = [];
+                while (!probe.done()) {
+                    frames.push(...JSON.parse(probe.advance(chunk)));
+                    if (!notified) { notified = true; self.postMessage({ id: message.id, progress: { frames: frames.length } }); }
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                }
+                output.push(frames);
+            } finally { probe.free(); }
+        }
+        return output;
+    }
     if (message.command === 'numeric') return { round: message.values.map(js_round), remainder: message.values.map(value => js_remainder(value, 2)) };
     if (message.command === 'rng') {
         if (!Number.isInteger(message.seed) || message.seed < 0 || message.seed > 0xffffffff ||

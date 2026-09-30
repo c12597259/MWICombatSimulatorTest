@@ -5,6 +5,7 @@ use mwi_combat_core::{
     INTERFACE_VERSION,
 };
 use std::cell::Cell;
+use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 
 const DATA_HASH: &str = match option_env!("MWI_COMBAT_DATA_SHA") {
@@ -14,6 +15,7 @@ const DATA_HASH: &str = match option_env!("MWI_COMBAT_DATA_SHA") {
 thread_local! {
     static LIVE_ENGINES: Cell<u32> = const { Cell::new(0) };
     static LIVE_PROBES: Cell<u32> = const { Cell::new(0) };
+    static LIVE_ENCOUNTERS: Cell<u32> = const { Cell::new(0) };
 }
 
 fn error(message: impl AsRef<str>) -> JsValue {
@@ -35,6 +37,10 @@ pub fn live_engines() -> u32 {
 pub fn live_probes() -> u32 {
     LIVE_PROBES.with(Cell::get)
 }
+#[wasm_bindgen]
+pub fn live_encounters() -> u32 {
+    LIVE_ENCOUNTERS.with(Cell::get)
+}
 
 #[wasm_bindgen]
 pub fn js_round(value: f64) -> f64 {
@@ -48,11 +54,32 @@ pub fn js_remainder(value: f64, divisor: f64) -> f64 {
 
 #[wasm_bindgen]
 pub struct PrototypeEngine {
-    definitions: DefinitionSet,
+    definitions: Rc<DefinitionSet>,
 }
 
 #[wasm_bindgen]
 impl PrototypeEngine {
+    pub fn math_trace(&self, input_json: &str) -> Result<String, JsValue> {
+        let cases: Vec<mwi_combat_core::combat_math::MathCase> =
+            serde_json::from_str(input_json).map_err(|_| error("Invalid math input"))?;
+        let output = mwi_combat_core::combat_math::math_trace(&cases).map_err(error)?;
+        serde_json::to_string(&output).map_err(|_| error("Cannot encode math trace"))
+    }
+    pub fn encounter_trace(&self, input_json: &str) -> Result<String, JsValue> {
+        let cases: Vec<mwi_combat_core::encounter::EncounterCase> =
+            serde_json::from_str(input_json).map_err(|_| error("Invalid encounter input"))?;
+        let output = mwi_combat_core::encounter::encounter_trace(&cases, self.definitions.clone())
+            .map_err(error)?;
+        serde_json::to_string(&output).map_err(|_| error("Cannot encode encounter trace"))
+    }
+    pub fn create_encounter(&self, input_json: &str) -> Result<EncounterProbe, JsValue> {
+        let case =
+            serde_json::from_str(input_json).map_err(|_| error("Invalid encounter input"))?;
+        let run = mwi_combat_core::encounter::EncounterRun::new(case, self.definitions.clone())
+            .map_err(error)?;
+        LIVE_ENCOUNTERS.with(|count| count.set(count.get() + 1));
+        Ok(EncounterProbe { run })
+    }
     pub fn attribute_trace(&self, input_json: &str) -> Result<String, JsValue> {
         let cases: Vec<mwi_combat_core::attributes::AttributeCase> =
             serde_json::from_str(input_json).map_err(|_| error("Invalid attribute input"))?;
@@ -67,7 +94,9 @@ impl PrototypeEngine {
         }
         let definitions = DefinitionSet::parse(data_json, expected_hash).map_err(error)?;
         LIVE_ENGINES.with(|count| count.set(count.get() + 1));
-        Ok(Self { definitions })
+        Ok(Self {
+            definitions: Rc::new(definitions),
+        })
     }
 
     pub fn info(&self) -> String {
@@ -95,6 +124,25 @@ impl PrototypeEngine {
 impl Drop for PrototypeEngine {
     fn drop(&mut self) {
         LIVE_ENGINES.with(|count| count.set(count.get() - 1));
+    }
+}
+#[wasm_bindgen]
+pub struct EncounterProbe {
+    run: mwi_combat_core::encounter::EncounterRun,
+}
+#[wasm_bindgen]
+impl EncounterProbe {
+    pub fn advance(&mut self, events: u32) -> Result<String, JsValue> {
+        let frames = self.run.advance(events).map_err(error)?;
+        serde_json::to_string(&frames).map_err(|_| error("Cannot encode encounter frames"))
+    }
+    pub fn done(&self) -> bool {
+        self.run.done()
+    }
+}
+impl Drop for EncounterProbe {
+    fn drop(&mut self) {
+        LIVE_ENCOUNTERS.with(|count| count.set(count.get() - 1));
     }
 }
 

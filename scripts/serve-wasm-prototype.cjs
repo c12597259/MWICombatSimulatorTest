@@ -13,7 +13,7 @@ const types = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascr
 const server = http.createServer(async (request, response) => {
     try {
         const pathname = decodeURIComponent(new URL(request.url, 'http://127.0.0.1').pathname);
-        if (['/__prototype_report', '/__attribute_report'].includes(pathname) && request.method === 'POST') {
+        if (['/__prototype_report', '/__attribute_report', '/__encounter_report'].includes(pathname) && request.method === 'POST') {
             if (request.headers.origin !== `http://127.0.0.1:${server.address().port}`) { response.writeHead(403).end(); return; }
             let body = '';
             for await (const chunk of request) {
@@ -22,10 +22,11 @@ const server = http.createServer(async (request, response) => {
             }
             const report = JSON.parse(body);
             const attributes = pathname === '/__attribute_report';
-            const paths = attributes ? ['/attributes.html', prefix + 'attributes.html'] : ['/', '/index.html', prefix, prefix + 'index.html'];
-            if (report.schemaVersion !== 1 || report.phase !== (attributes ? 'P2.1' : 'P1') || !Array.isArray(report.tests) ||
+            const encounters = pathname === '/__encounter_report';
+            const paths = encounters ? ['/encounters.html', prefix + 'encounters.html'] : attributes ? ['/attributes.html', prefix + 'attributes.html'] : ['/', '/index.html', prefix, prefix + 'index.html'];
+            if (report.schemaVersion !== 1 || report.phase !== (encounters ? 'P2.2' : attributes ? 'P2.1' : 'P1') || !Array.isArray(report.tests) ||
                 !paths.includes(report.path)) { response.writeHead(400).end(); return; }
-            const output = attributes ? path.join(root, '.bench/rust-wasm-p2-attributes') : reports;
+            const output = encounters ? path.join(root, '.bench/rust-wasm-p2-events') : attributes ? path.join(root, '.bench/rust-wasm-p2-attributes') : reports;
             fs.mkdirSync(output, { recursive: true });
             const name = report.path.startsWith(prefix) ? 'browser-pages.json' : 'browser-root.json';
             fs.writeFileSync(path.join(output, name), JSON.stringify(report, null, 2));

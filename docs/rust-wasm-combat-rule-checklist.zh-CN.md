@@ -25,6 +25,8 @@
 | awaitCooldownEvent | addNextAttackEvent | 已出现 | 等待结束与技能/普攻交错 |
 | cooldownReady | checkTriggers | 已出现 | 仅检查触发器，不增添攻击效果 |
 
+P2.2 已实现并在固定遭遇中执行上表除 enemyRespawn 以外的 17 种事件；1,186 案例 / 12,714 快照在本机 Rust、实际 WASM、浏览器 Worker 中逐字段对齐。新增 playerRespawn、weakenExpiration、furyExpiration 的针对性案例；换遭遇、地下城/迷宫分支和完整结果仍待 P2.3/P3。
+
 ## 战斗计算与效果
 
 每项都需要包括边界值和第一次不同事件的定位能力；完整结果对齐仍是共同验收要求。
@@ -50,9 +52,9 @@
 - [x] P2.1 地图、通行证、社区与印章属性增益；叠加次序和人工缺省输入对齐。
 - [ ] 迷宫箱子叠加与实际迷宫过程中的属性更新。
 - [x] P2.1 永久/临时增益属性、同名刷新/变化、过期/移除/清空/属性重算及浮点累加顺序；完整战斗事件与冷却重置仍待后续。
-- [ ] self、targeted_enemy、all_allies、all_enemies 四种触发依赖。
-- [ ] 活跃/死亡数量、最低血量比例、当前/缺失 HP/MP、各增益状态与控制状态条件。
-- [ ] greater_than_equal、less_than_equal、is_active、is_inactive 四种比较器及相等边界。
+- [x] P2.2 self、targeted_enemy、all_allies、all_enemies 四种触发依赖，840 个有效条件/比较器组合对齐。
+- [x] P2.2 活跃/死亡数量、最低血量比例、当前/缺失 HP/MP、54 种增益/控制等条件的固定遭遇测试；地图过程组合仍待后续。
+- [x] P2.2 greater_than_equal、less_than_equal、is_active、is_inactive 四种比较器；控制到期同时间边界、增益对象及缺失值对齐。
 - [ ] JS 的 Number/default/undefined/null、负半数 round 与数学函数 `pow(..., 1.4)`。
 
 ## 场景、队列与统计
@@ -72,3 +74,7 @@ P0 已观察 18 种分派事件中的 15 种；其余三种和上面的内部边
 P1 的队列/RNG/round/余数原型与根路径、Pages 子路径 Worker 验收已通过。round 覆盖负半数、负零、大整数和非有限数；完整数值转换与 pow 仍待验证。见 [P1 结果](./rust-wasm-combat-p1-results.zh-CN.md)。
 
 P2.1 的 3,473 个属性案例、7,459 个快照在本机 Rust、实际 WASM 和浏览器 Worker 中逐字段精确对齐；没有浮点容差。JSON 解析启用 `float_roundtrip` 并添加实际装备小数的位值回归。独立身份模型测试通过，但尚未连接真实战斗事件，因此事件、触发器与完整结果仍未验收。见 [P2.1 结果](./rust-wasm-combat-p2-attributes-results.zh-CN.md)。
+
+P2.2 将身份、队列、RNG 与属性连接到真实战斗事件，覆盖全部 57 种公开技能的等级 1/20、装备机制、五风格/四伤害、正零负抗性、HOT/DOT、控制/叠层到期、初始冷却、回蓝等待、死亡/复活与晋升。最低覆盖要求实际反伤/反击/派生技能、耗血/耗蓝、晋升新 ID 和来源死亡后的 DOT；1/7/1000 事件分段、失败后不可续跑、共享定义生命周期、Worker BUSY/取消/重建也已验证。它们证明固定遭遇，不将上面的完整地图/全规则组合项提前全部勾选。
+
+数学 65 案例与冻结 Node 18/V8 10.2 精确对齐；当前 Edge 原生 pow 另有 2,037/20,012 个末位差异，已保存审计。浏览器 Worker 对照使用冻结期望，尚未证明当前浏览器 JS 完整战斗一致。P2.3/P3/P5 必须验证这条兼容边界；不得扩大容差或替换参考。完整统计、地图/地下城/迷宫、时序与长跑仍待后续。见 [P2.2 结果](./rust-wasm-combat-p2-events-results.zh-CN.md)。

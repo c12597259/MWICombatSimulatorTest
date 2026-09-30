@@ -14,7 +14,7 @@ function compile(config) {
     });
 }
 
-async function prepare() {
+async function compileFrozen(entry, filename) {
     const reference = loadReference('js-reference-2783b09-p0');
     const archive = path.join(root, '.bench', reference.sourceArchive);
     for (const { file, sha256: expected } of [...reference.files.engine, ...reference.files.data]) {
@@ -22,7 +22,7 @@ async function prepare() {
     }
     const source = path.join(root, 'src');
     const modules = await compile({ mode: 'development', target: 'node', devtool: false, context: root,
-        entry: './bench/attributesReference.js', output: { path: path.join(root, '.bench'), filename: 'attributes-reference.cjs', library: { type: 'commonjs2' } },
+        entry, output: { path: path.join(root, '.bench'), filename, library: { type: 'commonjs2' } },
         plugins: [new webpack.NormalModuleReplacementPlugin(/.*/, resource => {
             const absolute = path.resolve(resource.context, resource.request);
             if (absolute.startsWith(source + path.sep)) resource.request = path.join(archive, 'src', path.relative(source, absolute));
@@ -37,6 +37,10 @@ async function prepare() {
     for (const file of ['combatsimulator/player.js', 'combatsimulator/monster.js', 'worker.js', 'guildCombatShrines.js']) {
         if (!resources.includes(path.join(archive, 'src', file))) throw new Error(`Frozen reference module not found: ${file}`);
     }
+    return reference;
+}
+async function prepare() {
+    const reference = await compileFrozen('./bench/attributesReference.js', 'attributes-reference.cjs');
     await compile({ mode: 'development', target: 'node', devtool: false, context: root, entry: './bench/attributesCases.js',
         output: { path: path.join(root, '.bench'), filename: 'attributes-cases.cjs', library: { type: 'commonjs2' } } });
     globalThis.onmessage = () => {};
@@ -60,4 +64,4 @@ async function prepare() {
     return manifest;
 }
 if (require.main === module) prepare().catch(error => { console.error(error); process.exitCode = 1; });
-module.exports = { prepare };
+module.exports = { prepare, compileFrozen, compile };

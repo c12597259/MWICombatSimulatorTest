@@ -1,6 +1,6 @@
 // Explicit JS-compatible attribute fields; recalculation is in attributes.rs.
-#[derive(Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CombatStats {
     pub attack_interval: f64,
     pub auto_attack_damage: f64,
@@ -347,7 +347,7 @@ impl CombatStats {
         }
     }
 }
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CombatDetails {
     pub stamina_level: f64,

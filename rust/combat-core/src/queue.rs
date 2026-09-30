@@ -12,21 +12,36 @@ pub struct ProbeEvent {
     pub hrid: String,
 }
 
-#[derive(Default)]
-pub struct CompatEventQueue {
-    heap: Vec<ProbeEvent>,
+pub trait TimedEvent {
+    fn id(&self) -> u32;
+    fn time(&self) -> f64;
 }
-
-impl CompatEventQueue {
-    pub fn events(&self) -> &[ProbeEvent] {
+impl TimedEvent for ProbeEvent {
+    fn id(&self) -> u32 {
+        self.id
+    }
+    fn time(&self) -> f64 {
+        self.time
+    }
+}
+pub struct CompatEventQueue<T: TimedEvent = ProbeEvent> {
+    heap: Vec<T>,
+}
+impl<T: TimedEvent> Default for CompatEventQueue<T> {
+    fn default() -> Self {
+        Self { heap: Vec::new() }
+    }
+}
+impl<T: TimedEvent> CompatEventQueue<T> {
+    pub fn events(&self) -> &[T] {
         &self.heap
     }
     pub fn clear(&mut self) {
         self.heap.clear();
     }
 
-    pub fn push(&mut self, event: ProbeEvent) -> Result<(), String> {
-        if !event.time.is_finite() {
+    pub fn push(&mut self, event: T) -> Result<(), String> {
+        if !event.time().is_finite() {
             return Err("Event time must be finite".into());
         }
         self.heap.push(event);
@@ -34,7 +49,7 @@ impl CompatEventQueue {
         Ok(())
     }
 
-    pub fn pop(&mut self) -> Option<ProbeEvent> {
+    pub fn pop(&mut self) -> Option<T> {
         let last = self.heap.pop()?;
         if self.heap.is_empty() {
             return Some(last);
@@ -45,7 +60,7 @@ impl CompatEventQueue {
     }
 
     pub fn remove(&mut self, id: u32) -> bool {
-        let Some(index) = self.heap.iter().position(|event| event.id == id) else {
+        let Some(index) = self.heap.iter().position(|event| event.id() == id) else {
             return false;
         };
         if index == 0 {
@@ -62,12 +77,12 @@ impl CompatEventQueue {
         true
     }
 
-    pub fn clear_matching(&mut self, predicate: impl Fn(&ProbeEvent) -> bool) -> bool {
+    pub fn clear_matching(&mut self, predicate: impl Fn(&T) -> bool) -> bool {
         let matches: Vec<u32> = self
             .heap
             .iter()
             .filter(|event| predicate(event))
-            .map(|event| event.id)
+            .map(|event| event.id())
             .collect();
         for id in &matches {
             self.remove(*id);
@@ -78,7 +93,7 @@ impl CompatEventQueue {
     fn sort_up(&mut self, mut index: usize) {
         while index > 0 {
             let parent = (index - 1) / 2;
-            if self.heap[parent].time <= self.heap[index].time {
+            if self.heap[parent].time() <= self.heap[index].time() {
                 break;
             }
             self.heap.swap(index, parent);
@@ -93,12 +108,13 @@ impl CompatEventQueue {
                 break;
             }
             let right = left + 1;
-            let best = if right < self.heap.len() && self.heap[right].time < self.heap[left].time {
-                right
-            } else {
-                left
-            };
-            if self.heap[index].time <= self.heap[best].time {
+            let best =
+                if right < self.heap.len() && self.heap[right].time() < self.heap[left].time() {
+                    right
+                } else {
+                    left
+                };
+            if self.heap[index].time() <= self.heap[best].time() {
                 break;
             }
             self.heap.swap(index, best);

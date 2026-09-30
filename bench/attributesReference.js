@@ -9,9 +9,7 @@ export { default as parsePlayerJson } from '../src/parsePlayerJson.js';
 
 const levels = ['stamina', 'intelligence', 'attack', 'melee', 'defense', 'ranged', 'magic'];
 const shrineKeys = ['force', 'tempo', 'spirit', 'rarity', 'scholar'];
-export async function attributeTrace(cases) {
-    const output = [];
-    for (const item of cases) {
+export async function createAttributeUnit(item) {
         const input = item.input;
         let unit;
         if (input.kind === 'monster') unit = new Monster(input.hrid, input.difficultyTier || 0, input.roomLevel || 0);
@@ -34,6 +32,12 @@ export async function attributeTrace(cases) {
                     labyrinth: null, extra: item.extra || {}, simulationTimeLimit: 0 } });
             } finally { CombatSimulator.prototype.simulate = original; }
         }
+        return unit;
+}
+export async function attributeTrace(cases) {
+    const output = [];
+    for (const item of cases) {
+        const unit = await createAttributeUnit(item);
         unit.updateCombatDetails();
         const snapshot = () => JSON.parse(JSON.stringify({ baseLevels: levels.map(key => unit[`${key}Level`]),
             experience: unit.experience, combatDetails: unit.combatDetails, buffKeys: Object.keys(unit.combatBuffs) }));

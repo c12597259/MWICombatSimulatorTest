@@ -9,6 +9,7 @@ const { build } = require('./build-combat-wasm.cjs');
     if (fs.existsSync(ready)) fs.unlinkSync(ready);
     build();
     await require('./prepare-attribute-reference.cjs').prepare();
+    await require('./prepare-encounter-reference.cjs').prepare();
     await new Promise((resolve, reject) => {
         const compiler = webpack(require('../prototype/webpack.config.cjs'));
         compiler.run((error, stats) => compiler.close(closeError => {
