@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "identity": {
+    "normalizationVersion": 1,
+    "rngVersion": "mulberry32-js-number-v1",
+    "engineSourceSha256": "c02aa7ba0d14cd16da73c65baf91c681be3a8a7800958b722437fb25610d8c0a",
+    "gameDataSha256": "dd2169d14584689aa7d0880bd220edb41e71a9a27430731e8db0a8d8b0bddd37",
+    "scenariosSha256": "81f0af4ad092a577257c281f0ba30dbea96bbec3996663546ea35929fc5ef546",
+    "fixtureHashes": {
+      "synthetic-party.json": "4e649df7d420ce0effe228b61e0ba78d5677a0453a9f6a81f4801854d7efc53d",
+      "synthetic-weak.json": "63d1d411b8f88b4d1784f6ea55794c00638e5fd1a1bbde0dd09e04ea3972b22e"
+    }
+  },
+  "scenarios": {
+    "dungeon-seed7": {
+      "canonicalHash": "4eca948c0b56f385a2e4745f160033abdfd08b136b7c3f8cd090759e0e79e9f7",
+      "randomCalls": 140680
+    },
+    "dungeon-hpmp": {
+      "canonicalHash": "6631318f7d19476edf6c7c1da8db46415db9937765b9c58220c8d5e1a1f18f99",
+      "randomCalls": 68822
+    },
+    "dungeon-wipes": {
+      "canonicalHash": "50eb78ac1655fdfa4e483a82f26caf09a5bfe08674894db47afc9ec754b4cdd8",
+      "randomCalls": 11681
+    },
+    "planet-party": {
+      "canonicalHash": "194735fc4593ca4c66d34635ffc9905b84a7c463910fc7bbefdb1758a13c6169",
+      "randomCalls": 33990
+    },
+    "planet-solo": {
+      "canonicalHash": "89263ec588a75f8304f908e6964eee9bc9fff558f805471e36926c438f0c64c5",
+      "randomCalls": 27132
+    },
+    "labyrinth": {
+      "canonicalHash": "278db1f81f2ce0335ce1b2e1c67704e2d045cccf7857424f5a7a7eaf9dffc1d1",
+      "randomCalls": 4032
+    },
+    "guild-extra-buffs": {
+      "canonicalHash": "8c65ffb6e99557560930845cd7b6544951443bd691489946ba541ba8af0d594e",
+      "randomCalls": 13339
+    },
+    "labyrinth-crates": {
+      "canonicalHash": "8ffaebbb6ace5bba33226434a7d19b767f88f184bde4d140dec3a2fc706c05fd",
+      "randomCalls": 4233
+    },
+    "dungeon-completion": {
+      "canonicalHash": "436df5a34ddc9f7ed3192236c4d77d81ae9ad9d5483a203c444da64a7728747b",
+      "randomCalls": 121935
+    }
+  }
+}

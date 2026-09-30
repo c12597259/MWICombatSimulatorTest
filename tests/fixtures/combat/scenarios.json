@@ -1,0 +1,11 @@
+[
+  { "name": "dungeon-seed7", "fixture": "synthetic-party.json", "options": { "hours": 2, "seed": 7 } },
+  { "name": "dungeon-hpmp", "fixture": "synthetic-party.json", "options": { "hours": 1, "seed": 42, "visualization": true }, "minimumCoverage": { "timeSeriesSamples": 1 } },
+  { "name": "dungeon-wipes", "fixture": "synthetic-weak.json", "options": { "hours": 1, "players": 1 }, "minimumCoverage": { "failed": 1, "wipeEvents": 1 } },
+  { "name": "planet-party", "fixture": "synthetic-party.json", "options": { "hours": 1, "players": 3, "zone": "/actions/combat/aqua_planet", "tier": 1 } },
+  { "name": "planet-solo", "fixture": "synthetic-party.json", "options": { "hours": 1, "players": 1, "zone": "/actions/combat/infernal_abyss", "tier": 0 } },
+  { "name": "labyrinth", "fixture": "synthetic-party.json", "options": { "hours": 0.2, "labyrinth": "/monsters/cyclops", "room": 150, "players": 1 }, "minimumCoverage": { "labyrinthAttempts": 2 } },
+  { "name": "guild-extra-buffs", "fixture": "synthetic-party.json", "options": { "hours": 0.2, "seed": 42, "extra": { "mooPass": true, "comExp": 2, "comDrop": 3, "personalBuffs": ["/items/seal_of_attack_speed", "/items/seal_of_critical_rate"] } } },
+  { "name": "labyrinth-crates", "fixture": "synthetic-party.json", "options": { "hours": 0.2, "seed": 7, "labyrinth": "/monsters/cyclops", "room": 150, "players": 1, "crates": ["/items/basic_food_crate", "/items/expert_coffee_crate"] } },
+  { "name": "dungeon-completion", "fixture": "synthetic-party.json", "options": { "hours": 2, "seed": 42, "tier": 0, "zone": "/actions/combat/chimerical_den" }, "minimumCoverage": { "completed": 1 } }
+]
