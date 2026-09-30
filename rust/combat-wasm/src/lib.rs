@@ -53,6 +53,13 @@ pub struct PrototypeEngine {
 
 #[wasm_bindgen]
 impl PrototypeEngine {
+    pub fn attribute_trace(&self, input_json: &str) -> Result<String, JsValue> {
+        let cases: Vec<mwi_combat_core::attributes::AttributeCase> =
+            serde_json::from_str(input_json).map_err(|_| error("Invalid attribute input"))?;
+        let output = mwi_combat_core::attributes::attribute_trace(&cases, &self.definitions)
+            .map_err(error)?;
+        serde_json::to_string(&output).map_err(|_| error("Cannot encode attribute trace"))
+    }
     #[wasm_bindgen(constructor)]
     pub fn new(data_json: &str, expected_hash: &str) -> Result<PrototypeEngine, JsValue> {
         if expected_hash != DATA_HASH {

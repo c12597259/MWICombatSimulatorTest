@@ -47,6 +47,11 @@ impl DefinitionSet {
     pub fn source_hash(&self) -> &str {
         &self.source_hash
     }
+    pub fn definition(&self, name: &str) -> Result<&Value, String> {
+        self.definitions
+            .get(name)
+            .ok_or_else(|| format!("Missing definition table: {name}"))
+    }
     pub fn count(&self) -> usize {
         self.definitions.as_object().map_or(0, |map| map.len())
     }

@@ -57,6 +57,7 @@ async function execute(message) {
     await ensureEngine(message.options);
     if (message.command === 'init') return stats();
     if (message.command === 'queue') return JSON.parse(engine.queue_trace(message.actionsJson));
+    if (message.command === 'attributes') return JSON.parse(engine.attribute_trace(message.inputJson));
     if (message.command === 'numeric') return { round: message.values.map(js_round), remainder: message.values.map(value => js_remainder(value, 2)) };
     if (message.command === 'rng') {
         if (!Number.isInteger(message.seed) || message.seed < 0 || message.seed > 0xffffffff ||
