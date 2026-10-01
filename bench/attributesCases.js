@@ -52,6 +52,39 @@ export function attributeGroups() {
         { op: 'start' }, { op: 'equip', equipment: { slot: '/equipment_types/main_hand', hrid: '/items/regal_sword', enhancementLevel: 20 } },
         { op: 'equip', equipment: { slot: '/equipment_types/main_hand', hrid: null, enhancementLevel: 0 } },
         { op: 'levels', levels: [1, 2, 3, 4, 5, 6, 7] }, { op: 'update' }, { op: 'clear' }] });
+    const equip = (slot, hrid, enhancementLevel = 0) => ({ op: 'equip', equipment: { slot: '/equipment_types/' + slot, hrid, enhancementLevel } });
+    const itemFor = slot => Object.values(items).find(item => item.equipmentDetail?.type === '/equipment_types/' + slot).hrid;
+    lifecycle.push({ name: 'cache-enhancement-and-buff-isolation', input: normalizeCharacterInput(party['1']), steps: [
+        { op: 'start' }, ...[10, 20, 0, 10].flatMap(enhancementLevel => [
+            equip('main_hand', '/items/regal_sword', enhancementLevel),
+            { op: 'add', time: 1, buffs: [buff('cache-crit', 'critical_rate', 0, 0.125), buff('cache-regen', 'hp_regen', 0.2, 0.01)] },
+            { op: 'update' }, { op: 'remove', keys: ['cache-crit', 'cache-regen'] }, { op: 'update' }
+        ]), { op: 'clear' }, { op: 'update' }] });
+    const bulwark = Object.values(items).find(item => item.equipmentDetail?.type === '/equipment_types/two_hand' && item.hrid.includes('bulwark')).hrid;
+    lifecycle.push({ name: 'cache-weapon-fallback-and-removal', input: base(), steps: [
+        equip('main_hand', '/items/regal_sword', 10), equip('two_hand', '/items/cursed_bow', 7),
+        equip('main_hand', null), { op: 'update' }, equip('main_hand', '/items/regal_sword', 20),
+        equip('two_hand', null), equip('main_hand', null), { op: 'update' },
+        equip('two_hand', bulwark, 10), { op: 'levels', levels: [100, 110, 120, 130, 140, 150, 160] },
+        { op: 'update' }, equip('two_hand', null), { op: 'update' }] });
+    lifecycle.push({ name: 'cache-new-slots-and-removal', input: base(), steps: [
+        ...['neck', 'earrings', 'ring', 'charm'].flatMap(slot => [equip(slot, itemFor(slot), 7), { op: 'update' }]),
+        ...['neck', 'earrings', 'ring', 'charm'].flatMap(slot => [equip(slot, itemFor(slot), 20), { op: 'update' }]),
+        ...['neck', 'earrings', 'ring', 'charm'].flatMap(slot => [equip(slot, null), { op: 'update' }])
+    ] });
+    lifecycle.push({ name: 'cache-pouch-levels-and-shrines', input: normalizeCharacterInput(party['2']), steps: [
+        { op: 'start' }, equip('pouch', null), { op: 'update' }, equip('pouch', itemFor('pouch')),
+        { op: 'levels', levels: [1, 2, 3, 4, 5, 6, 7] }, { op: 'update' },
+        equip('pouch', '/items/giant_pouch', 20), { op: 'shrines', levels: [20, 20, 20, 20, 20] },
+        { op: 'update' }, { op: 'shrines', levels: [0, 0, 0, 0, 0] }, { op: 'clear' }, { op: 'update' }
+    ] });
+    lifecycle.push({ name: 'cache-repeated-buff-expiry-and-reset', input: normalizeCharacterInput(party['3']), steps: [
+        { op: 'start' }, ...[1, 201, 401].flatMap(time => [
+            { op: 'add', time, buffs: [buff('cache-damage', 'damage', 0.15, 0), buff('cache-mp', 'mp_regen', 0.2, 0.01)] },
+            { op: 'update' }, { op: 'expire', time: time + 100 }, { op: 'update' },
+            { op: 'reset', time: time + 101 }, { op: 'clear' }, { op: 'update' }
+        ])
+    ] });
     // Name is test metadata; strict Rust request only includes the shared normalized schema.
     const clean = cases => cases.map(({ name, ...input }) => ({ name, request: input }));
     return { equipment: clean(equipment), monsters: clean(monsterCases), permanent: clean(permanent), lifecycle: clean(lifecycle) };

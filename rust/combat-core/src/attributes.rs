@@ -135,9 +135,15 @@ struct BuffEntry {
     buff: CombatBuff,
 }
 
+struct EquipmentStatsCache {
+    definition_hash: String,
+    stats: CombatStats,
+}
+
 pub struct AttributeUnit {
     input: UnitInput,
     equipment: Vec<EquipmentInput>,
+    equipment_base: Option<EquipmentStatsCache>,
     base_levels: [f64; 7],
     pub details: CombatDetails,
     pub experience: f64,
@@ -301,6 +307,7 @@ impl AttributeUnit {
         let mut unit = Self {
             input,
             equipment,
+            equipment_base: None,
             base_levels,
             details: CombatDetails::default(),
             experience: 0.0,
@@ -362,6 +369,11 @@ impl AttributeUnit {
     }
 
     fn initial_stats(&mut self, data: &DefinitionSet) -> Result<CombatStats, String> {
+        if let Some(cache) = &self.equipment_base {
+            if cache.definition_hash == data.source_hash() {
+                return Ok(cache.stats.clone());
+            }
+        }
         let mut stats = CombatStats::default();
         match &self.input {
             UnitInput::Player(_) => {
@@ -450,6 +462,15 @@ impl AttributeUnit {
                     stats.attack_interval = number(&raw["combatDetails"], "attackInterval");
                 }
             }
+        }
+        // Cache the original equipment sums before levels or buffs are applied.
+        // Equipment is private and Equip invalidates it; definition sets are immutable.
+        // Preserve the original accumulation order on every cache miss.
+        if matches!(self.input, UnitInput::Player(_)) {
+            self.equipment_base = Some(EquipmentStatsCache {
+                definition_hash: data.source_hash().into(),
+                stats: stats.clone(),
+            });
         }
         Ok(stats)
     }
@@ -863,6 +884,7 @@ impl AttributeUnit {
                 }
                 Self::validate_equipment(equipment, data)?;
                 Self::set_equipment(&mut self.equipment, equipment.clone());
+                self.equipment_base = None;
                 self.update(data)?;
             }
             AttributeStep::Levels { levels } => {
@@ -931,4 +953,56 @@ pub fn attribute_trace(cases: &[AttributeCase], data: &DefinitionSet) -> Result<
         output.push(frames);
     }
     Ok(json!(output))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn definitions(hash: &str, armor: f64) -> DefinitionSet {
+        DefinitionSet::parse(
+            &json!({"schemaVersion": 1, "sourceSha256": hash, "definitions": {
+                "actionDetailMap": {}, "abilityDetailMap": {}, "combatMonsterDetailMap": {},
+                "itemDetailMap": {"/items/test_helmet": {"equipmentDetail": {
+                    "combatStats": {"armor": armor}, "combatEnhancementBonuses": {}
+                }}}, "enhancementLevelTotalBonusMultiplierTable": [0.0]
+            }})
+            .to_string(),
+            hash,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn equipment_follows_definition_version_and_rejected_edits_preserve_state() {
+        let case: AttributeCase = serde_json::from_value(json!({"input": {
+            "kind": "player", "inputVersion": 1, "hrid": "player1",
+            "levels": [1, 1, 1, 1, 1, 1, 1], "equipment": [{
+                "slot": "/equipment_types/head", "hrid": "/items/test_helmet", "enhancementLevel": 0
+            }], "houseRooms": [], "achievements": {}, "shrines": [0, 0, 0, 0, 0],
+            "guildBuffs": [], "food": [], "drinks": [], "abilities": [], "debuffOnLevelGap": 0
+        }}))
+        .unwrap();
+        let old = definitions("old", 7.0);
+        let new = definitions("new", 19.0);
+        let mut unit = AttributeUnit::new(case.input.clone(), &old).unwrap();
+        assert_eq!(unit.details.total_armor, 7.2);
+        unit.update(&new).unwrap();
+        assert_eq!(unit.details.total_armor, 19.2);
+        let before = serde_json::to_value(unit.snapshot()).unwrap();
+        for (hrid, enhancement_level) in [("/items/missing", 0.0), ("/items/test_helmet", 1.0)] {
+            let edit = AttributeStep::Equip {
+                equipment: EquipmentInput {
+                    slot: "/equipment_types/head".into(),
+                    hrid: Some(hrid.into()),
+                    enhancement_level,
+                },
+            };
+            assert!(unit.apply(&edit, &case, &new).is_err());
+            unit.update(&new).unwrap();
+            assert_eq!(serde_json::to_value(unit.snapshot()).unwrap(), before);
+        }
+        unit.update(&old).unwrap();
+        assert_eq!(unit.details.total_armor, 7.2);
+    }
 }

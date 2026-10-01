@@ -8,6 +8,7 @@
         "test:combat": "node --test tests/combatPerformance.test.mjs tests/simulationWorkerPool.test.mjs",
         "bench": "node bench/run.cjs",
         "bench:freeze": "node bench/freeze.cjs",
+        "bench:wasm-cache": "node scripts/benchmark-wasm-cache.cjs",
         "test:parity-tools": "node --test tests/combatParityTools.test.mjs",
         "test:parity": "node bench/parity.cjs",
         "test:rust": "node scripts/test-rust.cjs",
