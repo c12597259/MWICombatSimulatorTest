@@ -101,6 +101,51 @@ export function encounterGroups() {
     manaRecovery.players[0].input.abilities = [selected('/abilities/fireball', 20), selected('/abilities/quick_shot', 1)];
     manaRecovery.setup.push({ unit: 0, combatDetails: { currentManapoints: 0 }, flags: { isOutOfMana: true } });
     mechanics.push(named('mana-recovery-awaits-next-attack', manaRecovery));
+    const condition = (dependency, kind, comparator, value = 0) => ({
+        dependencyHrid: `/combat_trigger_dependencies/${dependency}`,
+        conditionHrid: `/combat_trigger_conditions/${kind}`,
+        comparatorHrid: `/combat_trigger_comparators/${comparator}`, value
+    });
+    const lowMana = condition('self', 'current_mp', 'less_than_equal', 35);
+    const priorityOom = stable(base()); priorityOom.maxEvents = 24; priorityOom.timeLimit = 8e9;
+    priorityOom.players[0].input.abilities = [null, selected('/abilities/heal', 1, [lowMana]), null, selected('/abilities/fireball', 1, [lowMana])];
+    priorityOom.setup.push({ unit: 0, combatDetails: { currentManapoints: 35, combatStats: { manaLeech: 0, mpRegenPer10: 0 } } });
+    mechanics.push(named('trigger-read-sparse-priority-oom-skips-affordable-skill', priorityOom));
+    const priorityFalse = stable(base()); priorityFalse.maxEvents = 24;
+    priorityFalse.players[0].input.abilities = [null, selected('/abilities/heal', 1, [
+        condition('self', 'current_mp', 'greater_than_equal', 1e20),
+        condition('all_enemies', 'number_of_active_units', 'greater_than_equal', 1)
+    ]), null, selected('/abilities/quick_shot', 1)];
+    mechanics.push(named('trigger-read-sparse-false-condition-allows-later-skill', priorityFalse));
+    const consumableChain = stable(base()); consumableChain.maxEvents = 32;
+    consumableChain.players[0].input.food = [
+        { hrid: '/items/apple_gummy', triggers: [condition('self', 'current_mp', 'less_than_equal', 0)] },
+        { hrid: '/items/orange_gummy', triggers: [condition('self', 'current_mp', 'greater_than_equal', 80)] },
+        { hrid: '/items/gummy', triggers: [condition('self', 'current_mp', 'greater_than_equal', 151)] }
+    ];
+    consumableChain.players[0].input.drinks = [
+        { hrid: '/items/intelligence_coffee', triggers: [condition('self', 'current_mp', 'greater_than_equal', 150)] },
+        null, { hrid: '/items/channeling_coffee', triggers: [condition('self', 'intelligence_coffee', 'is_active')] }
+    ];
+    consumableChain.setup.push({ unit: 0, combatDetails: { maxManapoints: 150, currentManapoints: 0 }, flags: { isOutOfMana: true } });
+    mechanics.push(named('trigger-read-consumables-observe-prior-recovery-and-buff', consumableChain));
+    const mixedSides = stable(base([player(1, true), player(2, true), player(3, true)], [enemy('/monsters/crab'), enemy('/monsters/crab')]));
+    mixedSides.maxEvents = 32;
+    mixedSides.players[0].input.abilities = [selected('/abilities/fireball', 1, [
+        condition('all_allies', 'number_of_dead_units', 'greater_than_equal', 1),
+        condition('all_allies', 'number_of_active_units', 'greater_than_equal', 2),
+        condition('all_allies', 'lowest_hp_percentage', 'less_than_equal', 25),
+        condition('all_allies', 'current_hp', 'greater_than_equal', 100_000),
+        condition('all_enemies', 'number_of_dead_units', 'greater_than_equal', 1),
+        condition('all_enemies', 'number_of_active_units', 'greater_than_equal', 1),
+        condition('all_enemies', 'lowest_hp_percentage', 'less_than_equal', 25),
+        condition('targeted_enemy', 'current_hp', 'greater_than_equal', 1)
+    ])];
+    mixedSides.setup.push({ unit: 1, combatDetails: { currentHitpoints: 0 } },
+        { unit: 2, combatDetails: { currentHitpoints: 20_000 } },
+        { unit: 3, combatDetails: { currentHitpoints: 0 } },
+        { unit: 4, combatDetails: { currentHitpoints: 200_000 } });
+    mechanics.push(named('trigger-read-live-dead-lowest-and-sum-on-both-sides', mixedSides));
     const triggers = [];
     for (const hrid of Object.keys(conditions)) for (const dependency of ['self', 'targeted_enemy', 'all_allies', 'all_enemies']) {
         const key = hrid.split('/').pop();

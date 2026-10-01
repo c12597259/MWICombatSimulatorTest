@@ -272,12 +272,16 @@ impl EncounterRun {
             .add_buffs(buffs, time, &self.data)
     }
     pub(crate) fn sides(&self, source: UnitId) -> (Vec<UnitId>, Option<Vec<UnitId>>) {
+        let (allies, enemies) = self.side_refs(source);
+        (allies.to_vec(), enemies.map(<[UnitId]>::to_vec))
+    }
+    fn side_refs(&self, source: UnitId) -> (&[UnitId], Option<&[UnitId]>) {
         if self.unit(source).player {
-            (self.players.clone(), self.enemies.clone())
+            (&self.players, self.enemies.as_deref())
         } else {
             (
-                self.enemies.clone().unwrap_or_default(),
-                Some(self.players.clone()),
+                self.enemies.as_deref().unwrap_or_default(),
+                Some(&self.players),
             )
         }
     }
@@ -631,26 +635,31 @@ impl EncounterRun {
                 };
                 let condition = trigger.condition_hrid.rsplit('/').next().unwrap_or("");
                 let value = match condition {
-                    "number_of_active_units" => self.live(values).len() as f64,
+                    "number_of_active_units" => {
+                        values.iter().filter(|id| self.unit(**id).alive()).count() as f64
+                    }
                     "number_of_dead_units" => values
                         .iter()
                         .filter(|id| self.unit(**id).attributes.details.current_hitpoints <= 0.0)
                         .count() as f64,
                     "lowest_hp_percentage" => {
-                        self.live(values).iter().fold(2.0_f64, |min, id| {
-                            let details = &self.unit(*id).attributes.details;
-                            let current = details.current_hitpoints / details.max_hitpoints;
-                            if current < min {
-                                current
-                            } else {
-                                min
-                            }
-                        }) * 100.0
+                        values.iter().filter(|id| self.unit(**id).alive()).fold(
+                            2.0_f64,
+                            |min, id| {
+                                let details = &self.unit(*id).attributes.details;
+                                let current = details.current_hitpoints / details.max_hitpoints;
+                                if current < min {
+                                    current
+                                } else {
+                                    min
+                                }
+                            },
+                        ) * 100.0
                     }
                     _ => {
                         let mut total = 0.0;
                         let mut object = false;
-                        for id in self.live(values) {
+                        for id in values.iter().copied().filter(|id| self.unit(*id).alive()) {
                             let value = self.unit(id).trigger_value(trigger, self.time)?;
                             total += value.number;
                             object |= value.object;
@@ -698,22 +707,22 @@ impl EncounterRun {
         if unit.stunned || (ability && unit.silenced) || last + cooldown > self.time {
             return Ok(false);
         }
-        let (allies, enemies) = self.sides(id);
-        let target = self.first_target(enemies.as_deref());
+        let (allies, enemies) = self.side_refs(id);
+        let target = self.first_target(enemies);
         let mut active = true;
         // The original loop evaluates all trigger conditions even after one fails.
         for trigger in triggers {
-            if !self.trigger(trigger, id, target, &allies, enemies.as_deref())? {
+            if !self.trigger(trigger, id, target, allies, enemies)? {
                 active = false;
             }
         }
         Ok(active)
     }
-    pub(crate) fn can_use(&mut self, id: UnitId, ability: &Ability) -> bool {
+    pub(crate) fn can_use(&mut self, id: UnitId, mana_cost: f64) -> bool {
         if !self.unit(id).alive() {
             return false;
         }
-        let oom = self.unit(id).attributes.details.current_manapoints < ability.mana_cost;
+        let oom = self.unit(id).attributes.details.current_manapoints < mana_cost;
         if self.unit(id).player {
             self.emit(json!(["oom", id, oom, self.time]));
         }
@@ -725,28 +734,38 @@ impl EncounterRun {
         }) {
             return Ok(());
         }
-        let abilities = self.unit(id).abilities.clone();
+        let count = self.unit(id).abilities.len();
         let mut skip = false;
         let mut used = false;
-        for (index, ability) in abilities.iter().enumerate() {
-            let Some(ability) = ability else {
-                continue;
-            };
+        for index in 0..count {
             if used || skip {
                 continue;
             }
-            let haste = self.unit(id).attributes.details.combat_stats.ability_haste;
-            let cd = if haste > 0.0 {
-                ability.cooldown * 100.0 / (100.0 + haste)
-            } else {
-                ability.cooldown
+            // Trigger evaluation only reads state. Copy the scalars needed by
+            // scheduling rather than cloning every ability, effect and trigger.
+            let (triggered, mana_cost, cast) = {
+                let unit = self.unit(id);
+                let Some(ability) = unit.abilities[index].as_ref() else {
+                    continue;
+                };
+                let haste = unit.attributes.details.combat_stats.ability_haste;
+                let cd = if haste > 0.0 {
+                    ability.cooldown * 100.0 / (100.0 + haste)
+                } else {
+                    ability.cooldown
+                };
+                (
+                    self.should_trigger(id, ability.last_used, cd, &ability.triggers, true)?,
+                    ability.mana_cost,
+                    ability.cast,
+                )
             };
-            if self.should_trigger(id, ability.last_used, cd, &ability.triggers, true)? {
-                if !self.can_use(id, ability) {
+            if triggered {
+                if !self.can_use(id, mana_cost) {
                     skip = true;
                 } else {
-                    let cast = ability.cast
-                        / (1.0 + self.unit(id).attributes.details.combat_stats.cast_speed);
+                    let cast =
+                        cast / (1.0 + self.unit(id).attributes.details.combat_stats.cast_speed);
                     let mut event = CombatEvent::new(EventKind::Cast, self.time + cast, Some(id));
                     event.ability = Some(index);
                     self.push(event)?;
@@ -758,7 +777,7 @@ impl EncounterRun {
             self.unit_mut(id).out_of_mana = false;
             return Ok(());
         }
-        if self.sides(id).1.is_none() {
+        if self.side_refs(id).1.is_none() {
             return Ok(());
         }
         if !self.unit(id).blinded {
@@ -802,7 +821,7 @@ impl EncounterRun {
                             } else {
                                 &self.unit(id).food
                             })[index]
-                                .clone();
+                                .as_ref();
                             let Some(item) = item else {
                                 continue;
                             };
@@ -817,10 +836,13 @@ impl EncounterRun {
                             } else {
                                 item.cooldown
                             };
-                            if self.should_trigger(id, item.last_used, cd, &item.triggers, false)?
-                                && self.consume(id, drink, index, &item)?
-                            {
-                                used = true;
+                            if self.should_trigger(id, item.last_used, cd, &item.triggers, false)? {
+                                // Keep the execution snapshot, but do not copy
+                                // strings/triggers/buffs for a rejected item.
+                                let item = item.clone();
+                                if self.consume(id, drink, index, &item)? {
+                                    used = true;
+                                }
                             }
                         }
                     }
@@ -1463,7 +1485,7 @@ impl EncounterRun {
             .and_then(Option::as_ref)
             .ok_or("Unknown cast ability")?
             .clone();
-        if !self.can_use(source, &ability) {
+        if !self.can_use(source, ability.mana_cost) {
             return Ok(false);
         }
         let time = self.time;

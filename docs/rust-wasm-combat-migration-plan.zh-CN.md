@@ -1,8 +1,8 @@
 # 战斗模拟器 Rust / WebAssembly 改造计划
 
-日期：2026-09-30，更新：2026-10-01。状态：P0、P1、P2 单图检查点、装备缓存与 Buff 查询索引优化已完成，P3 规则组合与数值边界待继续。正式页面继续使用 JS。
+日期：2026-09-30，更新：2026-10-01。状态：P0、P1、P2 单图检查点，以及装备缓存、Buff 查询索引、触发器与调度分配优化已完成，P3 规则组合与数值边界待继续。正式页面继续使用 JS。
 
-起始代码依据：`testing` 分支 `2783b09784133c7618149f852c91309e0d8da6c3`。实施前重新核对工作树、数据版本和基准。P0/P1/P2 与两轮属性优化的已实现内容见阶段报告；未接入的正式页面接口与性能入口仍是计划项。
+起始代码依据：`testing` 分支 `2783b09784133c7618149f852c91309e0d8da6c3`。实施前重新核对工作树、数据版本和基准。P0/P1/P2 与三轮单场优化的已实现内容见阶段报告；未接入的正式页面接口与性能入口仍是计划项。
 
 ## 1. 这次改造要做到什么
 
@@ -296,6 +296,8 @@ P2 单图纵向检查点已完成，下一步进入 P3。五人海盗 T2 2h 的�
 
 随后完成单次属性重算的 Buff 查询索引：排序一次、按类型保留各条值，查询不再反复排序和创建返回数组，浮点顺序和神龛追加顺序不变，索引不跨事件保存。新增四序列 / 41 快照，全属性现为 3,482 案例 / 7,599 快照，全套本机、WASM 和八页浏览器回归通过。同轮 JS / 优化前 / 优化后热中位为 338.9 / 587.7 / 523.3 ms，本次提速约 1.12×、耗时减少 11%，仍比 JS 慢 1.54×。采样中 Buff 查询与排序从约 11.2% 降到 1.4%，下一项优先触发器检查与克隆；规则与数值门槛保留。见 [Buff 查询索引结果](./rust-wasm-combat-buff-index-results.zh-CN.md)。
 
+第三轮完成触发器与攻击调度分配优化：冷却/条件检查借用消耗品，安排攻击借用技能并复制少量标量，只读条件借用队伍列表并按原顺序过滤。保留实际效果执行快照、全部条件检查、技能优先级/缺蓝跳过和连续消耗品状态。新增四遭遇 / 94 快照，固定遭遇现为 1,190 案例 / 12,808 快照，全套回归与浏览器通过。同轮 JS / 优化前 / 优化后热中位 354.0 / 527.1 / 365.0 ms，本次提速 1.44×、耗时减少 30.8%，WASM 已接近同轮 JS，仍未达默认门槛。触发器检查采样占比从约 25.5% 降到 14.2%，触发器克隆从 8.1% 降到 0.6%；下一项评估统计和战斗日志的动态 JSON 热路径，见 [触发器与调度分配结果](./rust-wasm-combat-trigger-allocation-results.zh-CN.md)。
+
 若事件堆、`powf` 或浮点累加导致长期分歧，优先把差异缩成最小案例，预留额外 1–2 周解决；总工作可能到 3–6 周。不得通过换基准、删除困难案例或忽略游戏统计缩短表面工期。
 
 ## 10. 拟增加的开发入口
@@ -321,7 +323,7 @@ P2 单图纵向检查点已完成，下一步进入 P3。五人海盗 T2 2h 的�
 | `npm run test:simulations` | P2.3 已实现：冻结 JS 与本机 Rust / 实际 WASM 连续地图、完整统计、事件窗口及生命周期对照 |
 | `npm run diagnose:simulation -- 1 0 1100` | P2.3 已实现：定位连续场景窗口内首次不同事件、字段和随机状态 |
 | `npm run test:simulations-browser-reports` | P2.3 已实现：当前浏览器 JS/WASM 完整结果、冷/热性能及生命周期报告校验 |
-| `npm run bench:wasm-cache -- .bench/wasm-cache-baseline-9ba95a0 .bench/buff-cache/benchmark.json` | 已实现：同次浏览器比较旧/新实际 WASM 和 JS，可指定报告路径；需要保留的旧构建与 Node 20+ / Playwright |
+| `npm run bench:wasm-cache -- .bench/wasm-cache-baseline-61cd923 .bench/trigger-optimization/benchmark.json` | 已实现：同次浏览器比较旧/新实际 WASM 和 JS，可指定报告路径；需要保留的旧构建与 Node 20+ / Playwright |
 | `npm run test:parity -- --reference js-reference-2783b09-p0` | P0 已实现 JS 与冻结 JS 九场景对照，原固定结果保持不变 |
 | `npm run bench:wasm -- --input "仓库外的私人队伍文件" ...` | 私人代表场景的端到端对照，报告只保存在本机 |
 | `npm run build:production` | 统一发布入口，迁移完成后包含 WASM 构建和 Webpack |
@@ -342,6 +344,6 @@ P2 单图纵向检查点已完成，下一步进入 P3。五人海盗 T2 2h 的�
 
 后续可单独评估：共用 Rust 属性计算以减少编辑端重复、二进制输入输出、进一步的数据裁剪、多线程/SIMD。这些都以实测热点和维护收益为依据，先完成当前范围。
 
-P0 已完成冻结 JS、人工对照队伍、比较工具和 72h 重复基准，见 [P0 结果](./rust-wasm-combat-p0-results.zh-CN.md)。P1 已完成工具链、RNG/队列/数值原型和浏览器 Worker 验收，见 [P1 结果](./rust-wasm-combat-p1-results.zh-CN.md)。P2.1/P2.2/P2.3 已完成属性、固定遭遇、连续地图及完整统计，见 [P2.1](./rust-wasm-combat-p2-attributes-results.zh-CN.md)、[P2.2](./rust-wasm-combat-p2-events-results.zh-CN.md)、[P2.3](./rust-wasm-combat-p2-simulations-results.zh-CN.md) 与 [规则检查表](./rust-wasm-combat-rule-checklist.zh-CN.md)。[装备缓存](./rust-wasm-combat-equipment-cache-results.zh-CN.md) 与 [Buff 查询索引](./rust-wasm-combat-buff-index-results.zh-CN.md) 优化已完成，下一次优先检查触发器遍历与克隆，同时继续 P3 规则组合、数值边界。正式页面继续使用原 JS 引擎。
+P0 已完成冻结 JS、人工对照队伍、比较工具和 72h 重复基准，见 [P0 结果](./rust-wasm-combat-p0-results.zh-CN.md)。P1 已完成工具链、RNG/队列/数值原型和浏览器 Worker 验收，见 [P1 结果](./rust-wasm-combat-p1-results.zh-CN.md)。P2.1/P2.2/P2.3 已完成属性、固定遭遇、连续地图及完整统计，见 [P2.1](./rust-wasm-combat-p2-attributes-results.zh-CN.md)、[P2.2](./rust-wasm-combat-p2-events-results.zh-CN.md)、[P2.3](./rust-wasm-combat-p2-simulations-results.zh-CN.md) 与 [规则检查表](./rust-wasm-combat-rule-checklist.zh-CN.md)。[装备缓存](./rust-wasm-combat-equipment-cache-results.zh-CN.md)、[Buff 查询索引](./rust-wasm-combat-buff-index-results.zh-CN.md) 与 [触发器/调度分配](./rust-wasm-combat-trigger-allocation-results.zh-CN.md) 优化已完成，下一次评估统计与战斗日志的动态 JSON 热路径，同时继续 P3 规则组合、数值边界。正式页面继续使用原 JS 引擎。
 
 P2.2 数学审计发现 Edge 154 原生 pow 与 P0 Node/V8 在 20,012 个输入中有 2,037 个末位差异，P2.3 复核仍相同。WASM 严格对齐冻结参考；当前 Edge 原生 JS 的 19 个连续场景中，完整结果、事件计数及 RNG 均与 WASM 精确一致，没有改 Math.pow。此结论限于已测场景；全输入及跨浏览器数值/分支边界仍是 P3/P5 的门槛。冻结参考生成锁定原运行时，不得升级参考数学函数或扩大容差。

@@ -6,7 +6,7 @@ const { sha256 } = require('../bench/lib/reference.cjs');
 // Check executed branches, so an unused skill or diagnostic setup cannot make
 // a parity suite appear to cover a mechanic it never exercised.
 function audit(directory, manifest) {
-    const events = {}, operations = {}, labels = new Set();
+    const events = {}, operations = {}, labels = new Set(), traces = new Map();
     let promotedIdentity = false, dotAfterSourceDeath = false, cases = 0, frames = 0;
     for (const [name, info] of Object.entries(manifest.groups)) {
         const bytes = fs.readFileSync(path.join(directory, name + '.json'));
@@ -16,6 +16,7 @@ function audit(directory, manifest) {
         let groupFrames = 0;
         for (let index = 0; index < group.cases.length; index++) {
             const input = group.cases[index].request;
+            traces.set(group.cases[index].name, group.expected[index]);
             for (const frame of group.expected[index]) {
                 groupFrames++;
                 events[frame.event.type] = (events[frame.event.type] || 0) + 1;
@@ -38,6 +39,23 @@ function audit(directory, manifest) {
     assert.ok(operations.hpSpent > 0 && operations.death > 0 && operations.oom > 0, 'Missing HP spending, death or OOM branch');
     assert.ok(promotedIdentity, 'No promoted object identity');
     assert.ok(dotAfterSourceDeath, 'No DOT event after its source died');
+    const trace = name => {
+        const frames = traces.get(name);
+        assert.ok(frames?.length > 0, `Missing executed trigger regression: ${name}`);
+        return frames;
+    };
+    const casts = frames => frames.filter(frame => frame.event.type === 'abilityCastEndEvent' && frame.event.source === 0);
+    const oom = trace('trigger-read-sparse-priority-oom-skips-affordable-skill');
+    assert.ok(oom.flatMap(frame => frame.operations).some(op => op[0] === 'oom' && op[1] === 0 && op[2] === true));
+    assert.equal(casts(oom).length, 0, 'Priority OOM must skip the later affordable skill');
+    const later = casts(trace('trigger-read-sparse-false-condition-allows-later-skill'));
+    assert.ok(later.length > 0 && later.every(frame => frame.event.ability === '/abilities/quick_shot'));
+    const chain = trace('trigger-read-consumables-observe-prior-recovery-and-buff');
+    assert.deepEqual(chain[0].operations.filter(op => op[0] === 'consume').map(op => op[2]), [
+        '/items/apple_gummy', '/items/orange_gummy', '/items/intelligence_coffee', '/items/channeling_coffee'
+    ], 'Later consumables must observe recovery and buffs from earlier slots');
+    assert.equal(chain[0].units[0].state.attributes.combatDetails.currentManapoints, 150);
+    assert.ok(casts(trace('trigger-read-live-dead-lowest-and-sum-on-both-sides')).some(frame => frame.event.ability === '/abilities/fireball'));
     return { cases, frames, eventKinds: required.length, events, promotedIdentity, dotAfterSourceDeath };
 }
 module.exports = { audit };

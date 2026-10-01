@@ -2,7 +2,7 @@
 
 日期：2026-10-01。P2 完成后的第一次性能优化，仅缓存玩家装备基础属性，P3 的规则组合与数值边界仍待继续。正式页面继续使用 JS。
 
-后续更新：[Buff 查询索引优化](./rust-wasm-combat-buff-index-results.zh-CN.md) 已通过全套回归。本文保留装备缓存阶段的构建指纹和历史计时；最新构建与同轮性能见 Buff 报告，不将两轮绝对毫秒值混算。
+后续更新：[Buff 查询索引](./rust-wasm-combat-buff-index-results.zh-CN.md) 与 [触发器/调度分配](./rust-wasm-combat-trigger-allocation-results.zh-CN.md) 优化已通过全套回归。本文保留装备缓存阶段的构建指纹和历史计时；最新构建与同轮性能见触发器报告，不将各轮绝对毫秒值混算。
 
 ## 问题与改动
 
