@@ -85,6 +85,48 @@ export function attributeGroups() {
             { op: 'reset', time: time + 101 }, { op: 'clear' }, { op: 'update' }
         ])
     ] });
+    const mixedBuffs = [
+        buff('10', 'evasion', 0.1, 1e10), buff('3', 'attack_level', 0.13, 0.17),
+        buff('2', 'evasion', 1e-12, -1e10), buff('armor-a', 'armor', 0.1, 0.07),
+        buff('attack-b', 'attack_level', -0.02, 0.23), buff('evasion-last', 'evasion', 0.03, 0.01),
+        buff('armor-b', 'armor', 1e-12, 0.1), buff('regen', 'hp_regen', 0.2, 0.001),
+        buff('unused', 'unknown_test_type', 0.5, 7), buff('damage', 'damage', 0.07, 0)
+    ];
+    lifecycle.push({ name: 'buff-index-mixed-types-and-rounding', input: normalizeCharacterInput(party['1']), steps: [
+        { op: 'start' }, { op: 'add', time: 1, buffs: mixedBuffs }, { op: 'update' },
+        { op: 'levels', levels: [190, 170, 180, 160, 150, 140, 130] },
+        { op: 'remove', keys: ['2', 'armor-a'] }, { op: 'add', time: 2, buffs: [mixedBuffs[2], mixedBuffs[3]] },
+        { op: 'update' }, { op: 'clear' }, { op: 'update' }
+    ] });
+    const numericBuffs = [
+        buff('4294967295', 'evasion', 0.03, 1e10), buff('00', 'armor', 0.07, 0.01),
+        buff('4294967294', 'evasion', 0.01, -1e10), buff('0', 'evasion', 1e-12, 0.03),
+        buff('01', 'evasion', 0.02, 0.07), buff('2', 'armor', 0.13, 0.11),
+        buff('normal', 'evasion', 0.1, 0.17)
+    ];
+    lifecycle.push({ name: 'buff-index-js-numeric-key-boundaries', input: base(), steps: [
+        { op: 'add', time: 1, buffs: numericBuffs }, { op: 'update' },
+        { op: 'remove', keys: ['4294967294', '00'] },
+        { op: 'add', time: 2, buffs: [numericBuffs[2], numericBuffs[1]] }, { op: 'update' },
+        { op: 'expire', time: 102 }, { op: 'update' }
+    ] });
+    lifecycle.push({ name: 'buff-index-same-key-type-and-duration-refresh', input: base(), steps: [
+        { op: 'add', time: 1, buffs: [buff('same', 'damage', 0.2, 0.01)] },
+        { op: 'add', time: 2, buffs: [buff('same', 'accuracy', 0.2, 0.01, 200)] }, { op: 'update' },
+        { op: 'add', time: 3, buffs: [buff('same', 'accuracy', 0.3, 0.02, 300)] },
+        { op: 'expire', time: 202 }, { op: 'update' }, { op: 'expire', time: 303 }, { op: 'update' },
+        { op: 'add', time: 304, buffs: [buff('same', 'unknown_test_type', 0.2, 0.01)] },
+        { op: 'clear' }, { op: 'update' }
+    ] });
+    lifecycle.push({ name: 'buff-index-shrines-append-and-reset', input: normalizeCharacterInput(party['2']), steps: [
+        { op: 'start' }, { op: 'add', time: 1, buffs: [
+            buff('hp-a', 'max_hitpoints', 0.13, 0.1), buff('hp-b', 'max_hitpoints', 1e-12, 0.07),
+            buff('speed', 'attack_speed', 0.03, 0), buff('rare', 'rare_find', 0.1, 0.17),
+            buff('wisdom', 'wisdom', 0.07, 0.01), buff('damage', 'damage', 0.07, 0)
+        ] }, { op: 'update' }, { op: 'shrines', levels: [20, 20, 20, 20, 20] }, { op: 'update' },
+        { op: 'reset', time: 101 }, { op: 'update' }, { op: 'shrines', levels: [0, 0, 0, 0, 0] },
+        { op: 'reset', time: 0 }, { op: 'update' }
+    ] });
     // Name is test metadata; strict Rust request only includes the shared normalized schema.
     const clean = cases => cases.map(({ name, ...input }) => ({ name, request: input }));
     return { equipment: clean(equipment), monsters: clean(monsterCases), permanent: clean(permanent), lifecycle: clean(lifecycle) };

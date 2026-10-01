@@ -140,6 +140,70 @@ struct EquipmentStatsCache {
     stats: CombatStats,
 }
 
+struct BuffBoostGroup<'a> {
+    type_hrid: &'a str,
+    values: Vec<(f64, f64)>,
+}
+
+struct BuffBoosts<'a> {
+    groups: Vec<BuffBoostGroup<'a>>,
+    shrines: Option<[f64; 5]>,
+}
+
+impl<'a> BuffBoosts<'a> {
+    fn new(buffs: &'a [BuffEntry], shrines: Option<[f64; 5]>) -> Self {
+        let mut groups: Vec<BuffBoostGroup<'a>> = Vec::new();
+        // Preserve JS property order within each type. Keep individual values:
+        // levels, evasion and resistances must not use a pre-summed boost.
+        for entry in ordered_buffs(buffs) {
+            let type_hrid = entry.buff.type_hrid.as_str();
+            let value = (entry.buff.ratio_boost, entry.buff.flat_boost);
+            if let Some(group) = groups.iter_mut().find(|group| group.type_hrid == type_hrid) {
+                group.values.push(value);
+            } else {
+                groups.push(BuffBoostGroup {
+                    type_hrid,
+                    values: vec![value],
+                });
+            }
+        }
+        Self { groups, shrines }
+    }
+
+    fn get(&self, kind: &str) -> impl Iterator<Item = (f64, f64)> + '_ {
+        let values = self
+            .groups
+            .iter()
+            .find(|group| group.type_hrid == kind)
+            .map(|group| group.values.as_slice())
+            .unwrap_or(&[]);
+        let shrine = self.shrines.and_then(|levels| match kind {
+            "/buff_types/damage" => Some((levels[0] * 0.003, 0.0)),
+            "/buff_types/attack_speed" => Some((levels[1] * 0.004, 0.0)),
+            "/buff_types/cast_speed" => Some((0.0, levels[1] * 0.004)),
+            "/buff_types/max_hitpoints" | "/buff_types/max_manapoints" => {
+                Some((levels[2] * 0.01, 0.0))
+            }
+            "/buff_types/rare_find" => Some((0.0, levels[3] * 0.015)),
+            "/buff_types/wisdom" => Some((0.0, levels[4] * 0.005)),
+            _ => None,
+        });
+        values
+            .iter()
+            .copied()
+            .chain(shrine.filter(|(ratio, flat)| *ratio != 0.0 || *flat != 0.0))
+    }
+
+    fn total(&self, kind: &str) -> (f64, f64) {
+        let mut total = (0.0, 0.0);
+        for (ratio, flat) in self.get(kind) {
+            total.0 += ratio;
+            total.1 += flat;
+        }
+        total
+    }
+}
+
 pub struct AttributeUnit {
     input: UnitInput,
     equipment: Vec<EquipmentInput>,
@@ -475,53 +539,25 @@ impl AttributeUnit {
         Ok(stats)
     }
 
-    fn boosts(&self, kind: &str) -> Vec<(f64, f64)> {
-        let mut boosts: Vec<_> = ordered_buffs(&self.buffs)
-            .iter()
-            .filter(|entry| entry.buff.type_hrid == kind)
-            .map(|entry| (entry.buff.ratio_boost, entry.buff.flat_boost))
-            .collect();
-        if let UnitInput::Player(player) = &self.input {
-            let shrine = match kind {
-                "/buff_types/damage" => Some((player.shrines[0] * 0.003, 0.0)),
-                "/buff_types/attack_speed" => Some((player.shrines[1] * 0.004, 0.0)),
-                "/buff_types/cast_speed" => Some((0.0, player.shrines[1] * 0.004)),
-                "/buff_types/max_hitpoints" | "/buff_types/max_manapoints" => {
-                    Some((player.shrines[2] * 0.01, 0.0))
-                }
-                "/buff_types/rare_find" => Some((0.0, player.shrines[3] * 0.015)),
-                "/buff_types/wisdom" => Some((0.0, player.shrines[4] * 0.005)),
-                _ => None,
-            };
-            if let Some(boost) = shrine {
-                if boost.0 != 0.0 || boost.1 != 0.0 {
-                    boosts.push(boost);
-                }
-            }
-        }
-        boosts
-    }
-    fn boost(&self, kind: &str) -> (f64, f64) {
-        let mut total = (0.0, 0.0);
-        for (ratio, flat) in self.boosts(kind) {
-            total.0 += ratio;
-            total.1 += flat;
-        }
-        total
-    }
-
     pub fn update(&mut self, data: &DefinitionSet) -> Result<(), String> {
         self.initialized = true;
         let mut stats = self.initial_stats(data)?;
+        // This index lives only for this recalculation, so refresh/removal and
+        // shared buff timestamps keep their original update timing.
+        let shrines = match &self.input {
+            UnitInput::Player(player) => Some(player.shrines),
+            UnitInput::Monster(_) => None,
+        };
+        let buffs = BuffBoosts::new(&self.buffs, shrines);
         let mut levels = self.base_levels;
         for (index, key) in LEVELS.iter().enumerate() {
-            for (ratio, flat) in self.boosts(&format!("/buff_types/{key}_level")) {
+            for (ratio, flat) in buffs.get(&format!("/buff_types/{key}_level")) {
                 levels[index] += self.base_levels[index] * ratio;
                 levels[index] += flat;
             }
         }
-        let hp = self.boost("/buff_types/max_hitpoints");
-        let mp = self.boost("/buff_types/max_manapoints");
+        let hp = buffs.total("/buff_types/max_hitpoints");
+        let mp = buffs.total("/buff_types/max_manapoints");
         let mut details = self.details.clone();
         details.stamina_level = levels[0];
         details.intelligence_level = levels[1];
@@ -536,10 +572,10 @@ impl AttributeUnit {
         details.max_manapoints = ((10.0 * (10.0 + levels[1]) + stats.max_manapoints + mp.1)
             * (1.0 + stats.max_manapoints_ratio + mp.0))
             .floor();
-        let accuracy = self.boost("/buff_types/accuracy").0;
-        let damage = self.boost("/buff_types/damage").0;
-        let fury_accuracy = self.boost("/buff_types/fury_accuracy").0;
-        let fury_damage = self.boost("/buff_types/fury_damage").0;
+        let accuracy = buffs.total("/buff_types/accuracy").0;
+        let damage = buffs.total("/buff_types/damage").0;
+        let fury_accuracy = buffs.total("/buff_types/fury_accuracy").0;
+        let fury_damage = buffs.total("/buff_types/fury_damage").0;
         let mut ratings = [(0.0, 0.0, 0.0); 5];
         for (index, style) in ["stab", "slash", "smash", "ranged", "magic"]
             .iter()
@@ -560,7 +596,7 @@ impl AttributeUnit {
                 * (1.0 + fury_damage);
             let base = (10.0 + levels[4]) * (1.0 + stats.get(&format!("{style}Evasion")));
             let mut evasion = base;
-            for (ratio, flat) in self.boosts("/buff_types/evasion") {
+            for (ratio, flat) in buffs.get("/buff_types/evasion") {
                 evasion += flat;
                 evasion += base * ratio;
             }
@@ -594,7 +630,7 @@ impl AttributeUnit {
         details.magic_accuracy_rating = ratings[4].0;
         details.magic_max_damage = ratings[4].1;
         details.magic_evasion_rating = ratings[4].2;
-        stats.damage_taken = self.boost("/buff_types/damage_taken").1;
+        stats.damage_taken = buffs.total("/buff_types/damage_taken").1;
         for (key, kind) in [
             ("physicalAmplify", "physical_amplify"),
             ("waterAmplify", "water_amplify"),
@@ -604,13 +640,13 @@ impl AttributeUnit {
         ] {
             stats.set(
                 key,
-                stats.get(key) + self.boost(&format!("/buff_types/{kind}")).1,
+                stats.get(key) + buffs.total(&format!("/buff_types/{kind}")).1,
             );
         }
         stats.attack_interval /= 1.0 + levels[2] / 2000.0;
         stats.attack_interval /= 1.0 + stats.attack_speed;
         let mut attack_speed = 0.0;
-        for (ratio, _) in self.boosts("/buff_types/attack_speed") {
+        for (ratio, _) in buffs.get("/buff_types/attack_speed") {
             attack_speed += ratio;
         }
         stats.attack_interval /= 1.0 + attack_speed;
@@ -626,7 +662,7 @@ impl AttributeUnit {
         {
             let base = 0.2 * levels[4] + stats.get(key);
             resistances[index] = base;
-            for (ratio, flat) in self.boosts(&format!("/buff_types/{kind}")) {
+            for (ratio, flat) in buffs.get(&format!("/buff_types/{kind}")) {
                 resistances[index] += flat;
                 resistances[index] += base * ratio;
             }
@@ -636,7 +672,7 @@ impl AttributeUnit {
         details.total_nature_resistance = resistances[2];
         details.total_fire_resistance = resistances[3];
         for (key, kind) in [("hpRegenPer10", "hp_regen"), ("mpRegenPer10", "mp_regen")] {
-            let (ratio, flat) = self.boost(&format!("/buff_types/{kind}"));
+            let (ratio, flat) = buffs.total(&format!("/buff_types/{kind}"));
             let mut value = stats.get(key);
             value += value * ratio;
             value += flat;
@@ -655,7 +691,7 @@ impl AttributeUnit {
         ] {
             stats.set(
                 key,
-                stats.get(key) + self.boost(&format!("/buff_types/{kind}")).1,
+                stats.get(key) + buffs.total(&format!("/buff_types/{kind}")).1,
             );
         }
         stats.cast_speed += levels[2] / 2000.0;
@@ -664,7 +700,7 @@ impl AttributeUnit {
             ("combatRareFind", "rare_find"),
             ("combatDropQuantity", "combat_drop_quantity"),
         ] {
-            let (ratio, flat) = self.boost(&format!("/buff_types/{kind}"));
+            let (ratio, flat) = buffs.total(&format!("/buff_types/{kind}"));
             let mut value = stats.get(key);
             value += (1.0 + value) * ratio;
             value += flat;
@@ -672,7 +708,7 @@ impl AttributeUnit {
         }
         let base_threat = 100.0 + stats.threat;
         details.total_threat = base_threat;
-        let (ratio, flat) = self.boost("/buff_types/threat");
+        let (ratio, flat) = buffs.total("/buff_types/threat");
         if ratio != 0.0 {
             stats.threat += base_threat * ratio;
         } else {

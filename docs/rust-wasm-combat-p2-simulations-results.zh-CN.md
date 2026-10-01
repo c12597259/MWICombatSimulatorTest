@@ -2,7 +2,7 @@
 
 日期：2026-10-01。P2.3 已完成，P2 单图纵向检查点通过：19 个连续场景、113,295 个事件在冻结 JS、本机 Rust、实际 WASM 和当前 Edge JS 中得到相同结果与随机次数。**性能初测中 WASM 原型约比 JS 慢四倍**，尚不满足默认切换门槛。正式页面继续使用 JS，本轮没有生产构建、推送或部署。
 
-后续更新：首轮 [装备缓存优化](./rust-wasm-combat-equipment-cache-results.zh-CN.md) 已通过全套回归，同轮旧/新 WASM 提速约 2.34×，仍比 JS 慢约 1.52×。本文保留 P2.3 原始构建与历史计时；`.bench` 中通用 browser-root/browser-pages 报告存放最近一次构建的验收，最新构建指纹和性能以缓存报告为准。
+后续更新：[装备缓存优化](./rust-wasm-combat-equipment-cache-results.zh-CN.md) 与 [Buff 查询索引优化](./rust-wasm-combat-buff-index-results.zh-CN.md) 已通过全套回归。Buff 索引相对装备缓存版同轮提速约 1.12×，仍比同轮 JS 慢约 1.54×。本文保留 P2.3 原始构建与历史计时；`.bench` 中通用 browser-root/browser-pages 报告存放最近一次构建的验收，最新构建指纹和性能以 Buff 报告为准。
 
 ## 实现与参考
 

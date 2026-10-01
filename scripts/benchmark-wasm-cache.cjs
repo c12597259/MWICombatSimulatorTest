@@ -50,7 +50,7 @@ async function main() {
     `;
     const server = http.createServer((request, response) => {
         const url = new URL(request.url, 'http://localhost');
-        if (url.pathname === '/') { response.setHeader('Content-Type', 'text/html'); response.end('<!doctype html><title>WASM equipment cache benchmark</title>'); return; }
+        if (url.pathname === '/') { response.setHeader('Content-Type', 'text/html'); response.end('<!doctype html><title>Combat WASM benchmark</title>'); return; }
         if (url.pathname === '/worker.mjs' && Object.hasOwn(builds, url.searchParams.get('kind'))) {
             response.setHeader('Content-Type', 'text/javascript'); response.end(workerSource(url.searchParams.get('kind'))); return;
         }
@@ -120,7 +120,7 @@ async function main() {
             for (let offset = 0; offset < order.length; offset++) {
                 const kind = order[(index + offset) % order.length]; warm[kind].push((await measure(kind)).requestMs);
             }
-            console.log(`Equipment cache benchmark: round ${index + 1}/7 passed`);
+            console.log(`WASM benchmark: round ${index + 1}/7 passed`);
         }
         const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
         const medians = Object.fromEntries(Object.entries(warm).map(([kind, values]) => [kind, median(values)]));
@@ -130,7 +130,7 @@ async function main() {
             timestamp: new Date().toISOString(), baseline, wasmHashes: Object.fromEntries(Object.entries(manifests).map(([kind, manifest]) => [kind, manifest.artifacts['combat_wasm_bg.wasm']])),
             dataFingerprint: manifests.after.dataFingerprint, cold, warm, medians, beforeToAfter: medians.before / medians.after, jsToAfter: medians.js / medians.after,
             comparedRuns: 30, exact: true };
-        const output = path.join(root, '.bench/wasm-cache/benchmark.json'); fs.mkdirSync(path.dirname(output), { recursive: true });
+        const output = path.resolve(root, process.argv[3] || '.bench/wasm-cache/benchmark.json'); fs.mkdirSync(path.dirname(output), { recursive: true });
         fs.writeFileSync(output, JSON.stringify(report, null, 2)); console.log(JSON.stringify({ medians, beforeToAfter: report.beforeToAfter, jsToAfter: report.jsToAfter, output }, null, 2));
     } finally {
         if (browser) await browser.close();
