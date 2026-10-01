@@ -1,6 +1,6 @@
 export class ProbeClient {
-    constructor() {
-        this.worker = new Worker(new URL('./worker.js', import.meta.url));
+    constructor(worker = new Worker(new URL('./worker.js', import.meta.url))) {
+        this.worker = worker;
         this.nextId = 1;
         this.pending = new Map();
         this.worker.onmessage = ({ data }) => {

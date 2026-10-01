@@ -10,9 +10,18 @@ use std::{
 
 fn execute() -> Result<(), String> {
     let args: Vec<_> = env::args().collect();
-    if args.len() != 4 || !["attributes", "math", "encounters"].contains(&args[1].as_str()) {
+    if args.len() != 4
+        || ![
+            "attributes",
+            "math",
+            "encounters",
+            "simulations",
+            "simulationTraces",
+        ]
+        .contains(&args[1].as_str())
+    {
         return Err(
-            "Usage: mwi-combat-cli {attributes|math|encounters} DATA_FILE EXPECTED_HASH (JSON input on stdin)".into(),
+            "Usage: mwi-combat-cli {attributes|math|encounters|simulations|simulationTraces} DATA_FILE EXPECTED_HASH (JSON input on stdin)".into(),
         );
     }
     let data = DefinitionSet::parse(
@@ -38,6 +47,26 @@ fn execute() -> Result<(), String> {
             let cases: Vec<mwi_combat_core::encounter::EncounterCase> =
                 serde_json::from_str(&input).map_err(|_| "Invalid encounter input")?;
             mwi_combat_core::encounter::encounter_trace(&cases, Rc::new(data))?
+        }
+        "simulations" => {
+            let cases: Vec<mwi_combat_core::simulation::SimulationInput> =
+                serde_json::from_str(&input).map_err(|_| "Invalid simulation input")?;
+            let data = Rc::new(data);
+            let mut values = Vec::new();
+            for case in cases {
+                values.push(mwi_combat_core::simulation::simulate(case, data.clone())?);
+            }
+            serde_json::json!(values)
+        }
+        "simulationTraces" => {
+            let cases: Vec<mwi_combat_core::simulation::TraceInput> =
+                serde_json::from_str(&input).map_err(|_| "Invalid simulation trace")?;
+            let data = Rc::new(data);
+            let mut values = Vec::new();
+            for case in cases {
+                values.push(mwi_combat_core::simulation::trace(case, data.clone())?);
+            }
+            serde_json::json!(values)
         }
         _ => unreachable!(),
     };

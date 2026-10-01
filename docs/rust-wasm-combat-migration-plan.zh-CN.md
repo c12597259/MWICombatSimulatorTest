@@ -288,13 +288,15 @@ WASM 不支持、初始化/网络失败或资源指纹不符时，在战斗开�
 | --- | --- | --- |
 | P2.1 | 输入规范化、玩家/怪物属性、增益生命周期、独立对象身份、本机/WASM/浏览器属性精确对照 | 已完成：3,473 案例、7,459 快照，见 [P2.1 结果](./rust-wasm-combat-p2-attributes-results.zh-CN.md) |
 | P2.2 | 身份接入真实队列，普攻、代表队伍技能/触发器/冷却/消耗品、控制和持续效果 | 已完成固定遭遇：1,186 案例、12,714 事件快照、17 种事件与 RNG 精确对齐，见 [P2.2 结果](./rust-wasm-combat-p2-events-results.zh-CN.md) |
-| P2.3 | 连续地图/地下城、完整统计、首次不同事件定位、当前浏览器 JS 对照、浏览器性能初测 | 下一部分；通过后才标记整个 P2 完成 |
+| P2.3 | 连续地图/地下城、完整统计、首次不同事件定位、当前浏览器 JS 对照、浏览器性能初测 | 已完成：19 场景 / 113,295 事件，浏览器各 43/43；WASM 初测约慢四倍，见 [P2.3 结果](./rust-wasm-combat-p2-simulations-results.zh-CN.md) |
+
+P2 单图纵向检查点已完成，下一步进入 P3。五人海盗 T2 2h 的热运行 JS/WASM 比为 0.24–0.26×，没有达到默认切换门槛。继续 JS 默认，P3 补组合与数值边界时加入热点剖析；P5/P6 仍须 72h 和正式 Worker 池端到端验收。
 
 若事件堆、`powf` 或浮点累加导致长期分歧，优先把差异缩成最小案例，预留额外 1–2 周解决；总工作可能到 3–6 周。不得通过换基准、删除困难案例或忽略游戏统计缩短表面工期。
 
 ## 10. 拟增加的开发入口
 
-以下脚本由 P0–P4 逐步加入。P0/P1/P2.1/P2.2 已实现测试、冻结参考与原型构建入口；完整 WASM 地图/统计对照和性能入口仍待实现。调用者始终在正式模拟器目录执行，不在 `test1` 执行构建。
+以下脚本由 P0–P4 逐步加入。P0/P1/P2 已实现冻结参考、属性/事件/完整地图统计对照与独立原型性能初测；正式页面/Worker 池的性能入口仍待接入。调用者始终在正式模拟器目录执行，不在 `test1` 执行构建。
 
 | 命令 | 用途 |
 | --- | --- |
@@ -307,11 +309,14 @@ WASM 不支持、初始化/网络失败或资源指纹不符时，在战斗开�
 | `npm run start:wasm-prototype` | P1 已实现：启动本机自动浏览器验收页面 |
 | `npm run test:wasm-browser-reports` | P1 已实现：核对根路径与 Pages 路径验收报告 |
 | `npm run test:attributes` | P2.1 已实现：冻结 JS 与本机 Rust、实际 WASM 的全属性精确对照 |
-| `npm run test:wasm-browser` | 已实现：用独立 Edge 测试进程运行六个原型页面；需 Node 20+ 和可用 Playwright |
+| `npm run test:wasm-browser` | 已实现：用独立 Edge 测试进程运行八个原型页面；需 Node 20+ 和可用 Playwright |
 | `npm run test:attributes-browser-reports` | P2.1 已实现：核对两条属性页路径的报告、参考字节和生命周期 |
 | `npm run test:encounters` | P2.2 已实现：固定遭遇逐事件与数学对照；参考生成必须使用 P0 的 Node 18.16.1 |
 | `npm run test:encounters-browser-reports` | P2.2 已实现：核对两条战斗事件页的参考字节、覆盖、资源及生命周期 |
 | `npm run audit:browser-pow` | P2.2 已实现：独立 Edge 原生 pow 与冻结运行时比较；使用符合 Playwright 要求的 Node |
+| `npm run test:simulations` | P2.3 已实现：冻结 JS 与本机 Rust / 实际 WASM 连续地图、完整统计、事件窗口及生命周期对照 |
+| `npm run diagnose:simulation -- 1 0 1100` | P2.3 已实现：定位连续场景窗口内首次不同事件、字段和随机状态 |
+| `npm run test:simulations-browser-reports` | P2.3 已实现：当前浏览器 JS/WASM 完整结果、冷/热性能及生命周期报告校验 |
 | `npm run test:parity` | P0 已实现 JS 与冻结 JS 对照；完整 Rust/WASM 队伍对照待 P2 扩展 |
 | `npm run bench:wasm -- --input "仓库外的私人队伍文件" ...` | 私人代表场景的端到端对照，报告只保存在本机 |
 | `npm run build:production` | 统一发布入口，迁移完成后包含 WASM 构建和 Webpack |
@@ -332,6 +337,6 @@ WASM 不支持、初始化/网络失败或资源指纹不符时，在战斗开�
 
 后续可单独评估：共用 Rust 属性计算以减少编辑端重复、二进制输入输出、进一步的数据裁剪、多线程/SIMD。这些都以实测热点和维护收益为依据，先完成当前范围。
 
-P0 已完成冻结 JS、人工对照队伍、比较工具和 72h 重复基准，见 [P0 结果](./rust-wasm-combat-p0-results.zh-CN.md)。P1 已完成工具链、RNG/队列/数值原型和浏览器 Worker 验收，见 [P1 结果](./rust-wasm-combat-p1-results.zh-CN.md)。P2.1 已完成属性和输入基础，见 [P2.1 结果](./rust-wasm-combat-p2-attributes-results.zh-CN.md)。P2.2 已完成固定遭遇战斗事件和效果，见 [P2.2 结果](./rust-wasm-combat-p2-events-results.zh-CN.md) 与 [规则检查表](./rust-wasm-combat-rule-checklist.zh-CN.md)。下一次执行 P2.3 连续地图/地下城、完整统计与性能初测。正式页面继续使用原 JS 引擎。
+P0 已完成冻结 JS、人工对照队伍、比较工具和 72h 重复基准，见 [P0 结果](./rust-wasm-combat-p0-results.zh-CN.md)。P1 已完成工具链、RNG/队列/数值原型和浏览器 Worker 验收，见 [P1 结果](./rust-wasm-combat-p1-results.zh-CN.md)。P2.1/P2.2/P2.3 已完成属性、固定遭遇、连续地图及完整统计，见 [P2.1](./rust-wasm-combat-p2-attributes-results.zh-CN.md)、[P2.2](./rust-wasm-combat-p2-events-results.zh-CN.md)、[P2.3](./rust-wasm-combat-p2-simulations-results.zh-CN.md) 与 [规则检查表](./rust-wasm-combat-rule-checklist.zh-CN.md)。下一次执行 P3 规则组合、数值边界与性能剖析。正式页面继续使用原 JS 引擎。
 
-P2.2 数学审计发现 Edge 154 原生 pow 与 P0 Node/V8 在 20,012 个输入中有 2,037 个末位差异。当前 WASM 严格对齐冻结参考；P2.3 增加当前浏览器 JS 与 WASM 连续战斗比较，确认数学差异对分支/RNG/结果的影响，必要时先实施明确兼容方案。冻结参考生成已锁定原运行时；不得升级参考数学函数或扩大容差消除差异。完整浏览器数值兼容须在切换引擎前通过。
+P2.2 数学审计发现 Edge 154 原生 pow 与 P0 Node/V8 在 20,012 个输入中有 2,037 个末位差异，P2.3 复核仍相同。WASM 严格对齐冻结参考；当前 Edge 原生 JS 的 19 个连续场景中，完整结果、事件计数及 RNG 均与 WASM 精确一致，没有改 Math.pow。此结论限于已测场景；全输入及跨浏览器数值/分支边界仍是 P3/P5 的门槛。冻结参考生成锁定原运行时，不得升级参考数学函数或扩大容差。

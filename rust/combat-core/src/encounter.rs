@@ -137,21 +137,24 @@ pub struct EncounterCase {
     pub scheduled: Vec<ScheduledEvent>,
 }
 pub struct EncounterRun {
-    data: Rc<DefinitionSet>,
-    case: EncounterCase,
+    pub(crate) full: Option<crate::simulation::SimulationState>,
+    pub(crate) tracing: bool,
+    pub(crate) event_counts: serde_json::Map<String, Value>,
+    pub(crate) data: Rc<DefinitionSet>,
+    pub(crate) case: EncounterCase,
     pub units: UnitArena<RuntimeUnit>,
-    players: Vec<UnitId>,
-    enemies: Option<Vec<UnitId>>,
+    pub(crate) players: Vec<UnitId>,
+    pub(crate) enemies: Option<Vec<UnitId>>,
     pub queue: CompatEventQueue<CombatEvent>,
-    rng: CombatRng,
-    next_event_id: u32,
+    pub(crate) rng: CombatRng,
+    pub(crate) next_event_id: u32,
     pub time: f64,
-    processed: u32,
-    ended: bool,
-    failed: bool,
-    all_players_dead: bool,
-    operations: Vec<Value>,
-    max_enrage: f64,
+    pub(crate) processed: u32,
+    pub(crate) ended: bool,
+    pub(crate) failed: bool,
+    pub(crate) all_players_dead: bool,
+    pub(crate) operations: Vec<Value>,
+    pub(crate) max_enrage: f64,
 }
 impl EncounterRun {
     pub fn new(case: EncounterCase, data: Rc<DefinitionSet>) -> Result<Self, String> {
@@ -174,12 +177,22 @@ impl EncounterRun {
                 return Err("Player list contains a monster".into());
             }
             players.push(units.spawn(RuntimeUnit::new(entry.clone(), &data)?));
+            let id = *players.last().unwrap();
+            units
+                .get_mut(id)
+                .unwrap()
+                .assign_buff_identities(id.index());
         }
         for entry in &case.enemies {
             if !matches!(entry.input, UnitInput::Monster(_)) {
                 return Err("Enemy list contains a player".into());
             }
             enemies.push(units.spawn(RuntimeUnit::new(entry.clone(), &data)?));
+            let id = *enemies.last().unwrap();
+            units
+                .get_mut(id)
+                .unwrap()
+                .assign_buff_identities(id.index());
         }
         for setup in &case.setup {
             if units.id_at(setup.unit).is_none() {
@@ -188,6 +201,9 @@ impl EncounterRun {
         }
         let rng = CombatRng::new(case.seed);
         let mut run = Self {
+            full: None,
+            tracing: false,
+            event_counts: serde_json::Map::new(),
             data,
             case,
             units,
@@ -207,38 +223,55 @@ impl EncounterRun {
         run.push(CombatEvent::new(EventKind::Start, 0.0, None))?;
         Ok(run)
     }
-    fn unit(&self, id: UnitId) -> &RuntimeUnit {
+    pub(crate) fn unit(&self, id: UnitId) -> &RuntimeUnit {
         self.units.get(id).expect("valid runtime identity")
     }
-    fn unit_mut(&mut self, id: UnitId) -> &mut RuntimeUnit {
+    pub(crate) fn unit_mut(&mut self, id: UnitId) -> &mut RuntimeUnit {
         self.units.get_mut(id).expect("valid runtime identity")
     }
-    fn push(&mut self, mut event: CombatEvent) -> Result<(), String> {
+    pub(crate) fn push(&mut self, mut event: CombatEvent) -> Result<(), String> {
         self.next_event_id += 1;
         event.id = self.next_event_id;
         self.queue.push(event)
     }
-    fn at(&mut self, kind: EventKind, time: f64, source: Option<UnitId>) -> Result<(), String> {
+    pub(crate) fn at(
+        &mut self,
+        kind: EventKind,
+        time: f64,
+        source: Option<UnitId>,
+    ) -> Result<(), String> {
         self.push(CombatEvent::new(kind, time, source))
     }
-    fn clear_unit(&mut self, id: UnitId) {
+    pub(crate) fn clear_unit(&mut self, id: UnitId) {
         self.queue
             .clear_matching(|event| event.source == Some(id) || event.target == Some(id));
     }
-    fn step(&mut self, id: UnitId, step: &AttributeStep) -> Result<(), String> {
+    pub(crate) fn step(&mut self, id: UnitId, step: &AttributeStep) -> Result<(), String> {
         self.units
             .get_mut(id)
             .expect("valid identity")
             .step(step, &self.data)
     }
-    fn buff(&mut self, id: UnitId, buffs: &[CombatBuff], time: Option<f64>) -> Result<(), String> {
+    pub(crate) fn buff(
+        &mut self,
+        id: UnitId,
+        buffs: &[CombatBuff],
+        time: Option<f64>,
+    ) -> Result<(), String> {
+        for buff in buffs {
+            if let Some(instance) = buff.instance {
+                for unit in self.units.iter_mut() {
+                    unit.attributes.refresh_shared_buff(instance, time);
+                }
+            }
+        }
         self.units
             .get_mut(id)
             .expect("valid identity")
             .attributes
             .add_buffs(buffs, time, &self.data)
     }
-    fn sides(&self, source: UnitId) -> (Vec<UnitId>, Option<Vec<UnitId>>) {
+    pub(crate) fn sides(&self, source: UnitId) -> (Vec<UnitId>, Option<Vec<UnitId>>) {
         if self.unit(source).player {
             (self.players.clone(), self.enemies.clone())
         } else {
@@ -248,17 +281,17 @@ impl EncounterRun {
             )
         }
     }
-    fn live(&self, values: &[UnitId]) -> Vec<UnitId> {
+    pub(crate) fn live(&self, values: &[UnitId]) -> Vec<UnitId> {
         values
             .iter()
             .copied()
             .filter(|id| self.unit(*id).alive())
             .collect()
     }
-    fn first_target(&self, enemies: Option<&[UnitId]>) -> Option<UnitId> {
+    pub(crate) fn first_target(&self, enemies: Option<&[UnitId]>) -> Option<UnitId> {
         enemies.and_then(|values| values.iter().copied().find(|id| self.unit(*id).alive()))
     }
-    fn event_snapshot(&self, event: &CombatEvent) -> Value {
+    pub(crate) fn event_snapshot(&self, event: &CombatEvent) -> Value {
         let ability = event.source.and_then(|source| {
             event.ability.and_then(|index| {
                 self.unit(source).abilities[index]
@@ -277,18 +310,31 @@ impl EncounterRun {
         json!({ "id":event.id,"type":event.kind,"time":event.time,"source":event.source,"target":event.target,"sourceRef":event.source_ref,
             "ability":ability,"consumable":consumable,"hrid":event.hrid,"amount":event.amount,"totalTicks":event.ticks,"currentTick":event.tick,"encounterTime":event.encounter_time,"combatStyleHrid":event.style })
     }
-    fn frame(&mut self, event: &CombatEvent) -> Value {
-        let frame = json!({ "event":self.event_snapshot(event), "time":self.time, "randomCalls":self.rng.calls(),
+    pub(crate) fn frame(&mut self, event: &CombatEvent) -> Value {
+        let mut frame = json!({ "event":self.event_snapshot(event), "time":self.time, "randomCalls":self.rng.calls(),
             "units":self.units.iter().map(|(id, unit)| json!({"id":id,"state":unit.snapshot()})).collect::<Vec<_>>(),
             "players":self.players,"enemies":self.enemies,"heap":self.queue.events().iter().map(|event| self.event_snapshot(event)).collect::<Vec<_>>(),
             "operations":self.operations,"allPlayersDead":self.all_players_dead,"maxEnrageStack":self.max_enrage });
+        if let Some(full) = &self.full {
+            frame["result"] = full.result.value.clone();
+            frame["result"]["maxEnrageStack"] = json!(self.max_enrage);
+            for wipe in frame["result"]["wipeEvents"].as_array_mut().unwrap() {
+                wipe.as_object_mut().unwrap().remove("timestamp");
+            }
+            frame["zone"] = full
+                .zone
+                .as_ref()
+                .map(|zone| zone.snapshot())
+                .unwrap_or(Value::Null);
+            frame["attempts"] = json!(full.attempts);
+        }
         self.operations.clear();
         frame
     }
     pub fn done(&self) -> bool {
         self.failed
             || self.ended
-            || self.processed >= self.case.max_events
+            || (self.full.is_none() && self.processed >= self.case.max_events)
             || self.time >= self.case.time_limit
     }
     pub fn advance(&mut self, events: u32) -> Result<Vec<Value>, String> {
@@ -304,7 +350,7 @@ impl EncounterRun {
         }
         result
     }
-    fn advance_inner(&mut self, events: u32) -> Result<Vec<Value>, String> {
+    pub(crate) fn advance_inner(&mut self, events: u32) -> Result<Vec<Value>, String> {
         let mut frames = Vec::new();
         for _ in 0..events {
             if self.done() {
@@ -318,14 +364,30 @@ impl EncounterRun {
             self.process(event.clone())?;
             self.check_triggers()?;
             self.processed += 1;
-            frames.push(self.frame(&event));
-            if self.enemies.is_none() || self.all_players_dead {
+            if self.full.is_some() {
+                let key = serde_json::to_value(event.kind)
+                    .unwrap()
+                    .as_str()
+                    .unwrap()
+                    .to_string();
+                let count = self
+                    .event_counts
+                    .get(&key)
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                self.event_counts.insert(key, json!(count + 1));
+                self.sample();
+            }
+            if self.full.is_none() || self.tracing {
+                frames.push(self.frame(&event));
+            }
+            if self.full.is_none() && (self.enemies.is_none() || self.all_players_dead) {
                 self.ended = true;
             }
         }
         Ok(frames)
     }
-    fn apply_setup(&mut self) -> Result<(), String> {
+    pub(crate) fn apply_setup(&mut self) -> Result<(), String> {
         for setup in self.case.setup.clone() {
             let id = self.units.id_at(setup.unit).ok_or("Unknown setup unit")?;
             if !setup.buffs.is_empty() {
@@ -427,9 +489,23 @@ impl EncounterRun {
         }
         Ok(())
     }
-    fn process(&mut self, event: CombatEvent) -> Result<(), String> {
+    pub(crate) fn process(&mut self, event: CombatEvent) -> Result<(), String> {
         match event.kind {
             EventKind::Start => {
+                if self.full.is_some() {
+                    let lab = self.full.as_ref().unwrap().lab.is_some();
+                    for id in self.players.clone() {
+                        self.units.get_mut(id).unwrap().reset(
+                            if lab { 0.0 } else { self.time },
+                            self.time == 0.0,
+                            &self.data,
+                            &mut self.rng,
+                        )?;
+                    }
+                    self.at(EventKind::Regen, self.time + REGEN, None)?;
+                    self.full_start_encounter()?;
+                    return Ok(());
+                }
                 for id in self.players.clone() {
                     self.units.get_mut(id).unwrap().reset(
                         self.time,
@@ -508,12 +584,12 @@ impl EncounterRun {
                 }
             }
             EventKind::NextEncounter => {
-                return Err("Map progression belongs to the full simulator".into())
+                self.full_start_encounter()?;
             }
         }
         Ok(())
     }
-    fn start_attacks(&mut self) -> Result<(), String> {
+    pub(crate) fn start_attacks(&mut self) -> Result<(), String> {
         for id in self
             .players
             .iter()
@@ -527,7 +603,7 @@ impl EncounterRun {
         }
         Ok(())
     }
-    fn trigger(
+    pub(crate) fn trigger(
         &self,
         trigger: &Trigger,
         source: UnitId,
@@ -599,7 +675,7 @@ impl EncounterRun {
         };
         Self::compare(trigger, &value)
     }
-    fn compare(trigger: &Trigger, value: &Dependency) -> Result<bool, String> {
+    pub(crate) fn compare(trigger: &Trigger, value: &Dependency) -> Result<bool, String> {
         Ok(
             match trigger.comparator_hrid.rsplit('/').next().unwrap_or("") {
                 "greater_than_equal" => value.number >= trigger.value,
@@ -610,7 +686,7 @@ impl EncounterRun {
             },
         )
     }
-    fn should_trigger(
+    pub(crate) fn should_trigger(
         &self,
         id: UnitId,
         last: f64,
@@ -633,17 +709,17 @@ impl EncounterRun {
         }
         Ok(active)
     }
-    fn can_use(&mut self, id: UnitId, ability: &Ability) -> bool {
+    pub(crate) fn can_use(&mut self, id: UnitId, ability: &Ability) -> bool {
         if !self.unit(id).alive() {
             return false;
         }
         let oom = self.unit(id).attributes.details.current_manapoints < ability.mana_cost;
         if self.unit(id).player {
-            self.operations.push(json!(["oom", id, oom, self.time]));
+            self.emit(json!(["oom", id, oom, self.time]));
         }
         !oom
     }
-    fn next_attack(&mut self, id: UnitId) -> Result<(), String> {
+    pub(crate) fn next_attack(&mut self, id: UnitId) -> Result<(), String> {
         if self.queue.events().iter().any(|event| {
             event.source == Some(id) && matches!(event.kind, EventKind::Cast | EventKind::Attack)
         }) {
@@ -702,7 +778,7 @@ impl EncounterRun {
         }
         Ok(())
     }
-    fn check_triggers(&mut self) -> Result<(), String> {
+    pub(crate) fn check_triggers(&mut self) -> Result<(), String> {
         for _ in 0..10_000 {
             let mut used = false;
             // Each side filters alive units once, preserving the JS array loop.
@@ -756,7 +832,7 @@ impl EncounterRun {
         }
         Err("Consumable triggers did not settle".into())
     }
-    fn consume(
+    pub(crate) fn consume(
         &mut self,
         id: UnitId,
         drink: bool,
@@ -786,15 +862,15 @@ impl EncounterRun {
             cd /= 1.0 + food_haste;
         }
         self.at(EventKind::Cooldown, self.time + cd, None)?;
-        self.operations.push(json!(["consume", id, item.hrid]));
+        self.emit(json!(["consume", id, item.hrid]));
         if item.recovery == 0.0 {
             if item.hp > 0.0 {
                 let value = self.unit_mut(id).add_hp(item.hp);
-                self.operations.push(json!(["hp", id, item.hrid, value]));
+                self.emit(json!(["hp", id, item.hrid, value]));
             }
             if item.mp > 0.0 {
                 let value = self.unit_mut(id).add_mp(item.mp);
-                self.operations.push(json!(["mp", id, item.hrid, value]));
+                self.emit(json!(["mp", id, item.hrid, value]));
                 if self.unit(id).out_of_mana {
                     self.at(EventKind::Await, self.time, Some(id))?;
                 }
@@ -818,7 +894,7 @@ impl EncounterRun {
         }
         Ok(true)
     }
-    fn hot(&mut self, mut event: CombatEvent) -> Result<(), String> {
+    pub(crate) fn hot(&mut self, mut event: CombatEvent) -> Result<(), String> {
         let id = event.source.ok_or("Missing HOT source")?;
         let (drink, index) = event.consumable.ok_or("Missing consumable")?;
         let item = (if drink {
@@ -835,13 +911,13 @@ impl EncounterRun {
             let value = self
                 .unit_mut(id)
                 .add_hp(combat_math::tick_value(item.hp, ticks, tick));
-            self.operations.push(json!(["hp", id, item.hrid, value]));
+            self.emit(json!(["hp", id, item.hrid, value]));
         }
         if item.mp > 0.0 {
             let value = self
                 .unit_mut(id)
                 .add_mp(combat_math::tick_value(item.mp, ticks, tick));
-            self.operations.push(json!(["mp", id, item.hrid, value]));
+            self.emit(json!(["mp", id, item.hrid, value]));
             if self.unit(id).out_of_mana {
                 self.at(EventKind::Await, self.time, Some(id))?;
             }
@@ -853,7 +929,7 @@ impl EncounterRun {
         }
         Ok(())
     }
-    fn dot(&mut self, mut event: CombatEvent) -> Result<(), String> {
+    pub(crate) fn dot(&mut self, mut event: CombatEvent) -> Result<(), String> {
         let target = event.target.ok_or("Missing DOT target")?;
         let source = event.source_ref.ok_or("Missing DOT source ref")?;
         let tick = event.tick.ok_or("Missing DOT tick")?;
@@ -862,18 +938,20 @@ impl EncounterRun {
             combat_math::tick_value(event.amount.ok_or("Missing DOT damage")?, ticks, tick)
                 .min(self.unit(target).attributes.details.current_hitpoints);
         self.unit_mut(target).attributes.details.current_hitpoints -= damage;
-        self.operations
-            .push(json!(["attack", source, target, "damageOverTime", damage]));
+        self.emit(json!(["attack", source, target, "damageOverTime", damage]));
         if tick < ticks {
             event.time = self.time + DOT;
             event.tick = Some(tick + 1.0);
             self.push(event)?;
         }
+        if self.unit(target).player {
+            self.full_log(None, target, "damageOverTime", damage, false);
+        }
         self.death_if_zero(target);
         self.check_end()?;
         Ok(())
     }
-    fn regen(&mut self) -> Result<(), String> {
+    pub(crate) fn regen(&mut self) -> Result<(), String> {
         for id in self.players.clone() {
             if !self.unit(id).alive() {
                 continue;
@@ -882,16 +960,16 @@ impl EncounterRun {
             let hp = (details.max_hitpoints * details.combat_stats.hp_regen_per10).floor();
             let mp = (details.max_manapoints * details.combat_stats.mp_regen_per10).floor();
             let hp = self.unit_mut(id).add_hp(hp);
-            self.operations.push(json!(["hp", id, "regen", hp]));
+            self.emit(json!(["hp", id, "regen", hp]));
             let mp = self.unit_mut(id).add_mp(mp);
-            self.operations.push(json!(["mp", id, "regen", mp]));
+            self.emit(json!(["mp", id, "regen", mp]));
             if self.unit(id).out_of_mana {
                 self.at(EventKind::Await, self.time, Some(id))?;
             }
         }
         self.at(EventKind::Regen, self.time + REGEN, None)
     }
-    fn enrage(&mut self, elapsed: f64) -> Result<(), String> {
+    pub(crate) fn enrage(&mut self, elapsed: f64) -> Result<(), String> {
         let Some(enemies) = self.enemies.clone() else {
             return Ok(());
         };
@@ -909,8 +987,15 @@ impl EncounterRun {
         event.encounter_time = Some(elapsed + ENRAGE);
         self.push(event)
     }
-    fn make_buff(unique: &str, kind: &str, ratio: f64, flat: f64, duration: f64) -> CombatBuff {
+    pub(crate) fn make_buff(
+        unique: &str,
+        kind: &str,
+        ratio: f64,
+        flat: f64,
+        duration: f64,
+    ) -> CombatBuff {
         CombatBuff {
+            instance: None,
             unique_hrid: format!("/buff_uniques/{unique}"),
             type_hrid: format!("/buff_types/{kind}"),
             ratio_boost: ratio,
@@ -919,17 +1004,22 @@ impl EncounterRun {
             start_time: None,
         }
     }
-    fn death_if_zero(&mut self, id: UnitId) {
+    pub(crate) fn death_if_zero(&mut self, id: UnitId) {
         if self.unit(id).attributes.details.current_hitpoints == 0.0 {
             self.clear_unit(id);
-            self.operations.push(json!(["death", id]));
+            self.emit(json!(["death", id]));
         }
     }
-    fn check_end(&mut self) -> Result<bool, String> {
+    pub(crate) fn check_end(&mut self) -> Result<bool, String> {
         if let Some(enemies) = self.enemies.clone() {
             for id in &enemies {
                 if !self.unit(*id).alive() && self.unit(*id).experience_rate == 0.0 {
-                    let elapsed = self.time.min(self.unit(*id).enrage_time);
+                    let begin = self
+                        .full
+                        .as_ref()
+                        .map(|full| full.encounter_start)
+                        .unwrap_or(0.0);
+                    let elapsed = (self.time - begin).min(self.unit(*id).enrage_time);
                     self.unit_mut(*id).experience_rate = 1.0 + elapsed / self.unit(*id).enrage_time;
                 }
             }
@@ -941,15 +1031,44 @@ impl EncounterRun {
                     .iter()
                     .map(|id| self.unit(*id).attributes.experience * self.unit(*id).experience_rate)
                     .sum();
-                for id in &self.players {
-                    self.operations.push(json!([
+                for id in self.players.clone() {
+                    self.emit(json!([
                         "experience",
                         id,
                         experience / self.players.len() as f64
                     ]));
                 }
                 self.enemies = None;
-                self.operations.push(json!(["encounter"]));
+                if let Some(full) = &mut self.full {
+                    if let Some(zone) = &full.zone {
+                        if zone.dungeon {
+                            full.result
+                                .alive(&format!("#{}", zone.killed - 1), false, self.time);
+                            if zone.killed > zone.max_waves {
+                                if let Some(start) = full.result.value["timeSpentAlive"]
+                                    .as_array()
+                                    .unwrap()
+                                    .iter()
+                                    .find(|entry| entry["name"] == "#1")
+                                    .and_then(|entry| entry["spawnedAt"].as_f64())
+                                {
+                                    let elapsed = self.time - start;
+                                    for key in ["minDungenonTime", "maxDungenonTime"] {
+                                        let previous = full.result.value[key].as_f64().unwrap();
+                                        if previous == 0.0
+                                            || (key == "minDungenonTime" && previous > elapsed)
+                                            || (key == "maxDungenonTime" && previous < elapsed)
+                                        {
+                                            full.result.value[key] = json!(elapsed);
+                                        }
+                                    }
+                                }
+                                full.result.value["lastDungeonFinishTime"] = json!(self.time);
+                            }
+                        }
+                    }
+                }
+                self.emit(json!(["encounter"]));
             }
         }
         for id in self.players.clone() {
@@ -959,21 +1078,61 @@ impl EncounterRun {
                         && event.hrid.as_deref() == Some(self.unit(id).hrid.as_str())
                 })
             {
-                let mut event =
-                    CombatEvent::new(EventKind::Respawn, self.time + 150.0 * SECOND, None);
-                event.hrid = Some(self.unit(id).hrid.clone());
-                self.push(event)?;
-                self.operations.push(json!(["oom", id, false, self.time]));
+                if self
+                    .full
+                    .as_ref()
+                    .is_none_or(|full| full.zone.as_ref().is_some_and(|zone| !zone.dungeon))
+                {
+                    let mut event =
+                        CombatEvent::new(EventKind::Respawn, self.time + 150.0 * SECOND, None);
+                    event.hrid = Some(self.unit(id).hrid.clone());
+                    self.push(event)?;
+                }
+                self.emit(json!(["oom", id, false, self.time]));
             }
         }
         if self.live(&self.players).is_empty() {
+            if self
+                .full
+                .as_ref()
+                .is_some_and(|full| full.zone.as_ref().is_some_and(|zone| zone.dungeon))
+            {
+                let full = self.full.as_mut().unwrap();
+                full.result.value["wipeEvents"].as_array_mut().unwrap().push(json!({"simulationTime":self.time,"logs":full.logs.iter().collect::<Vec<_>>(),"wave":full.zone.as_ref().unwrap().killed-1,"timestamp":"runtime-clock"}));
+                full.logs.clear();
+                for kind in [
+                    EventKind::Attack,
+                    EventKind::Cast,
+                    EventKind::Dot,
+                    EventKind::Hot,
+                    EventKind::Regen,
+                    EventKind::Enrage,
+                    EventKind::StunExpire,
+                    EventKind::BlindExpire,
+                    EventKind::SilenceExpire,
+                    EventKind::Await,
+                ] {
+                    self.queue.clear_matching(|event| event.kind == kind);
+                }
+                self.enemies = None;
+                self.at(EventKind::Start, self.time + 3e9, None)?;
+            }
             self.queue
                 .clear_matching(|event| matches!(event.kind, EventKind::Attack | EventKind::Cast));
             self.all_players_dead = true;
         }
-        Ok(self.enemies.is_none() || self.all_players_dead)
+        let ended = self.enemies.is_none() || self.all_players_dead;
+        if self.full.as_ref().is_some_and(|full| {
+            full.lab.is_some() && (self.time - full.encounter_start > 120e9 || ended)
+        }) {
+            self.enemies = None;
+            self.queue.clear();
+            self.at(EventKind::Start, self.time, None)?;
+            return Ok(true);
+        }
+        Ok(ended)
     }
-    fn parry(&mut self, targets: &[UnitId]) -> Option<UnitId> {
+    pub(crate) fn parry(&mut self, targets: &[UnitId]) -> Option<UnitId> {
         let values: Vec<_> = self
             .live(targets)
             .into_iter()
@@ -989,7 +1148,7 @@ impl EncounterRun {
             None
         }
     }
-    fn threat_target(&mut self, targets: &[UnitId]) -> Result<UnitId, String> {
+    pub(crate) fn threat_target(&mut self, targets: &[UnitId]) -> Result<UnitId, String> {
         let total: f64 = targets
             .iter()
             .map(|id| self.unit(*id).attributes.details.combat_stats.threat)
@@ -1005,7 +1164,7 @@ impl EncounterRun {
         }
         Err("Threat selection found no target".into())
     }
-    fn attack(
+    pub(crate) fn attack(
         &mut self,
         source: UnitId,
         target: UnitId,
@@ -1017,14 +1176,14 @@ impl EncounterRun {
             .ok_or("Invalid attack identities")?;
         combat_math::attack(source, target, effect, &mut self.rng)
     }
-    fn record_attack(
+    pub(crate) fn record_attack(
         &mut self,
         source: UnitId,
         target: UnitId,
         ability: &str,
         result: &AttackResult,
     ) {
-        self.operations.push(json!([
+        self.emit(json!([
             "attack",
             source,
             target,
@@ -1036,29 +1195,46 @@ impl EncounterRun {
             }
         ]));
     }
-    fn record_returns(
+    pub(crate) fn record_returns(
         &mut self,
         source: UnitId,
         target: UnitId,
         result: &AttackResult,
         resources: bool,
+        logs: bool,
     ) {
         if resources && result.life_steal_heal > 0.0 {
-            self.operations
-                .push(json!(["hp", source, "lifesteal", result.life_steal_heal]));
+            self.emit(json!(["hp", source, "lifesteal", result.life_steal_heal]));
         }
         if resources && result.mana_leech_mana > 0.0 {
-            self.operations
-                .push(json!(["mp", source, "manaLeech", result.mana_leech_mana]));
+            self.emit(json!(["mp", source, "manaLeech", result.mana_leech_mana]));
         }
         if result.thorn_damage_done > 0.0 {
-            self.operations.push(json!([
+            if logs && self.unit(source).player {
+                self.full_log(
+                    Some(target),
+                    source,
+                    &result.thorn_type,
+                    result.thorn_damage_done,
+                    false,
+                );
+            }
+            self.emit(json!([
                 "attack",
                 target,
                 source,
                 result.thorn_type,
                 result.thorn_damage_done
             ]));
+        }
+        if logs && result.retaliation_damage_done > 0.0 && self.unit(source).player {
+            self.full_log(
+                Some(target),
+                source,
+                "retaliation",
+                result.retaliation_damage_done,
+                false,
+            );
         }
         if self
             .unit(target)
@@ -1068,7 +1244,7 @@ impl EncounterRun {
             .retaliation
             > 0.0
         {
-            self.operations.push(json!([
+            self.emit(json!([
                 "attack",
                 target,
                 source,
@@ -1081,7 +1257,7 @@ impl EncounterRun {
             ]));
         }
     }
-    fn stacks(
+    pub(crate) fn stacks(
         &mut self,
         source: UnitId,
         target: UnitId,
@@ -1214,7 +1390,7 @@ impl EncounterRun {
         }
         Ok(())
     }
-    fn auto_attack(&mut self, original: UnitId) -> Result<(), String> {
+    pub(crate) fn auto_attack(&mut self, original: UnitId) -> Result<(), String> {
         let (_, targets) = self.sides(original);
         let Some(targets) = targets else {
             return Ok(());
@@ -1232,6 +1408,15 @@ impl EncounterRun {
                 source = value;
             }
             let result = self.attack(source, target, None)?;
+            if self.unit(target).player && result.did_hit && result.damage_done > 0.0 {
+                self.full_log(
+                    Some(source),
+                    target,
+                    "autoAttack",
+                    result.damage_done,
+                    result.is_crit,
+                );
+            }
             let mayhem =
                 self.unit(source).attributes.details.combat_stats.mayhem > self.rng.next_f64();
             self.stacks(source, target, &result, false)?;
@@ -1247,7 +1432,7 @@ impl EncounterRun {
                     &result,
                 );
             }
-            self.record_returns(source, target, &result, true);
+            self.record_returns(source, target, &result, true, true);
             self.death_if_zero(target);
             if self.unit(source).attributes.details.current_hitpoints == 0.0
                 && (result.thorn_damage_done != 0.0 || result.retaliation_damage_done != 0.0)
@@ -1270,7 +1455,7 @@ impl EncounterRun {
         }
         Ok(())
     }
-    fn use_ability(&mut self, mut source: UnitId, index: usize) -> Result<bool, String> {
+    pub(crate) fn use_ability(&mut self, mut source: UnitId, index: usize) -> Result<bool, String> {
         let ability = self
             .unit(source)
             .abilities
@@ -1326,8 +1511,7 @@ impl EncounterRun {
                             * effect.spend_hp_ratio)
                             .floor();
                         self.unit_mut(source).attributes.details.current_hitpoints -= spent;
-                        self.operations
-                            .push(json!(["hpSpent", source, ability.hrid, spent]));
+                        self.emit(json!(["hpSpent", source, ability.hrid, spent]));
                     }
                     "/ability_effect_types/promote" => {
                         self.clear_unit(source);
@@ -1350,6 +1534,7 @@ impl EncounterRun {
                             steps: vec![],
                         };
                         source = self.units.spawn(RuntimeUnit::new(case, &self.data)?);
+                        self.unit_mut(source).assign_buff_identities(source.index());
                         self.next_attack(source)?;
                     }
                     _ => return Err("Unsupported ability effect".into()),
@@ -1359,7 +1544,7 @@ impl EncounterRun {
         let ripple = self.unit(source).attributes.details.combat_stats.ripple;
         if ripple > 0.0 && self.rng.next_f64() < ripple {
             let value = self.unit_mut(source).add_mp(10.0);
-            self.operations.push(json!(["mp", source, "ripple", value]));
+            self.emit(json!(["mp", source, "ripple", value]));
             let time = self.time;
             for ability in self.unit_mut(source).abilities.iter_mut().flatten() {
                 if ability.last_used != 0.0 && ability.last_used + ability.cooldown - time > 0.0 {
@@ -1373,7 +1558,7 @@ impl EncounterRun {
         self.check_end()?;
         Ok(true)
     }
-    fn ability_buff(
+    pub(crate) fn ability_buff(
         &mut self,
         source: UnitId,
         ability: &Ability,
@@ -1400,6 +1585,7 @@ impl EncounterRun {
                     let multiplier = 1.0 + level * value.multiplier;
                     buff.flat_boost *= multiplier;
                     buff.ratio_boost *= multiplier;
+                    buff.instance = None;
                 }
                 self.buff(target, &[buff], Some(self.time))?;
                 self.at(
@@ -1411,7 +1597,7 @@ impl EncounterRun {
         }
         Ok(())
     }
-    fn ability_damage(
+    pub(crate) fn ability_damage(
         &mut self,
         source: UnitId,
         ability: &Ability,
@@ -1434,7 +1620,7 @@ impl EncounterRun {
             if let Some(parry) = parry {
                 let result = self.attack(parry, source, None)?;
                 self.record_attack(parry, source, "parry", &result);
-                self.record_returns(parry, source, &result, true);
+                self.record_returns(parry, source, &result, true, false);
                 self.death_if_zero(source);
                 if self.unit(parry).attributes.details.current_hitpoints == 0.0
                     && (result.thorn_damage_done != 0.0 || result.retaliation_damage_done != 0.0)
@@ -1453,9 +1639,17 @@ impl EncounterRun {
                 break;
             }
             let result = self.attack(source, target, Some(effect))?;
+            if self.unit(target).player && result.did_hit && result.damage_done > 0.0 {
+                self.full_log(
+                    Some(source),
+                    target,
+                    &ability.hrid,
+                    result.damage_done,
+                    result.is_crit,
+                );
+            }
             if result.hp_drain > 0.0 {
-                self.operations
-                    .push(json!(["hp", source, ability.hrid, result.hp_drain]));
+                self.emit(json!(["hp", source, ability.hrid, result.hp_drain]));
             }
             if result.did_hit {
                 for buff in effect.buffs.as_deref().unwrap_or_default() {
@@ -1499,7 +1693,7 @@ impl EncounterRun {
             }
             self.stacks(source, target, &result, true)?;
             self.record_attack(source, target, &ability.hrid, &result);
-            self.record_returns(source, target, &result, false);
+            self.record_returns(source, target, &result, false, true);
             self.death_if_zero(target);
             if result.did_hit && effect.pierce > self.rng.next_f64() {
                 continue;
@@ -1510,7 +1704,12 @@ impl EncounterRun {
         }
         Ok(())
     }
-    fn apply_cc(&mut self, target: UnitId, duration: f64, kind: EventKind) -> Result<(), String> {
+    pub(crate) fn apply_cc(
+        &mut self,
+        target: UnitId,
+        duration: f64,
+        kind: EventKind,
+    ) -> Result<(), String> {
         let time = self.time + duration;
         let unit = self.unit_mut(target);
         match kind {
@@ -1551,7 +1750,7 @@ impl EncounterRun {
         }
         self.at(kind, time, Some(target))
     }
-    fn ability_heal(
+    pub(crate) fn ability_heal(
         &mut self,
         source: UnitId,
         ability: &Ability,
@@ -1608,10 +1807,15 @@ impl EncounterRun {
                 unit.attributes.details.current_manapoints = unit.attributes.details.max_manapoints;
                 unit.clear_cc();
             }
-            self.operations
-                .push(json!(["hp", target, ability.hrid, healed]));
+            self.emit(json!(["hp", target, ability.hrid, healed]));
             if revive {
                 self.next_attack(target)?;
+                if !self.unit(target).player {
+                    let hrid = self.unit(target).hrid.clone();
+                    if let Some(full) = &mut self.full {
+                        full.result.alive(&hrid, true, self.time);
+                    }
+                }
             }
         }
         Ok(())

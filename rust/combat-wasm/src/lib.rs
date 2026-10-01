@@ -16,6 +16,7 @@ thread_local! {
     static LIVE_ENGINES: Cell<u32> = const { Cell::new(0) };
     static LIVE_PROBES: Cell<u32> = const { Cell::new(0) };
     static LIVE_ENCOUNTERS: Cell<u32> = const { Cell::new(0) };
+    static LIVE_SIMULATIONS: Cell<u32> = const { Cell::new(0) };
 }
 
 fn error(message: impl AsRef<str>) -> JsValue {
@@ -41,6 +42,10 @@ pub fn live_probes() -> u32 {
 pub fn live_encounters() -> u32 {
     LIVE_ENCOUNTERS.with(Cell::get)
 }
+#[wasm_bindgen]
+pub fn live_simulations() -> u32 {
+    LIVE_SIMULATIONS.with(Cell::get)
+}
 
 #[wasm_bindgen]
 pub fn js_round(value: f64) -> f64 {
@@ -59,6 +64,29 @@ pub struct PrototypeEngine {
 
 #[wasm_bindgen]
 impl PrototypeEngine {
+    pub fn simulate(&self, input_json: &str) -> Result<String, JsValue> {
+        let input =
+            serde_json::from_str(input_json).map_err(|_| error("Invalid simulation input"))?;
+        let value = mwi_combat_core::simulation::simulate(input, self.definitions.clone())
+            .map_err(error)?;
+        serde_json::to_string(&value).map_err(|_| error("Cannot encode simulation"))
+    }
+    pub fn simulation_trace(&self, input_json: &str) -> Result<String, JsValue> {
+        let input =
+            serde_json::from_str(input_json).map_err(|_| error("Invalid simulation trace"))?;
+        let value =
+            mwi_combat_core::simulation::trace(input, self.definitions.clone()).map_err(error)?;
+        serde_json::to_string(&value).map_err(|_| error("Cannot encode simulation trace"))
+    }
+    pub fn create_simulation(&self, input_json: &str) -> Result<SimulationProbe, JsValue> {
+        let input =
+            serde_json::from_str(input_json).map_err(|_| error("Invalid simulation input"))?;
+        let run =
+            mwi_combat_core::encounter::EncounterRun::simulation(input, self.definitions.clone())
+                .map_err(error)?;
+        LIVE_SIMULATIONS.with(|count| count.set(count.get() + 1));
+        Ok(SimulationProbe { run })
+    }
     pub fn math_trace(&self, input_json: &str) -> Result<String, JsValue> {
         let cases: Vec<mwi_combat_core::combat_math::MathCase> =
             serde_json::from_str(input_json).map_err(|_| error("Invalid math input"))?;
@@ -124,6 +152,28 @@ impl PrototypeEngine {
 impl Drop for PrototypeEngine {
     fn drop(&mut self) {
         LIVE_ENGINES.with(|count| count.set(count.get() - 1));
+    }
+}
+#[wasm_bindgen]
+pub struct SimulationProbe {
+    run: mwi_combat_core::encounter::EncounterRun,
+}
+#[wasm_bindgen]
+impl SimulationProbe {
+    pub fn advance(&mut self, events: u32) -> Result<String, JsValue> {
+        self.run.advance(events).map_err(error)?;
+        Ok(self.run.progress().to_string())
+    }
+    pub fn done(&self) -> bool {
+        self.run.done()
+    }
+    pub fn result(&self) -> Result<String, JsValue> {
+        Ok(self.run.simulation_summary().map_err(error)?.to_string())
+    }
+}
+impl Drop for SimulationProbe {
+    fn drop(&mut self) {
+        LIVE_SIMULATIONS.with(|count| count.set(count.get() - 1));
     }
 }
 #[wasm_bindgen]

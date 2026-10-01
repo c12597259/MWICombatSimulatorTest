@@ -6,6 +6,7 @@ import Consumable from '../src/combatsimulator/consumable.js';
 import CombatSimulator from '../src/combatsimulator/combatSimulator.js';
 import '../src/worker.js';
 export { default as parsePlayerJson } from '../src/parsePlayerJson.js';
+const frozenWorkerHandler = globalThis.onmessage;
 
 const levels = ['stamina', 'intelligence', 'attack', 'melee', 'defense', 'ranged', 'magic'];
 const shrineKeys = ['force', 'tempo', 'spirit', 'rarity', 'scholar'];
@@ -24,13 +25,14 @@ export async function createAttributeUnit(item) {
                 ...Object.fromEntries(levels.map((key, index) => [`${key}Level`, input.levels[index]])) };
             // Use the frozen real Worker to construct zone/community/seal buffs.
             const original = CombatSimulator.prototype.simulate;
+            const originalPostMessage = globalThis.postMessage;
             try {
                 CombatSimulator.prototype.simulate = async function() { unit = this.players[0]; return {}; };
                 globalThis.postMessage = () => {};
-                await globalThis.onmessage({ data: { type: 'start_simulation', players: [dto],
+                await frozenWorkerHandler.call(globalThis, { data: { type: 'start_simulation', players: [dto],
                     zone: item.zoneHrid ? { zoneHrid: item.zoneHrid, difficultyTier: 0 } : null,
                     labyrinth: null, extra: item.extra || {}, simulationTimeLimit: 0 } });
-            } finally { CombatSimulator.prototype.simulate = original; }
+            } finally { CombatSimulator.prototype.simulate = original; globalThis.postMessage = originalPostMessage; }
         }
         return unit;
 }

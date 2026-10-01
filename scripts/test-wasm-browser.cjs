@@ -28,11 +28,15 @@ async function main() {
         });
         browser = await playwright.chromium.launch({ channel: process.env.MWI_BROWSER_CHANNEL || 'msedge', headless: true });
         const context = await browser.newContext();
-        for (const [relative, phase, count] of [['', 'P1', 12], ['MWICombatSimulatorTest/dist/', 'P1', 12],
+        const pages = [['', 'P1', 12], ['MWICombatSimulatorTest/dist/', 'P1', 12],
             ['attributes.html', 'P2.1', 7], ['MWICombatSimulatorTest/dist/attributes.html', 'P2.1', 7],
-            ['encounters.html', 'P2.2', 11], ['MWICombatSimulatorTest/dist/encounters.html', 'P2.2', 11]]) {
+            ['encounters.html', 'P2.2', 11], ['MWICombatSimulatorTest/dist/encounters.html', 'P2.2', 11],
+            ['simulations.html','P2.3',43],['MWICombatSimulatorTest/dist/simulations.html','P2.3',43]];
+        const phaseFilter = process.env.MWI_PROTOTYPE_PHASE;
+        if (phaseFilter && !pages.some(([, phase]) => phase === phaseFilter)) throw new Error('Unknown prototype phase');
+        for (const [relative, phase, count] of pages.filter(([, phase]) => !phaseFilter || phase === phaseFilter)) {
             const page = await context.newPage();
-            const saved = page.waitForResponse(response => response.url().endsWith(phase === 'P1' ? '/__prototype_report' : phase === 'P2.1' ? '/__attribute_report' : '/__encounter_report'), { timeout: 180_000 });
+            const saved = page.waitForResponse(response => response.url().endsWith(phase === 'P1' ? '/__prototype_report' : phase === 'P2.1' ? '/__attribute_report' : phase==='P2.3' ? '/__simulation_report' : '/__encounter_report'), { timeout: 180_000 });
             await page.goto(origin + relative);
             const response = await saved;
             if (!response.ok()) throw new Error(`Browser report save failed: ${relative}`);

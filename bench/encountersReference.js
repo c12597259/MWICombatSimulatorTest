@@ -5,7 +5,7 @@ import CombatUtilities from '../src/combatsimulator/combatUtilities.js';
 import seeded from './lib/seededRandom.cjs';
 
 const levels = ['stamina', 'intelligence', 'attack', 'melee', 'defense', 'ranged', 'magic'];
-function unitSnapshot(unit) {
+export function unitSnapshot(unit) {
     return { hrid: unit.hrid, isPlayer: unit.isPlayer, attributes: { baseLevels: levels.map(key => unit[`${key}Level`]),
         experience: unit.experience, combatDetails: unit.combatDetails, buffKeys: Object.keys(unit.combatBuffs) },
         buffs: Object.entries(unit.combatBuffs).map(([key, buff]) => ({ key, uniqueHrid: buff.uniqueHrid, typeHrid: buff.typeHrid,

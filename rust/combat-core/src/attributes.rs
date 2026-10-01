@@ -81,6 +81,8 @@ pub enum UnitInput {
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CombatBuff {
+    #[serde(skip)]
+    pub instance: Option<u64>,
     pub unique_hrid: String,
     pub type_hrid: String,
     pub ratio_boost: f64,
@@ -157,6 +159,7 @@ fn lookup<'a>(data: &'a DefinitionSet, table: &str, key: &str) -> Result<&'a Val
 }
 pub fn buff_definition(value: &Value, level: f64) -> Result<CombatBuff, String> {
     Ok(CombatBuff {
+        instance: None,
         unique_hrid: string(value, "uniqueHrid").ok_or("Missing buff identity")?,
         type_hrid: string(value, "typeHrid").ok_or("Missing buff type")?,
         ratio_boost: number(value, "ratioBoost")
@@ -178,6 +181,15 @@ fn ordered_buffs(buffs: &[BuffEntry]) -> Vec<&BuffEntry> {
 }
 
 impl AttributeUnit {
+    // JS ability buffs are shared objects. Refresh only their timestamp here;
+    // cached combat details are recalculated by the same later events as JS.
+    pub(crate) fn refresh_shared_buff(&mut self, instance: u64, time: Option<f64>) {
+        for entry in &mut self.buffs {
+            if entry.buff.instance == Some(instance) {
+                entry.buff.start_time = time;
+            }
+        }
+    }
     pub fn constructor_monster_state(&mut self) {
         self.base_levels = [1.0; 7];
         self.experience = 0.0;
@@ -724,6 +736,7 @@ impl AttributeUnit {
         let extra = &case.extra;
         let mut extra_buff = |unique: &str, kind: &str, ratio: f64, flat: f64| {
             self.add_permanent(CombatBuff {
+                instance: None,
                 unique_hrid: unique.into(),
                 type_hrid: format!("/buff_types/{kind}"),
                 ratio_boost: ratio,

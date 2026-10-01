@@ -219,6 +219,17 @@ impl RuntimeUnit {
             "experienceRate": self.experience_rate, "abilities": self.abilities.iter().map(ability).collect::<Vec<_>>(),
             "food": self.food.iter().map(consumable).collect::<Vec<_>>(), "drinks": self.drinks.iter().map(consumable).collect::<Vec<_>>(), "abilityManaCosts": self.mana_costs })
     }
+    pub(crate) fn assign_buff_identities(&mut self, prefix: usize) {
+        let mut ordinal = 0u64;
+        for ability in self.abilities.iter_mut().flatten() {
+            for effect in &mut ability.effects {
+                for buff in effect.buffs.iter_mut().flatten() {
+                    ordinal += 1;
+                    buff.buff.instance = Some(((prefix as u64 + 1) << 32) | ordinal);
+                }
+            }
+        }
+    }
     pub fn trigger_value(&self, trigger: &Trigger, time: f64) -> Result<Dependency, String> {
         let key = trigger.condition_hrid.rsplit('/').next().unwrap_or("");
         let details = &self.attributes.details;

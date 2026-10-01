@@ -1,4 +1,4 @@
-import init, { PrototypeEngine, module_info, live_engines, live_probes, live_encounters, js_round, js_remainder } from '../.wasm-build/pkg/combat_wasm.js';
+import init, { PrototypeEngine, module_info, live_engines, live_probes, live_encounters, live_simulations, js_round, js_remainder } from '../.wasm-build/pkg/combat_wasm.js';
 import wasmUrl from '../.wasm-build/pkg/combat_wasm_bg.wasm';
 import dataUrl from '../.wasm-build/data/combat-data.json?asset';
 import manifest from '../.wasm-build/manifest.json';
@@ -46,6 +46,7 @@ function stats() {
     return { moduleInitCount, engineInitCount, dataFetchCount, loadMode,
         liveEngines: wasm ? live_engines() : 0, liveProbes: wasm ? live_probes() : 0,
         liveEncounters: wasm ? live_encounters() : 0,
+        liveSimulations: wasm ? live_simulations() : 0,
         memoryBytes: wasm?.memory.buffer.byteLength ?? 0,
         info: engine ? JSON.parse(engine.info()) : null,
         module: wasm ? JSON.parse(module_info()) : null,
@@ -60,6 +61,20 @@ async function execute(message) {
     if (message.command === 'queue') return JSON.parse(engine.queue_trace(message.actionsJson));
     if (message.command === 'attributes') return JSON.parse(engine.attribute_trace(message.inputJson));
     if (message.command === 'math') return JSON.parse(engine.math_trace(message.inputJson));
+    if (message.command === 'simulationTrace') return JSON.parse(engine.simulation_trace(message.inputJson));
+    if (message.command === 'simulate') {
+        if (message.chunk == null) return JSON.parse(engine.simulate(message.inputJson));
+        if (!Number.isInteger(message.chunk) || message.chunk < 1 || message.chunk > 10000) throw failure('INVALID_INPUT', 'Invalid simulation chunk');
+        const probe = engine.create_simulation(message.inputJson);
+        try {
+            while (!probe.done()) {
+                const progress = JSON.parse(probe.advance(message.chunk));
+                self.postMessage({ id: message.id, progress });
+                await new Promise(resolve => setTimeout(resolve, 0));
+            }
+            return JSON.parse(probe.result());
+        } finally { probe.free(); }
+    }
     if (message.command === 'encounters') {
         const cases = JSON.parse(message.inputJson), chunk = message.chunk ?? 1000;
         if (!Array.isArray(cases) || cases.length > 1000 || cases.reduce((sum, value) => sum + value.maxEvents, 0) > 100_000 ||

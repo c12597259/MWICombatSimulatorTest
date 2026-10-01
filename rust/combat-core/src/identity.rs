@@ -1,5 +1,10 @@
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct UnitId(usize);
+impl UnitId {
+    pub(crate) fn index(self) -> usize {
+        self.0
+    }
+}
 
 /// IDs identify objects, not HRIDs or positions. Replacements allocate a new ID;
 /// old objects remain addressable until the run ends, just like queued JS refs.
@@ -13,6 +18,12 @@ impl<T> Default for UnitArena<T> {
     }
 }
 impl<T> UnitArena<T> {
+    pub(crate) fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
+        self.units.iter_mut()
+    }
+    pub fn truncate(&mut self, count: usize) {
+        self.units.truncate(count);
+    }
     pub fn iter(&self) -> impl Iterator<Item = (UnitId, &T)> {
         self.units
             .iter()
