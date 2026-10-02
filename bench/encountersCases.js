@@ -51,6 +51,17 @@ export function encounterGroups() {
         skills.push(named(`${hrid}:${level}`, run));
     }
     const mechanics = [];
+    // A normal-map wipe with both attacks and casts pending. Their removals
+    // must run in JS order, even though the same set of events is discarded.
+    const wipePlayer = player(1);
+    wipePlayer.extra = {};
+    wipePlayer.input.abilities = [selected('/abilities/fireball', 3), selected('/abilities/puncture', 5),
+        selected('/abilities/penetrating_strike', 15), selected('/abilities/flame_arrow', 1)];
+    mechanics.push(named('normal-wipe-preserves-separate-attack-cast-removal', {
+        ...base([wipePlayer], [enemy('/monsters/elementalist', 1), enemy('/monsters/salamander', 1),
+            enemy('/monsters/nom_nom', 1), enemy('/monsters/magician', 2)]),
+        seed: 2958411238, maxEvents: 200, timeLimit: 300e9
+    }));
     for (const stat of ['parry', 'mayhem', 'pierce', 'curse', 'fury', 'weaken', 'blaze', 'bloom', 'ripple', 'lifeSteal', 'manaLeech', 'physicalThorns', 'elementalThorns', 'retaliation', 'foodHaste', 'drinkConcentration', 'abilityHaste', 'castSpeed', 'tenacity']) {
         const caster = withStat(stat);
         const run = stable(base([caster, player(2, true)], [enemy('/monsters/crab'), enemy('/monsters/crab')]));

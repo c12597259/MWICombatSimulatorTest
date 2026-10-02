@@ -139,6 +139,7 @@ pub struct EncounterCase {
 pub struct EncounterRun {
     pub(crate) full: Option<crate::simulation::SimulationState>,
     pub(crate) tracing: bool,
+    pub(crate) retain_unit_history: bool,
     pub(crate) event_counts: serde_json::Map<String, Value>,
     pub(crate) data: Rc<DefinitionSet>,
     pub(crate) case: EncounterCase,
@@ -203,6 +204,7 @@ impl EncounterRun {
         let mut run = Self {
             full: None,
             tracing: false,
+            retain_unit_history: true,
             event_counts: serde_json::Map::new(),
             data,
             case,
@@ -388,8 +390,27 @@ impl EncounterRun {
             if self.full.is_none() && (self.enemies.is_none() || self.all_players_dead) {
                 self.ended = true;
             }
+            // Collect only between complete events: emit() has already consumed
+            // operation references, and all future reads are rooted in the sides
+            // or queue (including DOT source_ref and promoted off-side units).
+            if !self.retain_unit_history && self.processed.is_multiple_of(64) {
+                self.collect_units();
+            }
         }
         Ok(frames)
+    }
+    pub(crate) fn collect_units(&mut self) {
+        self.units.retain_reachable(
+            self.players
+                .iter()
+                .copied()
+                .chain(self.enemies.iter().flatten().copied())
+                .chain(self.queue.events().iter().flat_map(|event| {
+                    [event.source, event.target, event.source_ref]
+                        .into_iter()
+                        .flatten()
+                })),
+        );
     }
     pub(crate) fn apply_setup(&mut self) -> Result<(), String> {
         for setup in self.case.setup.clone() {
@@ -1140,7 +1161,11 @@ impl EncounterRun {
                 self.at(EventKind::Start, self.time + 3e9, None)?;
             }
             self.queue
-                .clear_matching(|event| matches!(event.kind, EventKind::Attack | EventKind::Cast));
+                .clear_matching(|event| event.kind == EventKind::Attack);
+            // JS removes attacks first, then casts from the resulting heap.
+            // Combining the predicates changes equal-time event ordering.
+            self.queue
+                .clear_matching(|event| event.kind == EventKind::Cast);
             self.all_players_dead = true;
         }
         let ended = self.enemies.is_none() || self.all_players_dead;
@@ -1863,4 +1888,90 @@ pub fn encounter_trace(cases: &[EncounterCase], data: Rc<DefinitionSet>) -> Resu
         output.push(frames);
     }
     Ok(json!(output))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn collection_keeps_all_event_roots_and_surviving_shared_buffs() {
+        let data = Rc::new(DefinitionSet::parse(&json!({
+            "schemaVersion": 1, "sourceSha256": "test", "definitions": {
+                "actionDetailMap": {}, "abilityDetailMap": {}, "itemDetailMap": {},
+                "combatMonsterDetailMap": {"/monsters/crab": {
+                    "abilities": [], "enrageTime": 60e9,
+                    "combatDetails": {"combatStats": {"combatStyleHrids": ["/combat_styles/stab"]}}
+                }}
+            }
+        }).to_string(), "test").unwrap());
+        let player: AttributeCase = serde_json::from_value(json!({"input": {
+            "kind": "player", "inputVersion": 1, "hrid": "player1",
+            "levels": [1,1,1,1,1,1,1], "equipment": [], "houseRooms": [],
+            "achievements": {}, "shrines": [0,0,0,0,0], "guildBuffs": [],
+            "food": [], "drinks": [], "abilities": [], "debuffOnLevelGap": 0
+        }}))
+        .unwrap();
+        let enemy: AttributeCase = serde_json::from_value(json!({"input": {
+            "kind": "monster", "hrid": "/monsters/crab"
+        }}))
+        .unwrap();
+        let mut run = EncounterRun::new(
+            EncounterCase {
+                players: vec![player],
+                enemies: vec![enemy.clone()],
+                seed: 1,
+                max_events: 100,
+                time_limit: 100e9,
+                setup: vec![],
+                scheduled: vec![],
+            },
+            data.clone(),
+        )
+        .unwrap();
+        let player = run.players[0];
+        let dot_source = run.enemies.as_ref().unwrap()[0];
+        let target = run
+            .units
+            .spawn(RuntimeUnit::new(enemy.clone(), &data).unwrap());
+        let promoted = run
+            .units
+            .spawn(RuntimeUnit::new(enemy.clone(), &data).unwrap());
+        let active = run
+            .units
+            .spawn(RuntimeUnit::new(enemy.clone(), &data).unwrap());
+        let garbage = run
+            .units
+            .spawn(RuntimeUnit::new(enemy.clone(), &data).unwrap());
+        run.enemies = Some(vec![active]);
+        run.queue.clear();
+        let mut dot = CombatEvent::new(EventKind::Dot, 3e9, None);
+        dot.source_ref = Some(dot_source);
+        dot.target = Some(target);
+        run.push(dot).unwrap();
+        run.at(EventKind::Await, 4e9, Some(promoted)).unwrap();
+        let mut buff = EncounterRun::make_buff("shared", "damage", 0.1, 0.0, 20e9);
+        buff.instance = Some(((promoted.index() as u64 + 1) << 32) | 1);
+        run.buff(player, &[buff.clone()], Some(1.0)).unwrap();
+
+        run.collect_units();
+        for id in [player, active, dot_source, target, promoted] {
+            assert!(run.units.get(id).is_some());
+        }
+        assert!(run.units.get(garbage).is_none());
+        run.queue.clear();
+        run.collect_units();
+        for id in [dot_source, target, promoted] {
+            assert!(run.units.get(id).is_none());
+        }
+        assert_eq!(run.units.iter().count(), 2);
+        let replacement = run.units.spawn(RuntimeUnit::new(enemy, &data).unwrap());
+        buff.instance = Some(((replacement.index() as u64 + 1) << 32) | 1);
+        run.buff(active, &[buff], Some(2.0)).unwrap();
+        // Reusing a caster's slot cannot refresh a buff left on a survivor.
+        assert_eq!(
+            run.unit(player).attributes.buffs_snapshot()[0]["startTime"],
+            1.0
+        );
+    }
 }

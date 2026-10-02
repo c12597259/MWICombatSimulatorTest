@@ -45,6 +45,13 @@ function audit(directory, manifest) {
         return frames;
     };
     const casts = frames => frames.filter(frame => frame.event.type === 'abilityCastEndEvent' && frame.event.source === 0);
+    const wipe = trace('normal-wipe-preserves-separate-attack-cast-removal');
+    const wipeIndex = wipe.findIndex(frame => frame.allPlayersDead);
+    assert.ok(wipeIndex > 0, 'The removal-order regression must reach a normal-map wipe');
+    for (const kind of ['autoAttack', 'abilityCastEndEvent']) {
+        assert.ok(wipe[wipeIndex - 1].heap.some(event => event.type === kind), `No pending ${kind} before wipe`);
+        assert.ok(!wipe[wipeIndex].heap.some(event => event.type === kind), `${kind} survived wipe`);
+    }
     const oom = trace('trigger-read-sparse-priority-oom-skips-affordable-skill');
     assert.ok(oom.flatMap(frame => frame.operations).some(op => op[0] === 'oom' && op[1] === 0 && op[2] === true));
     assert.equal(casts(oom).length, 0, 'Priority OOM must skip the later affordable skill');

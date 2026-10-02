@@ -33,6 +33,32 @@ test('P2.3 complete continuous simulations',async t=>{
         });
     }
     const sample=load(reference.cases[0]);
+    await t.test('72h normal-map simulation reclaims historical monsters and retains exact results',async()=>{
+        // A fresh module makes the memory assertion independent of trace tests'
+        // intentional retention and of the allocator's previous high-water mark.
+        const source=fs.readFileSync(path.join(root,'.wasm-build/pkg/combat_wasm.js'),'utf8')+'\n// isolated arena regression';
+        const isolated=await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
+        const runtime=await isolated.default({module_or_path:wasmBytes});
+        const other=new isolated.PrototypeEngine(fs.readFileSync(dataPath,'utf8'),manifest.dataFingerprint);
+        const input=structuredClone(sample.request);
+        input.players=input.players.slice(0,1);input.zone={hrid:'/actions/combat/crab',difficultyTier:0};input.timeLimit=72*3600e9;
+        globalThis.onmessage=()=>{};
+        globalThis.CustomEvent??=class CustomEvent extends Event {constructor(type,options){super(type);this.detail=options.detail;}};
+        const expected=await require('../.bench/simulations-reference.cjs').simulationReference(input);
+        assert.ok(expected.result.encounters>30_000,'Must allocate many successive monster identities');
+        const probe=other.create_simulation(JSON.stringify(input));let hourOneMemory;
+        try{
+            while(!probe.done()){
+                const progress=JSON.parse(probe.advance(1000));
+                if(progress.time>=3600e9)hourOneMemory??=runtime.memory.buffer.byteLength;
+            }
+            assert.equal(compareSimulation(expected,JSON.parse(probe.result())),null);
+            assert.equal(compareSimulation(expected,native('simulations',input)),null);
+            assert.ok(runtime.memory.buffer.byteLength-hourOneMemory<8*1024*1024,'Historical units must not grow memory with simulated hours');
+            assert.ok(runtime.memory.buffer.byteLength<64*1024*1024,'Small-output 72h simulation must remain bounded');
+        }finally{probe.free();other.free();}
+        assert.equal(isolated.live_simulations(),0);assert.equal(isolated.live_engines(),0);
+    });
     await t.test('chunks 1 / 7 / 1000 preserve progress, full stats and lifecycle',()=>{
         for(const chunk of [1,7,1000]){
             const probe=engine.create_simulation(JSON.stringify(sample.request));let previous=0;

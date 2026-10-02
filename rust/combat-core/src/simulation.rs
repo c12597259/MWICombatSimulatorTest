@@ -99,6 +99,7 @@ impl EncounterRun {
             data,
         )?;
         run.units.truncate(run.players.len());
+        run.retain_unit_history = false;
         run.enemies = None;
         run.full = Some(SimulationState {
             zone,
@@ -324,7 +325,9 @@ impl EncounterRun {
     pub fn progress(&self) -> Value {
         json!({"done":self.done(),"time":self.time,"processed":self.processed,"randomCalls":self.rng.calls(),"progress":(self.time/self.case.time_limit).min(1.0)})
     }
+    /// Enable before advancing to include the complete unit history in snapshots.
     pub fn enable_trace(&mut self) {
+        self.retain_unit_history = true;
         self.tracing = true;
     }
 }
@@ -351,6 +354,9 @@ pub fn trace(input: TraceInput, data: Rc<DefinitionSet>) -> Result<Value, String
         return Err("Invalid trace offset".into());
     }
     let mut run = EncounterRun::simulation(input.input, data)?;
+    // Frozen traces include every historical unit, even before start_event.
+    // Opt in before advancing the offset; normal simulations reclaim units.
+    run.retain_unit_history = true;
     while !run.done() && run.processed < input.start_event {
         run.advance((input.start_event - run.processed).min(1000))?;
     }
