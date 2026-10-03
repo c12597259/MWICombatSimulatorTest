@@ -1,3 +1,13 @@
+import { appendBuffBoost, EMPTY_BOOSTS, ZERO_BOOST } from "./combatBuffIndex.js";
+
+const LEVEL_FIELDS = ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"]
+    .map(skill => ({ level: skill + "Level", buff: "/buff_types/" + skill + "_level" }));
+const MELEE_FIELDS = ["stab", "slash", "smash"].map(style => ({
+    accuracy: style + "Accuracy", accuracyRating: style + "AccuracyRating",
+    damage: style + "Damage", maxDamage: style + "MaxDamage",
+    evasion: style + "Evasion", evasionRating: style + "EvasionRating",
+}));
+
 class CombatUnit {
     isPlayer;
     isStunned = false;
@@ -159,13 +169,24 @@ class CombatUnit {
     constructor() { }
 
     updateCombatDetails() {
-        // All reads in this recalculation share one scan, in the original buff order.
-        this._boostsForUpdate = new Map();
-        for (const buff of Object.values(this.combatBuffs)) {
-            let boosts = this._boostsForUpdate.get(buff.typeHrid);
-            if (!boosts) this._boostsForUpdate.set(buff.typeHrid, boosts = []);
-            boosts.push({ ratioBoost: buff.ratioBoost, flatBoost: buff.flatBoost });
+        this._boostsForUpdate = this.buildBuffBoostIndex();
+        try {
+            this.updateCombatDetailsFromBuffs();
+        } finally {
+            // A mutation or a read outside recalculation must see live values.
+            this._boostsForUpdate = null;
         }
+    }
+
+    buildBuffBoostIndex() {
+        const index = new Map();
+        for (const buff of Object.values(this.combatBuffs)) {
+            appendBuffBoost(index, buff.typeHrid, buff.ratioBoost, buff.flatBoost);
+        }
+        return index;
+    }
+
+    updateCombatDetailsFromBuffs() {
         if (this.isPlayer) {
             if (this.combatDetails.combatStats.hpRegenPer10 === 0) {
                 this.combatDetails.combatStats.hpRegenPer10 = 0.01;
@@ -179,14 +200,13 @@ class CombatUnit {
             }
         }
 
-        ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"].forEach((stat) => {
-            this.combatDetails[stat + "Level"] = this[stat + "Level"];
-            let boosts = this.getBuffBoosts("/buff_types/" + stat + "_level");
-            boosts.forEach((buff) => {
-                this.combatDetails[stat + "Level"] += (this[stat + "Level"] * buff.ratioBoost);
-                this.combatDetails[stat + "Level"] += buff.flatBoost;
-            });
-        });
+        for (const field of LEVEL_FIELDS) {
+            this.combatDetails[field.level] = this[field.level];
+            for (const buff of this.getBuffBoosts(field.buff)) {
+                this.combatDetails[field.level] += this[field.level] * buff.ratioBoost;
+                this.combatDetails[field.level] += buff.flatBoost;
+            }
+        }
 
         const maxHitpointsBoost = this.getBuffBoost("/buff_types/max_hitpoints");
         this.combatDetails.maxHitpoints = Math.floor(
@@ -222,25 +242,25 @@ class CombatUnit {
         let accuracyRatioBoost = this.getBuffBoost("/buff_types/accuracy").ratioBoost;
         let damageRatioBoost = this.getBuffBoost("/buff_types/damage").ratioBoost;
 
-        ["stab", "slash", "smash"].forEach((style) => {
-            this.combatDetails[style + "AccuracyRating"] =
+        const evasionBoosts = this.getBuffBoosts("/buff_types/evasion");
+        for (const field of MELEE_FIELDS) {
+            this.combatDetails[field.accuracyRating] =
                 (10 + this.combatDetails.attackLevel) *
-                (1 + this.combatDetails.combatStats[style + "Accuracy"]) *
+                (1 + this.combatDetails.combatStats[field.accuracy]) *
                 (1 + accuracyRatioBoost) *
                 (1 + accuracyRatioBoostFromFury);
-            this.combatDetails[style + "MaxDamage"] =
+            this.combatDetails[field.maxDamage] =
                 (10 + this.combatDetails.meleeLevel) *
-                (1 + this.combatDetails.combatStats[style + "Damage"]) *
+                (1 + this.combatDetails.combatStats[field.damage]) *
                 (1 + damageRatioBoost) *
                 (1 + damageRatioBoostFromFury);
-            let baseEvasion = (10 + this.combatDetails.defenseLevel) * (1 + this.combatDetails.combatStats[style + "Evasion"]);
-            this.combatDetails[style + "EvasionRating"] = baseEvasion;
-            let evasionBoosts = this.getBuffBoosts("/buff_types/evasion");
+            let baseEvasion = (10 + this.combatDetails.defenseLevel) * (1 + this.combatDetails.combatStats[field.evasion]);
+            this.combatDetails[field.evasionRating] = baseEvasion;
             for (const boost of evasionBoosts) {
-                this.combatDetails[style + "EvasionRating"] += boost.flatBoost;
-                this.combatDetails[style + "EvasionRating"] += baseEvasion * boost.ratioBoost;
+                this.combatDetails[field.evasionRating] += boost.flatBoost;
+                this.combatDetails[field.evasionRating] += baseEvasion * boost.ratioBoost;
             }
-        });
+        }
 
         this.combatDetails.defensiveMaxDamage = 
             (10 + this.combatDetails.defenseLevel) * 
@@ -266,7 +286,6 @@ class CombatUnit {
 
         let baseRangedEvasion = (10 + this.combatDetails.defenseLevel) * (1 + this.combatDetails.combatStats.rangedEvasion);
         this.combatDetails.rangedEvasionRating = baseRangedEvasion;
-        let evasionBoosts = this.getBuffBoosts("/buff_types/evasion");
         for (const boost of evasionBoosts) {
             this.combatDetails.rangedEvasionRating += boost.flatBoost;
             this.combatDetails.rangedEvasionRating += baseRangedEvasion * boost.ratioBoost;
@@ -306,9 +325,8 @@ class CombatUnit {
         let baseAttackSpeed = this.combatDetails.combatStats.attackSpeed;
         this.combatDetails.combatStats.attackInterval /= (1 + baseAttackSpeed);
         let attackIntervalBoosts = this.getBuffBoosts("/buff_types/attack_speed");
-        let attackIntervalRatioBoost = attackIntervalBoosts
-            .map((boost) => boost.ratioBoost)
-            .reduce((prev, cur) => prev + cur, 0);
+        let attackIntervalRatioBoost = 0;
+        for (const boost of attackIntervalBoosts) attackIntervalRatioBoost += boost.ratioBoost;
         this.combatDetails.combatStats.attackInterval /= (1 + attackIntervalRatioBoost);
 
         let baseArmor = 0.2 * this.combatDetails.defenseLevel + this.combatDetails.combatStats.armor;
@@ -393,8 +411,6 @@ class CombatUnit {
 
         this.combatDetails.combatStats.retaliation += this.getBuffBoost("/buff_types/retaliation").flatBoost;
         this.combatDetails.combatStats.tenacity += this.getBuffBoost("/buff_types/tenacity").flatBoost;
-        // Never retain this view across mutations or reads outside recalculation.
-        this._boostsForUpdate = null;
     }
 
     addBuffs(buffs, currentTime) {
@@ -525,7 +541,7 @@ class CombatUnit {
     }
 
     getBuffBoosts(type) {
-        if (this._boostsForUpdate) return this._boostsForUpdate.get(type) || [];
+        if (this._boostsForUpdate) return this._boostsForUpdate.get(type)?.boosts || EMPTY_BOOSTS;
         let boosts = [];
         Object.values(this.combatBuffs)
             .filter((buff) => buff.typeHrid == type)
@@ -537,6 +553,7 @@ class CombatUnit {
     }
 
     getBuffBoost(type) {
+        if (this._boostsForUpdate) return this._boostsForUpdate.get(type)?.total || ZERO_BOOST;
         let boosts = this.getBuffBoosts(type);
 
         let boost = {

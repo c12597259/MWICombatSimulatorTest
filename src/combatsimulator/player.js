@@ -4,7 +4,9 @@ import Consumable from "./consumable";
 import Equipment from "./equipment";
 import HouseRoom from "./houseRoom";
 import Achievement from "./achievement";
+import { appendBuffBoost } from "./combatBuffIndex.js";
 import {
+    GUILD_COMBAT_SHRINE_DETAILS,
     GUILD_COMBAT_SHRINE_DEFAULTS,
     getGuildCombatShrineBoosts,
     getNormalizedGuildCombatShrineBoosts,
@@ -83,19 +85,30 @@ class Player extends CombatUnit {
     }
 
     getBuffBoosts(type) {
+        if (this._boostsForUpdate) return super.getBuffBoosts(type);
         return [
             ...super.getBuffBoosts(type),
-            ...(this._shrineLevelsForUpdate
-                ? getNormalizedGuildCombatShrineBoosts(type, this._shrineLevelsForUpdate)
-                : getGuildCombatShrineBoosts(type, this.guildCombatBuffLevels)),
+            ...getGuildCombatShrineBoosts(type, this.guildCombatBuffLevels),
         ];
     }
 
+    buildBuffBoostIndex() {
+        const index = super.buildBuffBoostIndex();
+        const levels = normalizeGuildCombatShrineLevels(this.guildCombatBuffLevels);
+        // Shrine boosts follow the ordinary buffs, just as in getBuffBoosts.
+        for (const { buffTypes } of GUILD_COMBAT_SHRINE_DETAILS) {
+            for (const type of buffTypes) {
+                for (const boost of getNormalizedGuildCombatShrineBoosts(type, levels)) {
+                    appendBuffBoost(index, type, boost.ratioBoost, boost.flatBoost);
+                }
+            }
+        }
+        return index;
+    }
+
     updateCombatDetails() {
-        this._shrineLevelsForUpdate = normalizeGuildCombatShrineLevels(this.guildCombatBuffLevels);
         this.updateEquipmentStats();
         super.updateCombatDetails();
-        this._shrineLevelsForUpdate = null;
     }
 
     updateEquipmentStats() {
