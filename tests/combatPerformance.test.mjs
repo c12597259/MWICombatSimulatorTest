@@ -65,6 +65,60 @@ test('buff index preserves addition order and is not stale outside recalculation
     assert.deepEqual(p.getBuffBoost('/buff_types/damage'), { ratioBoost: 0.1, flatBoost: 2 });
 });
 
+test('recalculation preserves sequential level rounding and ordinary-before-shrine sums', () => {
+    const p = new Player();
+    p.staminaLevel = 1;
+    p.guildCombatBuffLevels.force = 5;
+    // Integer keys must keep Object.values order; pre-summing the level boosts
+    // would produce 1 instead of the legacy result 0 at this magnitude.
+    p.combatBuffs = {
+        10: { typeHrid: '/buff_types/stamina_level', ratioBoost: 0, flatBoost: -1e16 },
+        2: { typeHrid: '/buff_types/stamina_level', ratioBoost: 0, flatBoost: 1e16 },
+        a: { typeHrid: '/buff_types/damage', ratioBoost: 1e16, flatBoost: null },
+        b: { typeHrid: '/buff_types/damage', ratioBoost: -1e16, flatBoost: undefined },
+    };
+    p.updateCombatDetails();
+    assert.equal(p.combatDetails.staminaLevel, 0);
+    assert.equal(p.combatDetails.stabMaxDamage, (10 + p.meleeLevel) * 1.015);
+    assert.equal(p.combatDetails.maxHitpoints, 100);
+});
+
+test('shared buff edits, shrine changes and reset effects survive repeated recalculation', () => {
+    const p = new Player();
+    const shared = { uniqueHrid: 'damage', typeHrid: '/buff_types/damage', ratioBoost: 0.1, flatBoost: 0, duration: 100 };
+    p.addBuff(shared, 0);
+    assert.equal(p.combatDetails.stabMaxDamage, (10 + p.meleeLevel) * 1.1);
+    shared.ratioBoost = 0.25;
+    p.guildCombatBuffLevels.force = 5;
+    p.removeExpiredBuffs(1);
+    assert.equal(p.combatDetails.stabMaxDamage, (10 + p.meleeLevel) * (1 + (0.25 + 0.015)));
+    const taken = { uniqueHrid: 'taken', typeHrid: '/buff_types/damage_taken', ratioBoost: 0, flatBoost: 0.2, duration: 100 };
+    p.addBuff(taken, 0);
+    const damageTaken = p.combatDetails.combatStats.damageTaken;
+    assert.notEqual(damageTaken, 0);
+    p.clearCCs();
+    p.removeExpiredBuffs(2);
+    assert.equal(p.combatDetails.combatStats.damageTaken, damageTaken);
+    p.guildCombatBuffLevels.force = 0;
+    p.removeExpiredBuffs(100);
+    assert.equal(p.combatDetails.stabMaxDamage, 10 + p.meleeLevel);
+    assert.equal(p.combatDetails.combatStats.damageTaken, 0);
+});
+
+test('failed recalculation releases its buff snapshot', () => {
+    const p = new Player();
+    const calculate = p.updateCombatDetailsFromBuffs;
+    p.combatBuffs.a = { typeHrid: '/buff_types/damage', ratioBoost: 0.1, flatBoost: 0 };
+    p.updateCombatDetailsFromBuffs = () => { throw new Error('interrupted calculation'); };
+    assert.throws(() => p.updateCombatDetails(), /interrupted calculation/);
+    p.combatBuffs.a.ratioBoost = 0.3;
+    p.guildCombatBuffLevels.force = 5;
+    assert.deepEqual(p.getBuffBoost('/buff_types/damage'), { ratioBoost: 0.3 + 0.015, flatBoost: 0 });
+    p.updateCombatDetailsFromBuffs = calculate;
+    p.updateCombatDetails();
+    assert.equal(p.combatDetails.stabMaxDamage, (10 + p.meleeLevel) * (1 + (0.3 + 0.015)));
+});
+
 test('event queue preserves legacy equal-time order through random cancellations', () => {
     const q = new EventQueue();
     const heap = new Heap((a, b) => a.time - b.time);

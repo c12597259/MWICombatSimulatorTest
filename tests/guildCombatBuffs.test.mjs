@@ -2,10 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const combatUnitSource = await readFile(
-    new URL("../src/combatsimulator/combatUnit.js", import.meta.url),
+const buffIndexSource = await readFile(
+    new URL("../src/combatsimulator/combatBuffIndex.js", import.meta.url),
     "utf8",
 );
+const buffIndexModuleUrl = `data:text/javascript;base64,${Buffer.from(buffIndexSource).toString("base64")}`;
+const combatUnitSource = (await readFile(
+    new URL("../src/combatsimulator/combatUnit.js", import.meta.url),
+    "utf8",
+)).replace('"./combatBuffIndex.js"', JSON.stringify(buffIndexModuleUrl));
 const combatUnitModuleUrl = `data:text/javascript;base64,${Buffer.from(combatUnitSource).toString("base64")}`;
 const { default: CombatUnit } = await import(combatUnitModuleUrl);
 
