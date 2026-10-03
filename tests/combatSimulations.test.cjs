@@ -33,6 +33,27 @@ test('P2.3 complete continuous simulations',async t=>{
         });
     }
     const sample=load(reference.cases[0]);
+    await t.test('24h dungeon consumes its result without copying or dropping detailed wipe logs',async()=>{
+        // Fresh linear memory makes this catch the old ~364 MiB export peak,
+        // independently of allocations retained by earlier fixture/trace tests.
+        const source=fs.readFileSync(path.join(root,'.wasm-build/pkg/combat_wasm.js'),'utf8')+'\n// isolated owned-result regression';
+        const isolated=await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
+        const runtime=await isolated.default({module_or_path:wasmBytes});
+        const other=new isolated.PrototypeEngine(fs.readFileSync(dataPath,'utf8'),manifest.dataFingerprint);
+        const input={...sample.request,seed:1,timeLimit:24*3600e9,visualization:false};
+        globalThis.onmessage=()=>{};
+        globalThis.CustomEvent??=class CustomEvent extends Event {constructor(type,options){super(type);this.detail=options.detail;}};
+        try{
+            const expected=await require('../.bench/simulations-reference.cjs').simulationReference(input);
+            assert.ok(expected.result.wipeEvents.length>100,'Must exercise a large detailed history');
+            assert.ok(expected.result.wipeEvents.some(wipe=>wipe.logs.length>=200),'Must retain complete log windows');
+            const actual=JSON.parse(other.simulate(JSON.stringify(input)));
+            assert.equal(compareSimulation(expected,actual),null);
+            assert.ok(runtime.memory.buffer.byteLength<256*1024*1024,'Export must not deep-copy the complete history');
+            assert.equal(compareSimulation(expected,native('simulations',input)),null);
+        }finally{other.free();}
+        assert.equal(isolated.live_engines(),0);
+    });
     await t.test('72h normal-map simulation reclaims historical monsters and retains exact results',async()=>{
         // A fresh module makes the memory assertion independent of trace tests'
         // intentional retention and of the allocator's previous high-water mark.
@@ -65,8 +86,11 @@ test('P2.3 complete continuous simulations',async t=>{
             try {
                 assert.equal(wasm.live_simulations(),1);assert.throws(()=>probe.result());assert.throws(()=>probe.advance(0));assert.throws(()=>probe.advance(10001));
                 while(!probe.done()){const progress=JSON.parse(probe.advance(chunk));assert.ok(progress.processed>previous);previous=progress.processed;assert.ok(progress.progress>=0&&progress.progress<=1);}
-                assert.equal(compareSimulation(sample.expected,JSON.parse(probe.result())),null);
+                const firstResult=probe.result();
+                assert.equal(compareSimulation(sample.expected,JSON.parse(firstResult)),null);
+                assert.equal(probe.result(),firstResult,'Reading a Probe result must not consume or accumulate fields');
                 const last=JSON.parse(probe.advance(chunk));assert.equal(last.processed,previous);assert.equal(last.progress,1);
+                assert.equal(probe.result(),firstResult,'Advancing a completed Probe must preserve its result');
             }finally{probe.free();}assert.equal(wasm.live_simulations(),0);
         }
     });

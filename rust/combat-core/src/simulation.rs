@@ -237,14 +237,22 @@ impl EncounterRun {
         }
     }
     pub fn simulation_result(&self) -> Result<Value, String> {
+        self.check_simulation_result_ready()?;
+        let value = self.full.as_ref().unwrap().result.value.clone();
+        Ok(self.finalize_simulation_result(value))
+    }
+    fn check_simulation_result_ready(&self) -> Result<(), String> {
         if self.full.is_none() || !self.done() {
             return Err("Simulation has not completed".into());
         }
         if self.failed {
             return Err("Simulation failed".into());
         }
+        Ok(())
+    }
+    // Both borrowed snapshots and the consuming exit use the same final fields.
+    fn finalize_simulation_result(&self, mut value: Value) -> Value {
         let full = self.full.as_ref().unwrap();
-        let mut value = full.result.value.clone();
         value["maxEnrageStack"] = json!(self.max_enrage);
         value["simulatedTime"] = json!(self.time);
         if let Some(zone) = &full.zone {
@@ -315,12 +323,25 @@ impl EncounterRun {
                 value["manaUsed"][name][key] = json!(amount);
             }
         }
-        Ok(value)
+        value
     }
     pub fn simulation_summary(&self) -> Result<Value, String> {
-        Ok(
-            json!({"result":self.simulation_result()?,"randomCalls":self.rng.calls(),"events":self.event_counts,"processed":self.processed}),
-        )
+        Ok(self.wrap_simulation_result(self.simulation_result()?))
+    }
+    fn into_simulation_summary(mut self) -> Result<Value, String> {
+        self.check_simulation_result_ready()?;
+        // This run cannot be read again. Move its potentially large wipe history
+        // instead of cloning it; the borrowed Probe path still takes a snapshot.
+        let value = std::mem::take(&mut self.full.as_mut().unwrap().result.value);
+        let result = self.finalize_simulation_result(value);
+        Ok(self.wrap_simulation_result(result))
+    }
+    fn wrap_simulation_result(&self, result: Value) -> Value {
+        // Passing the result directly to json! serializes it into another Value,
+        // copying every nested log. Insert the owned value into the envelope.
+        let mut summary = json!({"result":null,"randomCalls":self.rng.calls(),"events":self.event_counts,"processed":self.processed});
+        summary["result"] = result;
+        summary
     }
     pub fn progress(&self) -> Value {
         json!({"done":self.done(),"time":self.time,"processed":self.processed,"randomCalls":self.rng.calls(),"progress":(self.time/self.case.time_limit).min(1.0)})
@@ -336,7 +357,7 @@ pub fn simulate(input: SimulationInput, data: Rc<DefinitionSet>) -> Result<Value
     while !run.done() {
         run.advance(1000)?;
     }
-    run.simulation_summary()
+    run.into_simulation_summary()
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
