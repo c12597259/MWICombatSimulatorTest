@@ -90,6 +90,7 @@ import {
 } from "./zoneSelection.js";
 
 import patchNote from "../patchNote.json";
+import { createSimulationRecordCapture, createSimulationHistoryArchive, getSimulationArchiveFilename } from "./simulationRecordExport.js";
 
 const ONE_SECOND = 1e9;
 const ONE_HOUR = 60 * 60 * ONE_SECOND;
@@ -98,6 +99,53 @@ let buttonStartSimulation = document.getElementById("buttonStartSimulation");
 let buttonStopSimulation = document.getElementById("buttonStopSimulation");
 let progressbar = document.getElementById("simulationProgressBar");
 let simStartTime = 0;
+const simulationExportMetadata = {
+    engine: "javascript-worker",
+    build: typeof __SIMULATION_EXPORT_BUILD__ === "undefined" ? null : __SIMULATION_EXPORT_BUILD__,
+    environment: {
+        userAgent: navigator.userAgent,
+        hardwareConcurrency: navigator.hardwareConcurrency ?? null,
+        deviceMemoryGiB: navigator.deviceMemory ?? null,
+    },
+};
+const simulationRecordCapture = createSimulationRecordCapture(simulationExportMetadata);
+let pendingSimulationHistorySave = Promise.resolve();
+
+function clearSimulationRecordCapture() {
+    simulationRecordCapture.clear();
+}
+
+async function exportCompletedSimulationRecord() {
+    const button = document.getElementById("buttonExportSimulationRecord");
+    if (button.disabled) return;
+    button.disabled = true;
+    const latestRun = simulationRecordCapture.getRecord();
+    try {
+        await pendingSimulationHistorySave;
+        const records = await loadSimulationHistoryRecords();
+        if (!records.length && !latestRun) {
+            showErrorModal(getLocalizedHistoryValue("common:controls.noSimulationRecords", "No simulation records to export yet."));
+            return;
+        }
+        const archive = await createSimulationHistoryArchive(records, decodeSimulationHistorySnapshot, {
+            latestRun, metadata: { exporter: simulationExportMetadata },
+        });
+        const blob = new Blob([JSON.stringify(archive)], { type: "application/json;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = getSimulationArchiveFilename(archive);
+        document.body.appendChild(link);
+        try { link.click(); } finally {
+            link.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 30_000);
+        }
+    } catch (error) {
+        showErrorModal(String(error));
+    } finally {
+        button.disabled = false;
+    }
+}
 
 let worker = new Worker(new URL("worker.js", import.meta.url));
 let multiWorker = new Worker(new URL("multiWorker.js", import.meta.url));
@@ -150,11 +198,12 @@ let playerDataMap = {
 function onWorkerMessage(event) {
     switch (event.data.type) {
         case "simulation_result":
+            simulationRecordCapture.finish(event.data.simResult);
             progressbar.style.width = "100%";
             progressbar.innerHTML = "100% (" + ((Date.now() - simStartTime) / 1000).toFixed(2) + "s)";
             //console.log("SIM RESULTS: ", event.data.simResult);
             showSimulationResult(event.data.simResult);
-            void saveCompletedSimulationHistory(event.data.simResult);
+            pendingSimulationHistorySave = saveCompletedSimulationHistory(event.data.simResult);
             updateContent();
             buttonStartSimulation.disabled = false;
             buttonStopSimulation.style.display = 'none';
@@ -170,7 +219,10 @@ function onWorkerMessage(event) {
             }
             break;
         case "simulation_error":
+            clearSimulationRecordCapture();
             pendingSimulationHistoryContext = null;
+            buttonStartSimulation.disabled = false;
+            buttonStopSimulation.style.display = 'none';
             showErrorModal(event.data.error.toString());
             break;
     }
@@ -180,6 +232,7 @@ function onMultiWorkerMessage(event) {
     switch (event.data.type) {
         case "simulation_result_allZones":
         case "simulation_result_allLabyrinths":
+            simulationRecordCapture.finish(event.data.simResults);
             progressbar.style.width = "100%";
             progressbar.innerHTML = "100% (" + ((Date.now() - simStartTime) / 1000).toFixed(2) + "s)";
             showAllSimulationResults(event.data.simResults);
@@ -194,6 +247,9 @@ function onMultiWorkerMessage(event) {
             progressbar.innerHTML = progress + "% (" + ((Date.now() - simStartTime) / 1000).toFixed(2) + "s)";
             break;
         case "simulation_error":
+            clearSimulationRecordCapture();
+            buttonStartSimulation.disabled = false;
+            buttonStopSimulation.style.display = 'none';
             showErrorModal(event.data.error.toString());
             break;
     }
@@ -2165,6 +2221,12 @@ async function saveCompletedSimulationHistory(simResult) {
     pendingSimulationHistoryContext = null;
     if (!context) {
         return;
+    }
+
+    const captured = simulationRecordCapture.getRecord();
+    if (captured) {
+        const { result, ...simulationRecord } = captured;
+        context.snapshot.simulationRecord = simulationRecord;
     }
 
     const expectedDropsByPlayer = {};
@@ -6177,6 +6239,7 @@ document.querySelectorAll('#playerTab .nav-link').forEach(tab => {
 initPlayerTabReordering();
 
 function initSimulationControls() {
+    document.getElementById("buttonExportSimulationRecord").addEventListener("click", exportCompletedSimulationRecord);
     let simulationTimeInput = document.getElementById("inputSimulationTime");
     simulationTimeInput.value = 24;
 
@@ -6200,13 +6263,22 @@ function initSimulationControls() {
             alert("You need to select at least one player to sim.");
             return;
         }
-        // buttonStartSimulation.disabled = true;
+        buttonStartSimulation.disabled = true;
         buttonStopSimulation.style.display = 'block';
-        startSimulation(selectedPlayers);
+        try {
+            startSimulation(selectedPlayers);
+        } catch (error) {
+            clearSimulationRecordCapture();
+            pendingSimulationHistoryContext = null;
+            buttonStartSimulation.disabled = false;
+            buttonStopSimulation.style.display = 'none';
+            showErrorModal(String(error));
+        }
     });
 
     buttonStopSimulation.style.display = 'none';
     buttonStopSimulation.addEventListener("click", (event) => {
+        clearSimulationRecordCapture();
         pendingSimulationHistoryContext = null;
         progressbar.style.width = "0%";
         progressbar.innerHTML = "0%";
@@ -6230,6 +6302,7 @@ function initSimulationControls() {
 }
 
 function startSimulation(selectedPlayers) {
+    clearSimulationRecordCapture();
     pendingSimulationHistoryContext = null;
     lastSimulationExperienceSnapshot = { ...playerDataMap };
     let simLabyrinthToggle = document.getElementById("simLabyrinthToggle");
@@ -6371,6 +6444,7 @@ function startSimulation(selectedPlayers) {
             worker = new Worker(new URL("multiWorker.js", import.meta.url));
         }
         worker.onmessage = onWorkerMessage;
+        simulationRecordCapture.start(workerMessage);
         worker.postMessage(workerMessage);
     } else if (simAllLabyrinthsToggle.checked) {
         let gameLabyrinths = Object.values(combatMonsterDetailMap)
@@ -6401,6 +6475,7 @@ function startSimulation(selectedPlayers) {
             multiWorker = new Worker(new URL("multiWorker.js", import.meta.url));
         }
         multiWorker.onmessage = onMultiWorkerMessage;
+        simulationRecordCapture.start(workerMessage);
         multiWorker.postMessage(workerMessage);
     } else if (simAllZonesToggle.checked || simAllSoloToggle.checked) {
         let targetHrids = {};
@@ -6451,6 +6526,7 @@ function startSimulation(selectedPlayers) {
             multiWorker = new Worker(new URL("multiWorker.js", import.meta.url));
         }
         multiWorker.onmessage = onMultiWorkerMessage;
+        simulationRecordCapture.start(workerMessage);
         multiWorker.postMessage(workerMessage);
     }
 }
