@@ -7,20 +7,32 @@ use crate::{
     zone::{LabyrinthInput, ZoneInput},
 };
 use serde_json::{json, Value};
+use std::borrow::Cow;
 
 pub struct SimResult {
     pub value: Value,
 }
 fn increment(root: &mut Value, keys: &[&str], amount: f64) {
-    if keys.len() == 1 {
-        let previous = root[keys[0]].as_f64().unwrap_or(0.0);
-        root[keys[0]] = json!(previous + amount);
-        return;
+    // Value's mutable string indexing allocates an owned key even on a hit.
+    // Borrow existing entries; allocate keys only when first inserting them.
+    if let Some(entry) = root.get_mut(keys[0]) {
+        increment_entry(entry, &keys[1..], amount);
+    } else {
+        let mut entry = Value::Null;
+        increment_entry(&mut entry, &keys[1..], amount);
+        root[keys[0]] = entry;
     }
-    if !root[keys[0]].is_object() {
-        root[keys[0]] = json!({});
+}
+fn increment_entry(entry: &mut Value, keys: &[&str], amount: f64) {
+    if keys.is_empty() {
+        let previous = entry.as_f64().unwrap_or(0.0);
+        *entry = json!(previous + amount);
+    } else {
+        if !entry.is_object() {
+            *entry = json!({});
+        }
+        increment(entry, keys, amount);
     }
-    increment(&mut root[keys[0]], &keys[1..], amount);
 }
 impl SimResult {
     pub fn new(zone: Option<&ZoneInput>, lab: Option<&LabyrinthInput>, players: usize) -> Self {
@@ -78,25 +90,25 @@ impl SimResult {
                 let target = units
                     .get(units.id_at(op[2].as_u64().unwrap() as usize).unwrap())
                     .unwrap();
-                let hit = op[4]
-                    .as_str()
-                    .map(String::from)
-                    .unwrap_or_else(|| op[4].as_f64().unwrap().to_string());
+                let hit = match op[4].as_str() {
+                    Some(hit) => Cow::Borrowed(hit),
+                    None => Cow::Owned(op[4].as_f64().unwrap().to_string()),
+                };
                 increment(
-                    &mut self.value["attacks"],
-                    &[name, &target.hrid, op[3].as_str().unwrap(), &hit],
+                    &mut self.value,
+                    &["attacks", name, &target.hrid, op[3].as_str().unwrap(), &hit],
                     1.0,
                 );
             }
             "death" => {
-                increment(&mut self.value["deaths"], &[name], 1.0);
+                increment(&mut self.value, &["deaths", name], 1.0);
                 if !unit.player {
                     self.alive(name, false, time);
                 }
             }
             "consume" => increment(
-                &mut self.value["consumablesUsed"],
-                &[name, op[2].as_str().unwrap()],
+                &mut self.value,
+                &["consumablesUsed", name, op[2].as_str().unwrap()],
                 1.0,
             ),
             "hp" | "mp" | "hpSpent" => {
@@ -106,8 +118,8 @@ impl SimResult {
                     _ => "hitpointsSpent",
                 };
                 increment(
-                    &mut self.value[field],
-                    &[name, op[2].as_str().unwrap()],
+                    &mut self.value,
+                    &[field, name, op[2].as_str().unwrap()],
                     op[3].as_f64().unwrap(),
                 );
             }
@@ -116,10 +128,11 @@ impl SimResult {
                 if out {
                     self.value["playerRanOutOfMana"][name] = json!(true);
                 }
-                if !self.value["playerRanOutOfManaTime"][name].is_object() {
-                    self.value["playerRanOutOfManaTime"][name] = json!({"isOutOfMana":false,"startTimeForOutOfMana":0,"totalTimeForOutOfMana":0});
+                let times = self.value.get_mut("playerRanOutOfManaTime").unwrap();
+                if !times[name].is_object() {
+                    times[name] = json!({"isOutOfMana":false,"startTimeForOutOfMana":0,"totalTimeForOutOfMana":0});
                 }
-                let entry = &mut self.value["playerRanOutOfManaTime"][name];
+                let entry = times.get_mut(name).unwrap();
                 let previous = entry["isOutOfMana"].as_bool().unwrap();
                 if out && !previous {
                     entry["isOutOfMana"] = json!(true);
@@ -147,9 +160,11 @@ impl SimResult {
                     "ranged",
                     "magic",
                 ];
-                if !self.value["experienceGained"][name].is_object() {
-                    self.value["experienceGained"][name] = json!({"stamina":0,"intelligence":0,"attack":0,"melee":0,"defense":0,"ranged":0,"magic":0});
+                let experience = self.value.get_mut("experienceGained").unwrap();
+                if !experience[name].is_object() {
+                    experience[name] = json!({"stamina":0,"intelligence":0,"attack":0,"melee":0,"defense":0,"ranged":0,"magic":0});
                 }
+                let experience = experience.get_mut(name).unwrap();
                 let mut rates = [0.0; 7];
                 for (index, skill) in skills.iter().enumerate() {
                     if stats
@@ -189,17 +204,95 @@ impl SimResult {
                         }
                     }
                 }
+                let bonuses = [
+                    stats.stamina_experience,
+                    stats.intelligence_experience,
+                    stats.attack_experience,
+                    stats.melee_experience,
+                    stats.defense_experience,
+                    stats.ranged_experience,
+                    stats.magic_experience,
+                ];
                 for (index, skill) in skills.iter().enumerate() {
                     if rates[index] > 0.0 {
                         let gain = op[2].as_f64().unwrap()
                             * (1.0 + stats.combat_experience)
-                            * (rates[index] * (1.0 + stats.get(&format!("{skill}Experience"))))
+                            * (rates[index] * (1.0 + bonuses[index]))
                             * (1.0 + input.debuff_on_level_gap);
-                        increment(&mut self.value["experienceGained"], &[name, skill], gain);
+                        increment(experience, &[skill], gain);
                     }
                 }
             }
             _ => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The original implementation is the oracle for coercion, insertion order,
+    // signed zero, non-finite values and non-associative floating point sums.
+    fn reference_increment(root: &mut Value, keys: &[&str], amount: f64) {
+        if keys.len() == 1 {
+            let previous = root[keys[0]].as_f64().unwrap_or(0.0);
+            root[keys[0]] = json!(previous + amount);
+            return;
+        }
+        if !root[keys[0]].is_object() {
+            root[keys[0]] = json!({});
+        }
+        reference_increment(&mut root[keys[0]], &keys[1..], amount);
+    }
+
+    #[test]
+    fn borrowed_counters_preserve_every_intermediate_serialized_result() {
+        let paths: &[&[&str]] = &[
+            &["attacks", "player1", "crab", "attack", "10"],
+            &["attacks", "player1", "crab", "attack", "2"],
+            &["attacks", "player2", "crab", "attack", "miss"],
+            &["experienceGained", "player1", "magic"],
+            &["experienceGained", "player1", "stamina"],
+            &["existing", "nested"],
+            &["existing"],
+            &["zero"],
+        ];
+        let amounts = [
+            0.0,
+            -0.0,
+            1e16,
+            1.0,
+            -1e16,
+            0.1,
+            f64::INFINITY,
+            2.0,
+            f64::NAN,
+        ];
+        for initial in [Value::Null, json!({"existing": "reset", "zero": -0.0})] {
+            let mut actual = initial.clone();
+            let mut expected = initial;
+            for path in paths {
+                for amount in amounts {
+                    increment(&mut actual, path, amount);
+                    reference_increment(&mut expected, path, amount);
+                    assert_eq!(
+                        serde_json::to_string(&actual).unwrap(),
+                        serde_json::to_string(&expected).unwrap()
+                    );
+                }
+            }
+            // Revisit both occupied and previously replaced nested paths.
+            for index in 0..200 {
+                let path = paths[index % paths.len()];
+                let amount = amounts[index % amounts.len()];
+                increment(&mut actual, path, amount);
+                reference_increment(&mut expected, path, amount);
+                assert_eq!(
+                    serde_json::to_string(&actual).unwrap(),
+                    serde_json::to_string(&expected).unwrap()
+                );
+            }
         }
     }
 }
