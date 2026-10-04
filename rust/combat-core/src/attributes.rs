@@ -550,15 +550,28 @@ impl AttributeUnit {
         };
         let buffs = BuffBoosts::new(&self.buffs, shrines);
         let mut levels = self.base_levels;
-        for (index, key) in LEVELS.iter().enumerate() {
-            for (ratio, flat) in buffs.get(&format!("/buff_types/{key}_level")) {
+        for (index, kind) in [
+            "/buff_types/stamina_level",
+            "/buff_types/intelligence_level",
+            "/buff_types/attack_level",
+            "/buff_types/melee_level",
+            "/buff_types/defense_level",
+            "/buff_types/ranged_level",
+            "/buff_types/magic_level",
+        ]
+        .iter()
+        .enumerate()
+        {
+            for (ratio, flat) in buffs.get(kind) {
                 levels[index] += self.base_levels[index] * ratio;
                 levels[index] += flat;
             }
         }
         let hp = buffs.total("/buff_types/max_hitpoints");
         let mp = buffs.total("/buff_types/max_manapoints");
-        let mut details = self.details.clone();
+        // All fallible work has finished. Preserve current HP/MP in place,
+        // without cloning the old combat stats that are replaced below.
+        let details = &mut self.details;
         details.stamina_level = levels[0];
         details.intelligence_level = levels[1];
         details.attack_level = levels[2];
@@ -577,9 +590,31 @@ impl AttributeUnit {
         let fury_accuracy = buffs.total("/buff_types/fury_accuracy").0;
         let fury_damage = buffs.total("/buff_types/fury_damage").0;
         let mut ratings = [(0.0, 0.0, 0.0); 5];
-        for (index, style) in ["stab", "slash", "smash", "ranged", "magic"]
-            .iter()
-            .enumerate()
+        for (index, (base_accuracy, base_damage, base_evasion)) in [
+            (stats.stab_accuracy, stats.stab_damage, stats.stab_evasion),
+            (
+                stats.slash_accuracy,
+                stats.slash_damage,
+                stats.slash_evasion,
+            ),
+            (
+                stats.smash_accuracy,
+                stats.smash_damage,
+                stats.smash_evasion,
+            ),
+            (
+                stats.ranged_accuracy,
+                stats.ranged_damage,
+                stats.ranged_evasion,
+            ),
+            (
+                stats.magic_accuracy,
+                stats.magic_damage,
+                stats.magic_evasion,
+            ),
+        ]
+        .iter()
+        .enumerate()
         {
             let damage_level = if index < 3 {
                 levels[3]
@@ -587,14 +622,12 @@ impl AttributeUnit {
                 levels[index + 2]
             };
             let accuracy = (10.0 + levels[2])
-                * (1.0 + stats.get(&format!("{style}Accuracy")))
+                * (1.0 + base_accuracy)
                 * (1.0 + accuracy)
                 * (1.0 + fury_accuracy);
-            let damage = (10.0 + damage_level)
-                * (1.0 + stats.get(&format!("{style}Damage")))
-                * (1.0 + damage)
-                * (1.0 + fury_damage);
-            let base = (10.0 + levels[4]) * (1.0 + stats.get(&format!("{style}Evasion")));
+            let damage =
+                (10.0 + damage_level) * (1.0 + base_damage) * (1.0 + damage) * (1.0 + fury_damage);
+            let base = (10.0 + levels[4]) * (1.0 + base_evasion);
             let mut evasion = base;
             for (ratio, flat) in buffs.get("/buff_types/evasion") {
                 evasion += flat;
@@ -631,17 +664,14 @@ impl AttributeUnit {
         details.magic_max_damage = ratings[4].1;
         details.magic_evasion_rating = ratings[4].2;
         stats.damage_taken = buffs.total("/buff_types/damage_taken").1;
-        for (key, kind) in [
-            ("physicalAmplify", "physical_amplify"),
-            ("waterAmplify", "water_amplify"),
-            ("natureAmplify", "nature_amplify"),
-            ("fireAmplify", "fire_amplify"),
-            ("healingAmplify", "healing_amplify"),
+        for (value, kind) in [
+            (&mut stats.physical_amplify, "/buff_types/physical_amplify"),
+            (&mut stats.water_amplify, "/buff_types/water_amplify"),
+            (&mut stats.nature_amplify, "/buff_types/nature_amplify"),
+            (&mut stats.fire_amplify, "/buff_types/fire_amplify"),
+            (&mut stats.healing_amplify, "/buff_types/healing_amplify"),
         ] {
-            stats.set(
-                key,
-                stats.get(key) + buffs.total(&format!("/buff_types/{kind}")).1,
-            );
+            *value += buffs.total(kind).1;
         }
         stats.attack_interval /= 1.0 + levels[2] / 2000.0;
         stats.attack_interval /= 1.0 + stats.attack_speed;
@@ -651,18 +681,18 @@ impl AttributeUnit {
         }
         stats.attack_interval /= 1.0 + attack_speed;
         let mut resistances = [0.0; 4];
-        for (index, (key, kind)) in [
-            ("armor", "armor"),
-            ("waterResistance", "water_resistance"),
-            ("natureResistance", "nature_resistance"),
-            ("fireResistance", "fire_resistance"),
+        for (index, (value, kind)) in [
+            (stats.armor, "/buff_types/armor"),
+            (stats.water_resistance, "/buff_types/water_resistance"),
+            (stats.nature_resistance, "/buff_types/nature_resistance"),
+            (stats.fire_resistance, "/buff_types/fire_resistance"),
         ]
         .iter()
         .enumerate()
         {
-            let base = 0.2 * levels[4] + stats.get(key);
+            let base = 0.2 * levels[4] + value;
             resistances[index] = base;
-            for (ratio, flat) in buffs.get(&format!("/buff_types/{kind}")) {
+            for (ratio, flat) in buffs.get(kind) {
                 resistances[index] += flat;
                 resistances[index] += base * ratio;
             }
@@ -671,40 +701,39 @@ impl AttributeUnit {
         details.total_water_resistance = resistances[1];
         details.total_nature_resistance = resistances[2];
         details.total_fire_resistance = resistances[3];
-        for (key, kind) in [("hpRegenPer10", "hp_regen"), ("mpRegenPer10", "mp_regen")] {
-            let (ratio, flat) = buffs.total(&format!("/buff_types/{kind}"));
-            let mut value = stats.get(key);
-            value += value * ratio;
-            value += flat;
-            stats.set(key, value);
-        }
-        for (key, kind) in [
-            ("lifeSteal", "life_steal"),
-            ("physicalThorns", "physical_thorns"),
-            ("elementalThorns", "elemental_thorns"),
-            ("combatExperience", "wisdom"),
-            ("criticalRate", "critical_rate"),
-            ("criticalDamage", "critical_damage"),
-            ("castSpeed", "cast_speed"),
-            ("retaliation", "retaliation"),
-            ("tenacity", "tenacity"),
+        for (value, kind) in [
+            (&mut stats.hp_regen_per10, "/buff_types/hp_regen"),
+            (&mut stats.mp_regen_per10, "/buff_types/mp_regen"),
         ] {
-            stats.set(
-                key,
-                stats.get(key) + buffs.total(&format!("/buff_types/{kind}")).1,
-            );
+            let (ratio, flat) = buffs.total(kind);
+            *value += *value * ratio;
+            *value += flat;
+        }
+        for (value, kind) in [
+            (&mut stats.life_steal, "/buff_types/life_steal"),
+            (&mut stats.physical_thorns, "/buff_types/physical_thorns"),
+            (&mut stats.elemental_thorns, "/buff_types/elemental_thorns"),
+            (&mut stats.combat_experience, "/buff_types/wisdom"),
+            (&mut stats.critical_rate, "/buff_types/critical_rate"),
+            (&mut stats.critical_damage, "/buff_types/critical_damage"),
+            (&mut stats.cast_speed, "/buff_types/cast_speed"),
+            (&mut stats.retaliation, "/buff_types/retaliation"),
+            (&mut stats.tenacity, "/buff_types/tenacity"),
+        ] {
+            *value += buffs.total(kind).1;
         }
         stats.cast_speed += levels[2] / 2000.0;
-        for (key, kind) in [
-            ("combatDropRate", "combat_drop_rate"),
-            ("combatRareFind", "rare_find"),
-            ("combatDropQuantity", "combat_drop_quantity"),
+        for (value, kind) in [
+            (&mut stats.combat_drop_rate, "/buff_types/combat_drop_rate"),
+            (&mut stats.combat_rare_find, "/buff_types/rare_find"),
+            (
+                &mut stats.combat_drop_quantity,
+                "/buff_types/combat_drop_quantity",
+            ),
         ] {
-            let (ratio, flat) = buffs.total(&format!("/buff_types/{kind}"));
-            let mut value = stats.get(key);
-            value += (1.0 + value) * ratio;
-            value += flat;
-            stats.set(key, value);
+            let (ratio, flat) = buffs.total(kind);
+            *value += (1.0 + *value) * ratio;
+            *value += flat;
         }
         let base_threat = 100.0 + stats.threat;
         details.total_threat = base_threat;
@@ -716,7 +745,6 @@ impl AttributeUnit {
         }
         stats.threat += flat;
         details.combat_stats = stats;
-        self.details = details;
         Ok(())
     }
 
