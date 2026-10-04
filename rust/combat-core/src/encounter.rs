@@ -865,7 +865,7 @@ impl EncounterRun {
                                 continue;
                             };
                             let stats = &self.unit(id).attributes.details.combat_stats;
-                            let haste = if item.category.contains("food") {
+                            let haste = if item.is_food {
                                 stats.food_haste
                             } else {
                                 stats.drink_concentration
@@ -917,9 +917,9 @@ impl EncounterRun {
         let concentration = stats.drink_concentration;
         let food_haste = stats.food_haste;
         let mut cd = item.cooldown;
-        if concentration > 0.0 && item.category.contains("drink") {
+        if concentration > 0.0 && item.is_drink {
             cd /= 1.0 + concentration;
-        } else if food_haste > 0.0 && item.category.contains("food") {
+        } else if food_haste > 0.0 && item.is_food {
             cd /= 1.0 + food_haste;
         }
         self.at(EventKind::Cooldown, self.time + cd, None)?;
@@ -945,7 +945,7 @@ impl EncounterRun {
         }
         for buff in &item.buffs {
             let mut buff = buff.clone();
-            if concentration > 0.0 && item.category.contains("drink") {
+            if concentration > 0.0 && item.is_drink {
                 buff.ratio_boost *= 1.0 + concentration;
                 buff.flat_boost *= 1.0 + concentration;
                 buff.duration /= 1.0 + concentration;
@@ -2059,7 +2059,8 @@ mod tests {
         run.unit_mut(id).attributes.details.current_hitpoints = 10.0;
         run.unit_mut(id).food = vec![Some(Consumable {
             hrid: "test".into(),
-            category: "food".into(),
+            is_food: true,
+            is_drink: false,
             cooldown: 1.0,
             hp: 0.0,
             mp: 0.0,
@@ -2078,5 +2079,72 @@ mod tests {
         run.check_triggers().unwrap();
         assert_eq!(run.trigger_snapshot.capacity(), capacity);
         assert!(run.trigger_snapshot.is_empty());
+    }
+
+    #[test]
+    fn consumable_categories_preserve_cooldown_and_buff_precedence() {
+        for (category, food, drink, cooldown) in [
+            (json!("/item_categories/food"), true, false, 20.0),
+            (json!("/item_categories/drink"), false, true, 10.0),
+            (json!("custom/food_and_drink"), true, true, 10.0),
+            (json!("seafood"), true, false, 20.0),
+            (json!("unknown"), false, false, 40.0),
+            (json!("FOOD_DRINK"), false, false, 40.0),
+            (Value::Null, false, false, 40.0),
+            (json!(42), false, false, 40.0),
+        ] {
+            let data = DefinitionSet::parse(
+                &json!({"schemaVersion": 1, "sourceSha256": "test", "definitions": {
+                    "actionDetailMap": {}, "abilityDetailMap": {}, "combatMonsterDetailMap": {},
+                    "itemDetailMap": {"test": {"categoryHrid": category,
+                        "consumableDetail": {"cooldownDuration": 40, "defaultCombatTriggers": []}}}
+                }})
+                .to_string(),
+                "test",
+            )
+            .unwrap();
+            let selection = serde_json::from_value(json!({"hrid": "test"})).unwrap();
+            let mut item = Consumable::selected(&selection, &data).unwrap();
+            assert_eq!((item.is_food, item.is_drink), (food, drink));
+
+            // Trigger eligibility prefers food haste, even when the category
+            // also matches drink. Actual consumption gives drink precedence.
+            let mut run = test_run();
+            let id = run.players[0];
+            let stats = &mut run.unit_mut(id).attributes.details.combat_stats;
+            stats.food_haste = 1.0;
+            stats.drink_concentration = 3.0;
+            item.last_used = 0.0;
+            run.unit_mut(id).food = vec![Some(item.clone())];
+            run.time = 15.0;
+            run.check_triggers().unwrap();
+            assert_eq!(
+                run.unit(id).food[0].as_ref().unwrap().last_used,
+                if food { 0.0 } else { 15.0 }
+            );
+
+            let mut run = test_run();
+            let id = run.players[0];
+            let stats = &mut run.unit_mut(id).attributes.details.combat_stats;
+            stats.food_haste = 1.0;
+            stats.drink_concentration = 3.0;
+            item.buffs = vec![EncounterRun::make_buff("test", "damage", 0.25, 4.0, 80.0)];
+            run.unit_mut(id).food = vec![Some(item.clone())];
+            run.consume(id, false, 0, &item).unwrap();
+            assert_eq!(
+                run.queue
+                    .events()
+                    .iter()
+                    .find(|event| event.kind == EventKind::Cooldown)
+                    .unwrap()
+                    .time,
+                cooldown
+            );
+            let buffs = run.unit(id).attributes.buffs_snapshot();
+            let multiplier = if drink { 4.0 } else { 1.0 };
+            assert_eq!(buffs[0]["ratioBoost"], json!(0.25 * multiplier));
+            assert_eq!(buffs[0]["flatBoost"], json!(4.0 * multiplier));
+            assert_eq!(buffs[0]["duration"], json!(80.0 / multiplier));
+        }
     }
 }

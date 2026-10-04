@@ -528,7 +528,10 @@ impl Ability {
 #[derive(Clone)]
 pub struct Consumable {
     pub hrid: String,
-    pub category: String,
+    // Preserve the two independent substring checks, including categories
+    // containing both names or neither; classification is fixed at creation.
+    pub is_food: bool,
+    pub is_drink: bool,
     pub cooldown: f64,
     pub hp: f64,
     pub mp: f64,
@@ -540,6 +543,7 @@ pub struct Consumable {
 impl Consumable {
     pub fn selected(value: &SelectionInput, data: &DefinitionSet) -> Result<Self, String> {
         let item = definition(data, "itemDetailMap", &value.hrid)?;
+        let category = item["categoryHrid"].as_str().unwrap_or("");
         let raw = &item["consumableDetail"];
         let buffs = raw["buffs"]
             .as_array()
@@ -553,7 +557,8 @@ impl Consumable {
             .unwrap_or_default();
         Ok(Self {
             hrid: value.hrid.clone(),
-            category: text(item, "categoryHrid"),
+            is_food: category.contains("food"),
+            is_drink: category.contains("drink"),
             cooldown: number(raw, "cooldownDuration"),
             hp: number(raw, "hitpointRestore"),
             mp: number(raw, "manapointRestore"),
