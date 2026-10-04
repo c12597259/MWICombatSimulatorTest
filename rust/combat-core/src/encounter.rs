@@ -1,5 +1,8 @@
 use crate::{
-    actions::{Ability, AbilityEffect, Consumable, Trigger},
+    actions::{
+        Ability, AbilityEffect, Consumable, Trigger, TriggerComparator, TriggerCondition,
+        TriggerDependency,
+    },
     attributes::{AttributeCase, AttributeStep, CombatBuff, MonsterInput, UnitInput},
     combat_math::{self, AttackResult},
     data::DefinitionSet,
@@ -156,6 +159,7 @@ pub struct EncounterRun {
     pub(crate) all_players_dead: bool,
     pub(crate) operations: Vec<Value>,
     pub(crate) max_enrage: f64,
+    trigger_snapshot: Vec<UnitId>,
 }
 impl EncounterRun {
     pub fn new(case: EncounterCase, data: Rc<DefinitionSet>) -> Result<Self, String> {
@@ -221,6 +225,7 @@ impl EncounterRun {
             all_players_dead: false,
             operations: vec![],
             max_enrage: 0.0,
+            trigger_snapshot: Vec::new(),
         };
         run.push(CombatEvent::new(EventKind::Start, 0.0, None))?;
         Ok(run)
@@ -636,17 +641,17 @@ impl EncounterRun {
         allies: &[UnitId],
         enemies: Option<&[UnitId]>,
     ) -> Result<bool, String> {
-        let dep = trigger.dependency_hrid.rsplit('/').next().unwrap_or("");
+        let dep = trigger.dependency;
         let value = match dep {
-            "self" => self.unit(source).trigger_value(trigger, self.time)?,
-            "targeted_enemy" => {
+            TriggerDependency::SelfUnit => self.unit(source).trigger_value(trigger, self.time)?,
+            TriggerDependency::Target => {
                 let Some(target) = target else {
                     return Ok(false);
                 };
                 self.unit(target).trigger_value(trigger, self.time)?
             }
-            "all_allies" | "all_enemies" => {
-                let values = if dep == "all_allies" {
+            TriggerDependency::Allies | TriggerDependency::Enemies => {
+                let values = if dep == TriggerDependency::Allies {
                     allies
                 } else {
                     let Some(values) = enemies else {
@@ -654,16 +659,16 @@ impl EncounterRun {
                     };
                     values
                 };
-                let condition = trigger.condition_hrid.rsplit('/').next().unwrap_or("");
+                let condition = trigger.condition;
                 let value = match condition {
-                    "number_of_active_units" => {
+                    TriggerCondition::ActiveUnits => {
                         values.iter().filter(|id| self.unit(**id).alive()).count() as f64
                     }
-                    "number_of_dead_units" => values
+                    TriggerCondition::DeadUnits => values
                         .iter()
                         .filter(|id| self.unit(**id).attributes.details.current_hitpoints <= 0.0)
                         .count() as f64,
-                    "lowest_hp_percentage" => {
+                    TriggerCondition::LowestHp => {
                         values.iter().filter(|id| self.unit(**id).alive()).fold(
                             2.0_f64,
                             |min, id| {
@@ -706,15 +711,13 @@ impl EncounterRun {
         Self::compare(trigger, &value)
     }
     pub(crate) fn compare(trigger: &Trigger, value: &Dependency) -> Result<bool, String> {
-        Ok(
-            match trigger.comparator_hrid.rsplit('/').next().unwrap_or("") {
-                "greater_than_equal" => value.number >= trigger.value,
-                "less_than_equal" => value.number <= trigger.value,
-                "is_active" => value.active,
-                "is_inactive" => !value.active,
-                _ => return Err("Unknown trigger comparator".into()),
-            },
-        )
+        Ok(match trigger.comparator {
+            TriggerComparator::GreaterEqual => value.number >= trigger.value,
+            TriggerComparator::LessEqual => value.number <= trigger.value,
+            TriggerComparator::Active => value.active,
+            TriggerComparator::Inactive => !value.active,
+            _ => return Err("Unknown trigger comparator".into()),
+        })
     }
     pub(crate) fn should_trigger(
         &self,
@@ -819,14 +822,29 @@ impl EncounterRun {
         Ok(())
     }
     pub(crate) fn check_triggers(&mut self) -> Result<(), String> {
+        let mut snapshot = std::mem::take(&mut self.trigger_snapshot);
+        let result = self.check_triggers_with_snapshot(&mut snapshot);
+        // Restore reusable storage on both success and evaluation errors.
+        snapshot.clear();
+        self.trigger_snapshot = snapshot;
+        result
+    }
+
+    fn check_triggers_with_snapshot(&mut self, snapshot: &mut Vec<UnitId>) -> Result<(), String> {
         for _ in 0..10_000 {
             let mut used = false;
-            // Each side filters alive units once, preserving the JS array loop.
-            for side in [
-                self.players.clone(),
-                self.enemies.clone().unwrap_or_default(),
-            ] {
-                for id in self.live(&side) {
+            // Consumption changes unit state and queues later events; it does
+            // not change either roster. Keep the original per-side alive
+            // snapshot and order, reusing its storage instead of cloning sides.
+            for enemy_side in [false, true] {
+                snapshot.clear();
+                let side = if enemy_side {
+                    self.enemies.as_deref().unwrap_or_default()
+                } else {
+                    &self.players
+                };
+                snapshot.extend(side.iter().copied().filter(|id| self.unit(*id).alive()));
+                for &id in snapshot.iter() {
                     if !self.unit(id).alive() {
                         return Err("Checking triggers for a dead unit".into());
                     }
@@ -1894,8 +1912,7 @@ pub fn encounter_trace(cases: &[EncounterCase], data: Rc<DefinitionSet>) -> Resu
 mod tests {
     use super::*;
 
-    #[test]
-    fn collection_keeps_all_event_roots_and_surviving_shared_buffs() {
+    fn test_run() -> EncounterRun {
         let data = Rc::new(DefinitionSet::parse(&json!({
             "schemaVersion": 1, "sourceSha256": "test", "definitions": {
                 "actionDetailMap": {}, "abilityDetailMap": {}, "itemDetailMap": {},
@@ -1916,7 +1933,7 @@ mod tests {
             "kind": "monster", "hrid": "/monsters/crab"
         }}))
         .unwrap();
-        let mut run = EncounterRun::new(
+        EncounterRun::new(
             EncounterCase {
                 players: vec![player],
                 enemies: vec![enemy.clone()],
@@ -1928,7 +1945,14 @@ mod tests {
             },
             data.clone(),
         )
-        .unwrap();
+        .unwrap()
+    }
+
+    #[test]
+    fn collection_keeps_all_event_roots_and_surviving_shared_buffs() {
+        let mut run = test_run();
+        let data = run.data.clone();
+        let enemy = run.case.enemies[0].clone();
         let player = run.players[0];
         let dot_source = run.enemies.as_ref().unwrap()[0];
         let target = run
@@ -1973,5 +1997,86 @@ mod tests {
             run.unit(player).attributes.buffs_snapshot()[0]["startTime"],
             1.0
         );
+    }
+
+    fn test_trigger(dependency: &str, condition: &str, comparator: &str) -> Trigger {
+        serde_json::from_value(
+            json!({"dependencyHrid": dependency, "conditionHrid": condition,
+            "comparatorHrid": comparator, "value": 1e9}),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn compiled_trigger_errors_keep_original_skip_and_evaluation_order() {
+        let mut run = test_run();
+        let id = run.players[0];
+        let invalid = test_trigger("self", "unknown", "is_active");
+        assert!(!run
+            .should_trigger(id, 0.0, 10.0, std::slice::from_ref(&invalid), true)
+            .unwrap());
+        run.unit_mut(id).stunned = true;
+        assert!(!run
+            .should_trigger(id, -100.0, 0.0, std::slice::from_ref(&invalid), true)
+            .unwrap());
+        run.unit_mut(id).stunned = false;
+        run.unit_mut(id).silenced = true;
+        assert!(!run
+            .should_trigger(id, -100.0, 0.0, std::slice::from_ref(&invalid), true)
+            .unwrap());
+        run.unit_mut(id).silenced = false;
+        run.enemies = None;
+        assert!(!run
+            .should_trigger(
+                id,
+                -100.0,
+                0.0,
+                &[test_trigger("targeted_enemy", "unknown", "unknown")],
+                true
+            )
+            .unwrap());
+        let false_first = test_trigger("self", "current_hp", "greater_than_equal");
+        assert!(run
+            .should_trigger(id, -100.0, 0.0, &[false_first, invalid], true)
+            .unwrap_err()
+            .contains("Unknown trigger condition"));
+        assert!(run
+            .should_trigger(
+                id,
+                -100.0,
+                0.0,
+                &[test_trigger("self", "current_hp", "unknown")],
+                true
+            )
+            .unwrap_err()
+            .contains("Unknown trigger comparator"));
+    }
+
+    #[test]
+    fn trigger_snapshot_storage_survives_errors_and_roster_changes() {
+        let mut run = test_run();
+        let id = run.players[0];
+        run.unit_mut(id).attributes.details.current_hitpoints = 10.0;
+        run.unit_mut(id).food = vec![Some(Consumable {
+            hrid: "test".into(),
+            category: "food".into(),
+            cooldown: 1.0,
+            hp: 0.0,
+            mp: 0.0,
+            recovery: 0.0,
+            buffs: vec![],
+            triggers: vec![test_trigger("self", "unknown", "is_active")],
+            last_used: -100.0,
+        })];
+        assert!(run.check_triggers().is_err());
+        assert!(run.trigger_snapshot.is_empty());
+        let capacity = run.trigger_snapshot.capacity();
+        assert!(capacity > 0);
+        run.unit_mut(id).food.clear();
+        run.unit_mut(id).attributes.details.current_hitpoints = 0.0;
+        run.enemies = None;
+        run.check_triggers().unwrap();
+        assert_eq!(run.trigger_snapshot.capacity(), capacity);
+        assert!(run.trigger_snapshot.is_empty());
     }
 }

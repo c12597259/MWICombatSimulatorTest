@@ -1,5 +1,7 @@
 use crate::{
-    actions::{definition, number, text, Ability, Consumable, Trigger, NEVER_USED},
+    actions::{
+        definition, number, text, Ability, Consumable, Trigger, TriggerCondition, NEVER_USED,
+    },
     attributes::{AttributeCase, AttributeStep, AttributeUnit, UnitInput},
     data::DefinitionSet,
     rng::CombatRng,
@@ -231,101 +233,47 @@ impl RuntimeUnit {
         }
     }
     pub fn trigger_value(&self, trigger: &Trigger, time: f64) -> Result<Dependency, String> {
-        let key = trigger.condition_hrid.rsplit('/').next().unwrap_or("");
         let details = &self.attributes.details;
-        let value = match key {
-            "current_hp" => details.current_hitpoints,
-            "current_mp" => details.current_manapoints,
-            "missing_hp" => details.max_hitpoints - details.current_hitpoints,
-            "missing_mp" => details.max_manapoints - details.current_manapoints,
-            "stun_status" => {
+        let value = match trigger.condition {
+            TriggerCondition::CurrentHp => details.current_hitpoints,
+            TriggerCondition::CurrentMp => details.current_manapoints,
+            TriggerCondition::MissingHp => details.max_hitpoints - details.current_hitpoints,
+            TriggerCondition::MissingMp => details.max_manapoints - details.current_manapoints,
+            TriggerCondition::Stun => {
                 if self.stunned || self.stun_expire == Some(time) {
                     1.0
                 } else {
                     0.0
                 }
             }
-            "blind_status" => {
+            TriggerCondition::Blind => {
                 if self.blinded || self.blind_expire == Some(time) {
                     1.0
                 } else {
                     0.0
                 }
             }
-            "silence_status" => {
+            TriggerCondition::Silence => {
                 if self.silenced || self.silence_expire == Some(time) {
                     1.0
                 } else {
                     0.0
                 }
             }
-            "berserk"
-            | "frenzy"
-            | "precision"
-            | "vampirism"
-            | "attack_coffee"
-            | "defense_coffee"
-            | "lucky_coffee"
-            | "magic_coffee"
-            | "melee_coffee"
-            | "ranged_coffee"
-            | "swiftness_coffee"
-            | "wisdom_coffee"
-            | "ice_spear"
-            | "puncture"
-            | "frost_surge"
-            | "elusiveness"
-            | "channeling_coffee"
-            | "fierce_aura"
-            | "invincible_armor"
-            | "invincible_fire_resistance"
-            | "invincible_nature_resistance"
-            | "invincible_water_resistance"
-            | "provoke"
-            | "taunt"
-            | "crippling_slash"
-            | "mana_spring"
-            | "retribution"
-            | "fracturing_impact"
-            | "maim"
-            | "curse"
-            | "weaken" => {
-                let active = self
-                    .attributes
-                    .has_buff(&format!("/buff_uniques/{key}"), false);
+            TriggerCondition::Buff { key, prefix } => {
+                let active = self.attributes.has_buff(key, prefix);
                 return Ok(Dependency {
                     number: f64::NAN,
                     active,
                     object: active,
                 });
             }
-            "critical_aura"
-            | "critical_coffee"
-            | "intelligence_coffee"
-            | "stamina_coffee"
-            | "elemental_affinity"
-            | "fury"
-            | "guardian_aura"
-            | "insanity"
-            | "spike_shell"
-            | "toxic_pollen"
-            | "invincible"
-            | "mystic_aura"
-            | "pestilent_shot"
-            | "smoke_burst"
-            | "speed_aura"
-            | "toughness"
-            | "enrage" => {
-                let active = self
-                    .attributes
-                    .has_buff(&format!("/buff_uniques/{key}"), true);
-                return Ok(Dependency {
-                    number: f64::NAN,
-                    active,
-                    object: active,
-                });
+            _ => {
+                return Err(format!(
+                    "Unknown trigger condition: {}",
+                    trigger.condition_hrid.rsplit('/').next().unwrap_or("")
+                ))
             }
-            _ => return Err(format!("Unknown trigger condition: {key}")),
         };
         Ok(Dependency {
             number: value,

@@ -23,13 +23,301 @@ pub fn definition<'a>(
 }
 
 #[derive(Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase", from = "TriggerInput")]
 pub struct Trigger {
-    pub dependency_hrid: String,
-    pub condition_hrid: String,
-    pub comparator_hrid: String,
-    #[serde(default)]
+    dependency_hrid: String,
+    pub(crate) condition_hrid: String,
+    comparator_hrid: String,
     pub value: f64,
+    #[serde(skip)]
+    pub(crate) dependency: TriggerDependency,
+    #[serde(skip)]
+    pub(crate) condition: TriggerCondition,
+    #[serde(skip)]
+    pub(crate) comparator: TriggerComparator,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TriggerInput {
+    dependency_hrid: String,
+    condition_hrid: String,
+    comparator_hrid: String,
+    #[serde(default)]
+    value: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum TriggerDependency {
+    SelfUnit,
+    Target,
+    Allies,
+    Enemies,
+    Unknown,
+}
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum TriggerComparator {
+    GreaterEqual,
+    LessEqual,
+    Active,
+    Inactive,
+    Unknown,
+}
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum TriggerCondition {
+    CurrentHp,
+    CurrentMp,
+    MissingHp,
+    MissingMp,
+    Stun,
+    Blind,
+    Silence,
+    ActiveUnits,
+    DeadUnits,
+    LowestHp,
+    Buff { key: &'static str, prefix: bool },
+    Unknown,
+}
+
+impl From<TriggerInput> for Trigger {
+    fn from(input: TriggerInput) -> Self {
+        let dependency = match input.dependency_hrid.rsplit('/').next().unwrap_or("") {
+            "self" => TriggerDependency::SelfUnit,
+            "targeted_enemy" => TriggerDependency::Target,
+            "all_allies" => TriggerDependency::Allies,
+            "all_enemies" => TriggerDependency::Enemies,
+            _ => TriggerDependency::Unknown,
+        };
+        let comparator = match input.comparator_hrid.rsplit('/').next().unwrap_or("") {
+            "greater_than_equal" => TriggerComparator::GreaterEqual,
+            "less_than_equal" => TriggerComparator::LessEqual,
+            "is_active" => TriggerComparator::Active,
+            "is_inactive" => TriggerComparator::Inactive,
+            _ => TriggerComparator::Unknown,
+        };
+        // Keep unknown identifiers for the original evaluation-time error path.
+        // Cooldown/CC/absent-target checks must still be able to skip them.
+        let condition = TriggerCondition::parse(&input.condition_hrid);
+        Self {
+            dependency_hrid: input.dependency_hrid,
+            condition_hrid: input.condition_hrid,
+            comparator_hrid: input.comparator_hrid,
+            value: input.value,
+            dependency,
+            condition,
+            comparator,
+        }
+    }
+}
+
+impl TriggerCondition {
+    fn parse(hrid: &str) -> Self {
+        match hrid.rsplit('/').next().unwrap_or("") {
+            "current_hp" => Self::CurrentHp,
+            "current_mp" => Self::CurrentMp,
+            "missing_hp" => Self::MissingHp,
+            "missing_mp" => Self::MissingMp,
+            "stun_status" => Self::Stun,
+            "blind_status" => Self::Blind,
+            "silence_status" => Self::Silence,
+            "number_of_active_units" => Self::ActiveUnits,
+            "number_of_dead_units" => Self::DeadUnits,
+            "lowest_hp_percentage" => Self::LowestHp,
+            "berserk" => Self::Buff {
+                key: "/buff_uniques/berserk",
+                prefix: false,
+            },
+            "frenzy" => Self::Buff {
+                key: "/buff_uniques/frenzy",
+                prefix: false,
+            },
+            "precision" => Self::Buff {
+                key: "/buff_uniques/precision",
+                prefix: false,
+            },
+            "vampirism" => Self::Buff {
+                key: "/buff_uniques/vampirism",
+                prefix: false,
+            },
+            "attack_coffee" => Self::Buff {
+                key: "/buff_uniques/attack_coffee",
+                prefix: false,
+            },
+            "defense_coffee" => Self::Buff {
+                key: "/buff_uniques/defense_coffee",
+                prefix: false,
+            },
+            "lucky_coffee" => Self::Buff {
+                key: "/buff_uniques/lucky_coffee",
+                prefix: false,
+            },
+            "magic_coffee" => Self::Buff {
+                key: "/buff_uniques/magic_coffee",
+                prefix: false,
+            },
+            "melee_coffee" => Self::Buff {
+                key: "/buff_uniques/melee_coffee",
+                prefix: false,
+            },
+            "ranged_coffee" => Self::Buff {
+                key: "/buff_uniques/ranged_coffee",
+                prefix: false,
+            },
+            "swiftness_coffee" => Self::Buff {
+                key: "/buff_uniques/swiftness_coffee",
+                prefix: false,
+            },
+            "wisdom_coffee" => Self::Buff {
+                key: "/buff_uniques/wisdom_coffee",
+                prefix: false,
+            },
+            "ice_spear" => Self::Buff {
+                key: "/buff_uniques/ice_spear",
+                prefix: false,
+            },
+            "puncture" => Self::Buff {
+                key: "/buff_uniques/puncture",
+                prefix: false,
+            },
+            "frost_surge" => Self::Buff {
+                key: "/buff_uniques/frost_surge",
+                prefix: false,
+            },
+            "elusiveness" => Self::Buff {
+                key: "/buff_uniques/elusiveness",
+                prefix: false,
+            },
+            "channeling_coffee" => Self::Buff {
+                key: "/buff_uniques/channeling_coffee",
+                prefix: false,
+            },
+            "fierce_aura" => Self::Buff {
+                key: "/buff_uniques/fierce_aura",
+                prefix: false,
+            },
+            "invincible_armor" => Self::Buff {
+                key: "/buff_uniques/invincible_armor",
+                prefix: false,
+            },
+            "invincible_fire_resistance" => Self::Buff {
+                key: "/buff_uniques/invincible_fire_resistance",
+                prefix: false,
+            },
+            "invincible_nature_resistance" => Self::Buff {
+                key: "/buff_uniques/invincible_nature_resistance",
+                prefix: false,
+            },
+            "invincible_water_resistance" => Self::Buff {
+                key: "/buff_uniques/invincible_water_resistance",
+                prefix: false,
+            },
+            "provoke" => Self::Buff {
+                key: "/buff_uniques/provoke",
+                prefix: false,
+            },
+            "taunt" => Self::Buff {
+                key: "/buff_uniques/taunt",
+                prefix: false,
+            },
+            "crippling_slash" => Self::Buff {
+                key: "/buff_uniques/crippling_slash",
+                prefix: false,
+            },
+            "mana_spring" => Self::Buff {
+                key: "/buff_uniques/mana_spring",
+                prefix: false,
+            },
+            "retribution" => Self::Buff {
+                key: "/buff_uniques/retribution",
+                prefix: false,
+            },
+            "fracturing_impact" => Self::Buff {
+                key: "/buff_uniques/fracturing_impact",
+                prefix: false,
+            },
+            "maim" => Self::Buff {
+                key: "/buff_uniques/maim",
+                prefix: false,
+            },
+            "curse" => Self::Buff {
+                key: "/buff_uniques/curse",
+                prefix: false,
+            },
+            "weaken" => Self::Buff {
+                key: "/buff_uniques/weaken",
+                prefix: false,
+            },
+            "critical_aura" => Self::Buff {
+                key: "/buff_uniques/critical_aura",
+                prefix: true,
+            },
+            "critical_coffee" => Self::Buff {
+                key: "/buff_uniques/critical_coffee",
+                prefix: true,
+            },
+            "intelligence_coffee" => Self::Buff {
+                key: "/buff_uniques/intelligence_coffee",
+                prefix: true,
+            },
+            "stamina_coffee" => Self::Buff {
+                key: "/buff_uniques/stamina_coffee",
+                prefix: true,
+            },
+            "elemental_affinity" => Self::Buff {
+                key: "/buff_uniques/elemental_affinity",
+                prefix: true,
+            },
+            "fury" => Self::Buff {
+                key: "/buff_uniques/fury",
+                prefix: true,
+            },
+            "guardian_aura" => Self::Buff {
+                key: "/buff_uniques/guardian_aura",
+                prefix: true,
+            },
+            "insanity" => Self::Buff {
+                key: "/buff_uniques/insanity",
+                prefix: true,
+            },
+            "spike_shell" => Self::Buff {
+                key: "/buff_uniques/spike_shell",
+                prefix: true,
+            },
+            "toxic_pollen" => Self::Buff {
+                key: "/buff_uniques/toxic_pollen",
+                prefix: true,
+            },
+            "invincible" => Self::Buff {
+                key: "/buff_uniques/invincible",
+                prefix: true,
+            },
+            "mystic_aura" => Self::Buff {
+                key: "/buff_uniques/mystic_aura",
+                prefix: true,
+            },
+            "pestilent_shot" => Self::Buff {
+                key: "/buff_uniques/pestilent_shot",
+                prefix: true,
+            },
+            "smoke_burst" => Self::Buff {
+                key: "/buff_uniques/smoke_burst",
+                prefix: true,
+            },
+            "speed_aura" => Self::Buff {
+                key: "/buff_uniques/speed_aura",
+                prefix: true,
+            },
+            "toughness" => Self::Buff {
+                key: "/buff_uniques/toughness",
+                prefix: true,
+            },
+            "enrage" => Self::Buff {
+                key: "/buff_uniques/enrage",
+                prefix: true,
+            },
+            _ => Self::Unknown,
+        }
+    }
 }
 fn triggers(selection: Option<&Value>, defaults: &Value) -> Result<Vec<Trigger>, String> {
     let value = selection
@@ -38,6 +326,40 @@ fn triggers(selection: Option<&Value>, defaults: &Value) -> Result<Vec<Trigger>,
     let result: Vec<Trigger> =
         serde_json::from_value(value.clone()).map_err(|_| "Invalid combat triggers")?;
     Ok(result)
+}
+
+#[cfg(test)]
+mod trigger_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn compiled_triggers_preserve_wire_shape_defaults_and_late_errors() {
+        let input = json!({"dependencyHrid": "/custom/self", "conditionHrid": "/custom/critical_aura",
+            "comparatorHrid": "/custom/is_active"});
+        let trigger: Trigger = serde_json::from_value(input.clone()).unwrap();
+        assert_eq!(trigger.dependency, TriggerDependency::SelfUnit);
+        assert_eq!(
+            trigger.condition,
+            TriggerCondition::Buff {
+                key: "/buff_uniques/critical_aura",
+                prefix: true
+            }
+        );
+        assert_eq!(trigger.comparator, TriggerComparator::Active);
+        assert_eq!(trigger.value, 0.0);
+        let mut expected = input;
+        expected["value"] = json!(0.0);
+        assert_eq!(serde_json::to_value(&trigger).unwrap(), expected);
+        expected["condition"] = json!("injected compiled value");
+        assert!(serde_json::from_value::<Trigger>(expected).is_err());
+        let unknown: Trigger = serde_json::from_value(json!({"dependencyHrid": "future",
+            "conditionHrid": "future", "comparatorHrid": "future"}))
+        .unwrap();
+        assert_eq!(unknown.dependency, TriggerDependency::Unknown);
+        assert_eq!(unknown.condition, TriggerCondition::Unknown);
+        assert_eq!(unknown.comparator, TriggerComparator::Unknown);
+    }
 }
 
 #[derive(Clone)]
