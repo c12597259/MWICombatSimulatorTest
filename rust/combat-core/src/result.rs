@@ -170,7 +170,10 @@ impl SimResult {
                 if !focus.is_empty()
                     && map
                         .get(focus)
-                        .is_some_and(|v| v.as_f64().unwrap_or(0.0) != 0.0)
+                        // skillExpMap uses booleans; JS tests the entry's truthiness.
+                        .is_some_and(|v| {
+                            v.as_bool().unwrap_or(false) || v.as_f64().unwrap_or(0.0) != 0.0
+                        })
                 {
                     for (index, skill) in skills.iter().enumerate() {
                         if focus.rsplit('/').next() == Some(*skill) {
