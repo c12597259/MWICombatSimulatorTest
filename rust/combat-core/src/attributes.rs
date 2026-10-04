@@ -140,67 +140,104 @@ struct EquipmentStatsCache {
     stats: CombatStats,
 }
 
-struct BuffBoostGroup<'a> {
-    type_hrid: &'a str,
+struct MonsterStatsCache {
+    definition_hash: String,
+    stats: CombatStats,
+    levels: [f64; 7],
+    experience: f64,
+}
+
+macro_rules! buff_kinds {
+    ($($kind:ident => $name:literal),* $(,)?) => {
+        #[derive(Clone, Copy)]
+        enum BuffKind { $($kind),* }
+
+        const BUFF_KIND_COUNT: usize = [$($name),*].len();
+
+        impl BuffKind {
+            fn from_hrid(hrid: &str) -> Option<Self> {
+                match hrid {
+                    $(concat!("/buff_types/", $name) => Some(Self::$kind),)*
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
+buff_kinds! {
+    StaminaLevel => "stamina_level", IntelligenceLevel => "intelligence_level",
+    AttackLevel => "attack_level", MeleeLevel => "melee_level",
+    DefenseLevel => "defense_level", RangedLevel => "ranged_level", MagicLevel => "magic_level",
+    MaxHitpoints => "max_hitpoints", MaxManapoints => "max_manapoints",
+    Accuracy => "accuracy", Damage => "damage", FuryAccuracy => "fury_accuracy", FuryDamage => "fury_damage",
+    Evasion => "evasion", DamageTaken => "damage_taken",
+    PhysicalAmplify => "physical_amplify", WaterAmplify => "water_amplify", NatureAmplify => "nature_amplify",
+    FireAmplify => "fire_amplify", HealingAmplify => "healing_amplify", AttackSpeed => "attack_speed",
+    Armor => "armor", WaterResistance => "water_resistance", NatureResistance => "nature_resistance",
+    FireResistance => "fire_resistance", HpRegen => "hp_regen", MpRegen => "mp_regen",
+    LifeSteal => "life_steal", PhysicalThorns => "physical_thorns", ElementalThorns => "elemental_thorns",
+    Wisdom => "wisdom", CriticalRate => "critical_rate", CriticalDamage => "critical_damage",
+    CastSpeed => "cast_speed", Retaliation => "retaliation", Tenacity => "tenacity",
+    CombatDropRate => "combat_drop_rate", RareFind => "rare_find", CombatDropQuantity => "combat_drop_quantity",
+    Threat => "threat",
+}
+
+#[derive(Default)]
+struct BuffBoostGroup {
     values: Vec<(f64, f64)>,
+    total: (f64, f64),
 }
 
-struct BuffBoosts<'a> {
-    groups: Vec<BuffBoostGroup<'a>>,
-    shrines: Option<[f64; 5]>,
+struct BuffBoosts {
+    groups: [BuffBoostGroup; BUFF_KIND_COUNT],
 }
 
-impl<'a> BuffBoosts<'a> {
-    fn new(buffs: &'a [BuffEntry], shrines: Option<[f64; 5]>) -> Self {
-        let mut groups: Vec<BuffBoostGroup<'a>> = Vec::new();
+impl BuffBoosts {
+    fn new(buffs: &[BuffEntry], shrines: Option<[f64; 5]>) -> Self {
+        let mut index = Self {
+            groups: std::array::from_fn(|_| BuffBoostGroup::default()),
+        };
         // Preserve JS property order within each type. Keep individual values:
         // levels, evasion and resistances must not use a pre-summed boost.
         for entry in ordered_buffs(buffs) {
-            let type_hrid = entry.buff.type_hrid.as_str();
-            let value = (entry.buff.ratio_boost, entry.buff.flat_boost);
-            if let Some(group) = groups.iter_mut().find(|group| group.type_hrid == type_hrid) {
-                group.values.push(value);
-            } else {
-                groups.push(BuffBoostGroup {
-                    type_hrid,
-                    values: vec![value],
-                });
+            if let Some(kind) = BuffKind::from_hrid(&entry.buff.type_hrid) {
+                index.push(kind, entry.buff.ratio_boost, entry.buff.flat_boost);
             }
         }
-        Self { groups, shrines }
-    }
-
-    fn get(&self, kind: &str) -> impl Iterator<Item = (f64, f64)> + '_ {
-        let values = self
-            .groups
-            .iter()
-            .find(|group| group.type_hrid == kind)
-            .map(|group| group.values.as_slice())
-            .unwrap_or(&[]);
-        let shrine = self.shrines.and_then(|levels| match kind {
-            "/buff_types/damage" => Some((levels[0] * 0.003, 0.0)),
-            "/buff_types/attack_speed" => Some((levels[1] * 0.004, 0.0)),
-            "/buff_types/cast_speed" => Some((0.0, levels[1] * 0.004)),
-            "/buff_types/max_hitpoints" | "/buff_types/max_manapoints" => {
-                Some((levels[2] * 0.01, 0.0))
+        if let Some(levels) = shrines {
+            use BuffKind::*;
+            // Append shrines after ordinary buffs, in the original sum order.
+            for (kind, ratio, flat) in [
+                (Damage, levels[0] * 0.003, 0.0),
+                (AttackSpeed, levels[1] * 0.004, 0.0),
+                (CastSpeed, 0.0, levels[1] * 0.004),
+                (MaxHitpoints, levels[2] * 0.01, 0.0),
+                (MaxManapoints, levels[2] * 0.01, 0.0),
+                (RareFind, 0.0, levels[3] * 0.015),
+                (Wisdom, 0.0, levels[4] * 0.005),
+            ] {
+                if ratio != 0.0 || flat != 0.0 {
+                    index.push(kind, ratio, flat);
+                }
             }
-            "/buff_types/rare_find" => Some((0.0, levels[3] * 0.015)),
-            "/buff_types/wisdom" => Some((0.0, levels[4] * 0.005)),
-            _ => None,
-        });
-        values
-            .iter()
-            .copied()
-            .chain(shrine.filter(|(ratio, flat)| *ratio != 0.0 || *flat != 0.0))
+        }
+        index
     }
 
-    fn total(&self, kind: &str) -> (f64, f64) {
-        let mut total = (0.0, 0.0);
-        for (ratio, flat) in self.get(kind) {
-            total.0 += ratio;
-            total.1 += flat;
-        }
-        total
+    fn push(&mut self, kind: BuffKind, ratio: f64, flat: f64) {
+        let group = &mut self.groups[kind as usize];
+        group.values.push((ratio, flat));
+        group.total.0 += ratio;
+        group.total.1 += flat;
+    }
+
+    fn get(&self, kind: BuffKind) -> impl Iterator<Item = (f64, f64)> + '_ {
+        self.groups[kind as usize].values.iter().copied()
+    }
+
+    fn total(&self, kind: BuffKind) -> (f64, f64) {
+        self.groups[kind as usize].total
     }
 }
 
@@ -208,6 +245,7 @@ pub struct AttributeUnit {
     input: UnitInput,
     equipment: Vec<EquipmentInput>,
     equipment_base: Option<EquipmentStatsCache>,
+    monster_base: Option<MonsterStatsCache>,
     base_levels: [f64; 7],
     pub details: CombatDetails,
     pub experience: f64,
@@ -372,6 +410,7 @@ impl AttributeUnit {
             input,
             equipment,
             equipment_base: None,
+            monster_base: None,
             base_levels,
             details: CombatDetails::default(),
             experience: 0.0,
@@ -435,6 +474,16 @@ impl AttributeUnit {
     fn initial_stats(&mut self, data: &DefinitionSet) -> Result<CombatStats, String> {
         if let Some(cache) = &self.equipment_base {
             if cache.definition_hash == data.source_hash() {
+                return Ok(cache.stats.clone());
+            }
+        }
+        if let Some(cache) = &self.monster_base {
+            if cache.definition_hash == data.source_hash() {
+                // Monster identity/tier/room are private and fixed for this unit.
+                // Constructor reset and Levels can overwrite these fields; the
+                // uncached monster path restores them on every update too.
+                self.base_levels = cache.levels;
+                self.experience = cache.experience;
                 return Ok(cache.stats.clone());
             }
         }
@@ -535,11 +584,19 @@ impl AttributeUnit {
                 definition_hash: data.source_hash().into(),
                 stats: stats.clone(),
             });
+        } else {
+            self.monster_base = Some(MonsterStatsCache {
+                definition_hash: data.source_hash().into(),
+                stats: stats.clone(),
+                levels: self.base_levels,
+                experience: self.experience,
+            });
         }
         Ok(stats)
     }
 
     pub fn update(&mut self, data: &DefinitionSet) -> Result<(), String> {
+        use BuffKind::*;
         self.initialized = true;
         let mut stats = self.initial_stats(data)?;
         // This index lives only for this recalculation, so refresh/removal and
@@ -551,24 +608,24 @@ impl AttributeUnit {
         let buffs = BuffBoosts::new(&self.buffs, shrines);
         let mut levels = self.base_levels;
         for (index, kind) in [
-            "/buff_types/stamina_level",
-            "/buff_types/intelligence_level",
-            "/buff_types/attack_level",
-            "/buff_types/melee_level",
-            "/buff_types/defense_level",
-            "/buff_types/ranged_level",
-            "/buff_types/magic_level",
+            StaminaLevel,
+            IntelligenceLevel,
+            AttackLevel,
+            MeleeLevel,
+            DefenseLevel,
+            RangedLevel,
+            MagicLevel,
         ]
         .iter()
         .enumerate()
         {
-            for (ratio, flat) in buffs.get(kind) {
+            for (ratio, flat) in buffs.get(*kind) {
                 levels[index] += self.base_levels[index] * ratio;
                 levels[index] += flat;
             }
         }
-        let hp = buffs.total("/buff_types/max_hitpoints");
-        let mp = buffs.total("/buff_types/max_manapoints");
+        let hp = buffs.total(MaxHitpoints);
+        let mp = buffs.total(MaxManapoints);
         // All fallible work has finished. Preserve current HP/MP in place,
         // without cloning the old combat stats that are replaced below.
         let details = &mut self.details;
@@ -585,10 +642,10 @@ impl AttributeUnit {
         details.max_manapoints = ((10.0 * (10.0 + levels[1]) + stats.max_manapoints + mp.1)
             * (1.0 + stats.max_manapoints_ratio + mp.0))
             .floor();
-        let accuracy = buffs.total("/buff_types/accuracy").0;
-        let damage = buffs.total("/buff_types/damage").0;
-        let fury_accuracy = buffs.total("/buff_types/fury_accuracy").0;
-        let fury_damage = buffs.total("/buff_types/fury_damage").0;
+        let accuracy = buffs.total(Accuracy).0;
+        let damage = buffs.total(Damage).0;
+        let fury_accuracy = buffs.total(FuryAccuracy).0;
+        let fury_damage = buffs.total(FuryDamage).0;
         let mut ratings = [(0.0, 0.0, 0.0); 5];
         for (index, (base_accuracy, base_damage, base_evasion)) in [
             (stats.stab_accuracy, stats.stab_damage, stats.stab_evasion),
@@ -629,7 +686,7 @@ impl AttributeUnit {
                 (10.0 + damage_level) * (1.0 + base_damage) * (1.0 + damage) * (1.0 + fury_damage);
             let base = (10.0 + levels[4]) * (1.0 + base_evasion);
             let mut evasion = base;
-            for (ratio, flat) in buffs.get("/buff_types/evasion") {
+            for (ratio, flat) in buffs.get(Evasion) {
                 evasion += flat;
                 evasion += base * ratio;
             }
@@ -663,36 +720,36 @@ impl AttributeUnit {
         details.magic_accuracy_rating = ratings[4].0;
         details.magic_max_damage = ratings[4].1;
         details.magic_evasion_rating = ratings[4].2;
-        stats.damage_taken = buffs.total("/buff_types/damage_taken").1;
+        stats.damage_taken = buffs.total(DamageTaken).1;
         for (value, kind) in [
-            (&mut stats.physical_amplify, "/buff_types/physical_amplify"),
-            (&mut stats.water_amplify, "/buff_types/water_amplify"),
-            (&mut stats.nature_amplify, "/buff_types/nature_amplify"),
-            (&mut stats.fire_amplify, "/buff_types/fire_amplify"),
-            (&mut stats.healing_amplify, "/buff_types/healing_amplify"),
+            (&mut stats.physical_amplify, PhysicalAmplify),
+            (&mut stats.water_amplify, WaterAmplify),
+            (&mut stats.nature_amplify, NatureAmplify),
+            (&mut stats.fire_amplify, FireAmplify),
+            (&mut stats.healing_amplify, HealingAmplify),
         ] {
             *value += buffs.total(kind).1;
         }
         stats.attack_interval /= 1.0 + levels[2] / 2000.0;
         stats.attack_interval /= 1.0 + stats.attack_speed;
         let mut attack_speed = 0.0;
-        for (ratio, _) in buffs.get("/buff_types/attack_speed") {
+        for (ratio, _) in buffs.get(AttackSpeed) {
             attack_speed += ratio;
         }
         stats.attack_interval /= 1.0 + attack_speed;
         let mut resistances = [0.0; 4];
         for (index, (value, kind)) in [
-            (stats.armor, "/buff_types/armor"),
-            (stats.water_resistance, "/buff_types/water_resistance"),
-            (stats.nature_resistance, "/buff_types/nature_resistance"),
-            (stats.fire_resistance, "/buff_types/fire_resistance"),
+            (stats.armor, Armor),
+            (stats.water_resistance, WaterResistance),
+            (stats.nature_resistance, NatureResistance),
+            (stats.fire_resistance, FireResistance),
         ]
         .iter()
         .enumerate()
         {
             let base = 0.2 * levels[4] + value;
             resistances[index] = base;
-            for (ratio, flat) in buffs.get(kind) {
+            for (ratio, flat) in buffs.get(*kind) {
                 resistances[index] += flat;
                 resistances[index] += base * ratio;
             }
@@ -702,34 +759,31 @@ impl AttributeUnit {
         details.total_nature_resistance = resistances[2];
         details.total_fire_resistance = resistances[3];
         for (value, kind) in [
-            (&mut stats.hp_regen_per10, "/buff_types/hp_regen"),
-            (&mut stats.mp_regen_per10, "/buff_types/mp_regen"),
+            (&mut stats.hp_regen_per10, HpRegen),
+            (&mut stats.mp_regen_per10, MpRegen),
         ] {
             let (ratio, flat) = buffs.total(kind);
             *value += *value * ratio;
             *value += flat;
         }
         for (value, kind) in [
-            (&mut stats.life_steal, "/buff_types/life_steal"),
-            (&mut stats.physical_thorns, "/buff_types/physical_thorns"),
-            (&mut stats.elemental_thorns, "/buff_types/elemental_thorns"),
-            (&mut stats.combat_experience, "/buff_types/wisdom"),
-            (&mut stats.critical_rate, "/buff_types/critical_rate"),
-            (&mut stats.critical_damage, "/buff_types/critical_damage"),
-            (&mut stats.cast_speed, "/buff_types/cast_speed"),
-            (&mut stats.retaliation, "/buff_types/retaliation"),
-            (&mut stats.tenacity, "/buff_types/tenacity"),
+            (&mut stats.life_steal, LifeSteal),
+            (&mut stats.physical_thorns, PhysicalThorns),
+            (&mut stats.elemental_thorns, ElementalThorns),
+            (&mut stats.combat_experience, Wisdom),
+            (&mut stats.critical_rate, CriticalRate),
+            (&mut stats.critical_damage, CriticalDamage),
+            (&mut stats.cast_speed, CastSpeed),
+            (&mut stats.retaliation, Retaliation),
+            (&mut stats.tenacity, Tenacity),
         ] {
             *value += buffs.total(kind).1;
         }
         stats.cast_speed += levels[2] / 2000.0;
         for (value, kind) in [
-            (&mut stats.combat_drop_rate, "/buff_types/combat_drop_rate"),
-            (&mut stats.combat_rare_find, "/buff_types/rare_find"),
-            (
-                &mut stats.combat_drop_quantity,
-                "/buff_types/combat_drop_quantity",
-            ),
+            (&mut stats.combat_drop_rate, CombatDropRate),
+            (&mut stats.combat_rare_find, RareFind),
+            (&mut stats.combat_drop_quantity, CombatDropQuantity),
         ] {
             let (ratio, flat) = buffs.total(kind);
             *value += (1.0 + *value) * ratio;
@@ -737,7 +791,7 @@ impl AttributeUnit {
         }
         let base_threat = 100.0 + stats.threat;
         details.total_threat = base_threat;
-        let (ratio, flat) = buffs.total("/buff_types/threat");
+        let (ratio, flat) = buffs.total(Threat);
         if ratio != 0.0 {
             stats.threat += base_threat * ratio;
         } else {
@@ -1026,7 +1080,14 @@ mod tests {
     fn definitions(hash: &str, armor: f64) -> DefinitionSet {
         DefinitionSet::parse(
             &json!({"schemaVersion": 1, "sourceSha256": hash, "definitions": {
-                "actionDetailMap": {}, "abilityDetailMap": {}, "combatMonsterDetailMap": {},
+                "actionDetailMap": {}, "abilityDetailMap": {}, "combatMonsterDetailMap": {
+                    "/monsters/test": {"experience": 5, "combatDetails": {
+                        "staminaLevel": 10, "intelligenceLevel": 10, "attackLevel": 10,
+                        "meleeLevel": 10, "defenseLevel": 20, "rangedLevel": 10, "magicLevel": 10,
+                        "combatStats": {"armor": armor, "attackInterval": 3000000000.0,
+                            "combatStyleHrids": ["/combat_styles/stab"], "damageType": "/damage_types/physical"}
+                    }}
+                },
                 "itemDetailMap": {"/items/test_helmet": {"equipmentDetail": {
                     "combatStats": {"armor": armor}, "combatEnhancementBonuses": {}
                 }}}, "enhancementLevelTotalBonusMultiplierTable": [0.0]
@@ -1035,6 +1096,78 @@ mod tests {
             hash,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn buff_index_preserves_property_order_shrines_and_live_values() {
+        let entry = |key: &str, ratio: f64, flat: f64| BuffEntry {
+            key: key.into(),
+            buff: serde_json::from_value(
+                json!({"uniqueHrid": key, "typeHrid": "/buff_types/damage",
+                "ratioBoost": ratio, "flatBoost": flat}),
+            )
+            .unwrap(),
+        };
+        // Numeric JS property keys sort ahead of string keys and numerically.
+        let mut buffs = vec![entry("10", -1e16, -1e16), entry("2", 1e16, 1e16)];
+        let index = BuffBoosts::new(&buffs, Some([5.0, 0.0, 0.0, 0.0, 0.0]));
+        assert_eq!(
+            index.get(BuffKind::Damage).collect::<Vec<_>>(),
+            vec![(1e16, 1e16), (-1e16, -1e16), (0.015, 0.0)]
+        );
+        assert_eq!(index.total(BuffKind::Damage), (0.015, 0.0));
+        // Sequential formulas must still receive individual values. Summing
+        // flat boosts first would change this result from zero to one.
+        let mut level = 1.0;
+        for (_, flat) in index.get(BuffKind::Damage) {
+            level += flat;
+        }
+        assert_eq!(level, 0.0);
+        assert_eq!(index.total(BuffKind::Evasion), (0.0, 0.0));
+        assert_eq!(index.get(BuffKind::Evasion).count(), 0);
+        buffs[0].buff.ratio_boost = 0.5;
+        buffs[1].buff.ratio_boost = 0.25;
+        let next = BuffBoosts::new(&buffs, None);
+        assert_eq!(next.total(BuffKind::Damage).0, 0.75);
+        assert!(BuffKind::from_hrid("/buff_types/unknown_future_type").is_none());
+    }
+
+    #[test]
+    fn monster_cache_restores_levels_and_tracks_definitions_without_retaining_buffs() {
+        let case: AttributeCase = serde_json::from_value(json!({"input": {
+            "kind": "monster", "hrid": "/monsters/test", "difficultyTier": 2, "roomLevel": 150
+        }}))
+        .unwrap();
+        let old = definitions("old", 7.0);
+        let new = definitions("new", 19.0);
+        let mut unit = AttributeUnit::new(case.input.clone(), &old).unwrap();
+        let original = serde_json::to_value(unit.snapshot()).unwrap();
+        unit.constructor_monster_state();
+        assert_eq!(unit.base_levels, [1.0; 7]);
+        assert_eq!(unit.experience, 0.0);
+        unit.update(&old).unwrap();
+        assert_eq!(serde_json::to_value(unit.snapshot()).unwrap(), original);
+        unit.apply(&AttributeStep::Levels { levels: [999.0; 7] }, &case, &old)
+            .unwrap();
+        assert_eq!(serde_json::to_value(unit.snapshot()).unwrap(), original);
+        let buff: CombatBuff = serde_json::from_value(
+            json!({"uniqueHrid": "armor", "typeHrid": "/buff_types/armor",
+            "ratioBoost": 0.2, "flatBoost": 3, "duration": 10}),
+        )
+        .unwrap();
+        unit.details.current_hitpoints = 123.0;
+        unit.add_buffs(&[buff], Some(0.0), &old).unwrap();
+        let base = original["combatDetails"]["totalArmor"].as_f64().unwrap();
+        assert_eq!(unit.details.total_armor, (base + 3.0) + base * 0.2);
+        assert_eq!(unit.details.current_hitpoints, 123.0);
+        unit.expire(10.0, &old).unwrap();
+        assert_eq!(unit.details.total_armor, base);
+        unit.update(&new).unwrap();
+        let fresh = AttributeUnit::new(case.input.clone(), &new).unwrap();
+        assert_eq!(unit.details.total_armor, fresh.details.total_armor);
+        assert_ne!(unit.details.total_armor, base);
+        unit.update(&old).unwrap();
+        assert_eq!(unit.details.total_armor, base);
     }
 
     #[test]
