@@ -2,12 +2,72 @@ use crate::{
     actions::number,
     attributes::UnitInput,
     data::DefinitionSet,
-    identity::UnitArena,
+    identity::{UnitArena, UnitId},
     runtime_unit::RuntimeUnit,
     zone::{LabyrinthInput, ZoneInput},
 };
 use serde_json::{json, Value};
 use std::borrow::Cow;
+
+#[derive(Clone, Copy)]
+pub(crate) enum Hit {
+    Damage(f64),
+    Miss,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum ResultOp<'a> {
+    Attack {
+        source: UnitId,
+        target: UnitId,
+        ability: &'a str,
+        hit: Hit,
+    },
+    Death(UnitId),
+    Consume(UnitId, &'a str),
+    Hp(UnitId, &'a str, f64),
+    Mp(UnitId, &'a str, f64),
+    HpSpent(UnitId, &'a str, f64),
+    Oom(UnitId, bool),
+    Experience(UnitId, f64),
+    Encounter,
+}
+
+impl ResultOp<'_> {
+    // Keep the wire representation at the trace boundary only. The ordinary
+    // simulation path borrows labels and passes existing generational handles.
+    pub(crate) fn trace_json(self, time: f64) -> Value {
+        match self {
+            Self::Attack {
+                source,
+                target,
+                ability,
+                hit,
+            } => {
+                let hit = match hit {
+                    Hit::Damage(amount) => json!(amount),
+                    Hit::Miss => json!("miss"),
+                };
+                json!(["attack", source, target, ability, hit])
+            }
+            Self::Death(id) => json!(["death", id]),
+            Self::Consume(id, item) => json!(["consume", id, item]),
+            Self::Hp(id, label, amount) => json!(["hp", id, label, amount]),
+            Self::Mp(id, label, amount) => json!(["mp", id, label, amount]),
+            Self::HpSpent(id, label, amount) => json!(["hpSpent", id, label, amount]),
+            Self::Oom(id, out) => json!(["oom", id, out, time]),
+            Self::Experience(id, amount) => json!(["experience", id, amount]),
+            Self::Encounter => json!(["encounter"]),
+        }
+    }
+}
+
+fn finite_amount(amount: f64) -> f64 {
+    // JSON used to convert NaN/infinity to null, then as_f64().unwrap() failed
+    // when that amount was read. Preserve rejection at the same use sites.
+    assert!(amount.is_finite(), "Non-finite result amount");
+    amount
+}
 
 pub struct SimResult {
     pub value: Value,
@@ -64,67 +124,75 @@ impl SimResult {
             );
         }
     }
-    pub fn apply(
+    pub(crate) fn apply(
         &mut self,
-        op: &Value,
+        op: ResultOp<'_>,
         units: &UnitArena<RuntimeUnit>,
         time: f64,
         data: &DefinitionSet,
     ) {
-        let kind = op[0].as_str().unwrap();
-        if kind == "encounter" {
+        if matches!(op, ResultOp::Encounter) {
             self.value["encounters"] = json!(number(&self.value, "encounters") + 1.0);
             self.value["lastEncounterFinishTime"] = json!(time);
             return;
         }
-        let Some(unit) = op[1]
-            .as_u64()
-            .and_then(|id| units.id_at(id as usize))
-            .and_then(|id| units.get(id))
-        else {
+        let source = match op {
+            ResultOp::Attack { source, .. } => source,
+            ResultOp::Death(id)
+            | ResultOp::Consume(id, _)
+            | ResultOp::Hp(id, _, _)
+            | ResultOp::Mp(id, _, _)
+            | ResultOp::HpSpent(id, _, _)
+            | ResultOp::Oom(id, _)
+            | ResultOp::Experience(id, _) => id,
+            ResultOp::Encounter => unreachable!(),
+        };
+        let Some(unit) = units.get(source) else {
             return;
         };
         let name = unit.hrid.as_str();
-        match kind {
-            "attack" => {
-                let target = units
-                    .get(units.id_at(op[2].as_u64().unwrap() as usize).unwrap())
-                    .unwrap();
-                let hit = match op[4].as_str() {
-                    Some(hit) => Cow::Borrowed(hit),
-                    None => Cow::Owned(op[4].as_f64().unwrap().to_string()),
+        match op {
+            ResultOp::Attack {
+                target,
+                ability,
+                hit,
+                ..
+            } => {
+                let target = units.get(target).unwrap();
+                let hit = match hit {
+                    Hit::Miss => Cow::Borrowed("miss"),
+                    Hit::Damage(amount) => Cow::Owned(finite_amount(amount).to_string()),
                 };
                 increment(
                     &mut self.value,
-                    &["attacks", name, &target.hrid, op[3].as_str().unwrap(), &hit],
+                    &["attacks", name, &target.hrid, ability, &hit],
                     1.0,
                 );
             }
-            "death" => {
+            ResultOp::Death(_) => {
                 increment(&mut self.value, &["deaths", name], 1.0);
                 if !unit.player {
                     self.alive(name, false, time);
                 }
             }
-            "consume" => increment(
-                &mut self.value,
-                &["consumablesUsed", name, op[2].as_str().unwrap()],
-                1.0,
-            ),
-            "hp" | "mp" | "hpSpent" => {
-                let field = match kind {
-                    "hp" => "hitpointsGained",
-                    "mp" => "manapointsGained",
+            ResultOp::Consume(_, item) => {
+                increment(&mut self.value, &["consumablesUsed", name, item], 1.0)
+            }
+            ResultOp::Hp(_, label, amount)
+            | ResultOp::Mp(_, label, amount)
+            | ResultOp::HpSpent(_, label, amount) => {
+                let field = match op {
+                    ResultOp::Hp(..) => "hitpointsGained",
+                    ResultOp::Mp(..) => "manapointsGained",
                     _ => "hitpointsSpent",
                 };
                 increment(
                     &mut self.value,
-                    &[field, name, op[2].as_str().unwrap()],
-                    op[3].as_f64().unwrap(),
+                    &[field, name, label],
+                    finite_amount(amount),
                 );
             }
-            "oom" => {
-                let out = op[2].as_bool().unwrap();
+            ResultOp::Oom(_, out) => {
                 if out {
                     self.value["playerRanOutOfMana"][name] = json!(true);
                 }
@@ -146,7 +214,7 @@ impl SimResult {
                     );
                 }
             }
-            "experience" => {
+            ResultOp::Experience(_, amount) => {
                 let UnitInput::Player(input) = &unit.case.input else {
                     return;
                 };
@@ -215,7 +283,7 @@ impl SimResult {
                 ];
                 for (index, skill) in skills.iter().enumerate() {
                     if rates[index] > 0.0 {
-                        let gain = op[2].as_f64().unwrap()
+                        let gain = finite_amount(amount)
                             * (1.0 + stats.combat_experience)
                             * (rates[index] * (1.0 + bonuses[index]))
                             * (1.0 + input.debuff_on_level_gap);
@@ -223,7 +291,7 @@ impl SimResult {
                     }
                 }
             }
-            _ => {}
+            ResultOp::Encounter => unreachable!(),
         }
     }
 }
@@ -231,6 +299,71 @@ impl SimResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn typed_traces_preserve_serial_ids_after_slot_reuse_and_wire_shapes() {
+        let mut units = UnitArena::default();
+        let retired = units.spawn(());
+        let target = units.spawn(());
+        units.retain_reachable(std::iter::once(target));
+        let source = units.spawn(());
+        assert!(units.get(retired).is_none());
+        assert_eq!(source.index(), 2);
+        let cases = [
+            (
+                ResultOp::Attack {
+                    source,
+                    target,
+                    ability: "hit",
+                    hit: Hit::Damage(-0.0),
+                },
+                json!(["attack", 2, 1, "hit", -0.0]),
+            ),
+            (
+                ResultOp::Attack {
+                    source,
+                    target,
+                    ability: "hit",
+                    hit: Hit::Miss,
+                },
+                json!(["attack", 2, 1, "hit", "miss"]),
+            ),
+            (ResultOp::Death(source), json!(["death", 2])),
+            (
+                ResultOp::Consume(source, "tea"),
+                json!(["consume", 2, "tea"]),
+            ),
+            (
+                ResultOp::Hp(source, "regen", 0.25),
+                json!(["hp", 2, "regen", 0.25]),
+            ),
+            (
+                ResultOp::Mp(source, "regen", 0.5),
+                json!(["mp", 2, "regen", 0.5]),
+            ),
+            (
+                ResultOp::HpSpent(source, "cast", 2.0),
+                json!(["hpSpent", 2, "cast", 2.0]),
+            ),
+            (ResultOp::Oom(source, true), json!(["oom", 2, true, 12.0])),
+            (
+                ResultOp::Experience(source, 3.0),
+                json!(["experience", 2, 3.0]),
+            ),
+            (ResultOp::Encounter, json!(["encounter"])),
+        ];
+        for (op, expected) in cases {
+            assert_eq!(op.trace_json(12.0).to_string(), expected.to_string());
+        }
+        for amount in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(
+                ResultOp::Hp(source, "regen", amount).trace_json(0.0),
+                json!(["hp", 2, "regen", null])
+            );
+            assert!(std::panic::catch_unwind(|| finite_amount(amount)).is_err());
+        }
+        assert_eq!(finite_amount(-0.0).to_bits(), (-0.0_f64).to_bits());
+    }
 
     // The original implementation is the oracle for coercion, insertion order,
     // signed zero, non-finite values and non-associative floating point sums.

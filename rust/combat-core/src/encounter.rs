@@ -8,6 +8,7 @@ use crate::{
     data::DefinitionSet,
     identity::{UnitArena, UnitId},
     queue::{CompatEventQueue, TimedEvent},
+    result::{Hit, ResultOp},
     rng::CombatRng,
     runtime_unit::{Dependency, RuntimeUnit},
 };
@@ -748,7 +749,7 @@ impl EncounterRun {
         }
         let oom = self.unit(id).attributes.details.current_manapoints < mana_cost;
         if self.unit(id).player {
-            self.emit(json!(["oom", id, oom, self.time]));
+            self.emit(ResultOp::Oom(id, oom));
         }
         !oom
     }
@@ -923,15 +924,15 @@ impl EncounterRun {
             cd /= 1.0 + food_haste;
         }
         self.at(EventKind::Cooldown, self.time + cd, None)?;
-        self.emit(json!(["consume", id, item.hrid]));
+        self.emit(ResultOp::Consume(id, &item.hrid));
         if item.recovery == 0.0 {
             if item.hp > 0.0 {
                 let value = self.unit_mut(id).add_hp(item.hp);
-                self.emit(json!(["hp", id, item.hrid, value]));
+                self.emit(ResultOp::Hp(id, &item.hrid, value));
             }
             if item.mp > 0.0 {
                 let value = self.unit_mut(id).add_mp(item.mp);
-                self.emit(json!(["mp", id, item.hrid, value]));
+                self.emit(ResultOp::Mp(id, &item.hrid, value));
                 if self.unit(id).out_of_mana {
                     self.at(EventKind::Await, self.time, Some(id))?;
                 }
@@ -972,13 +973,13 @@ impl EncounterRun {
             let value = self
                 .unit_mut(id)
                 .add_hp(combat_math::tick_value(item.hp, ticks, tick));
-            self.emit(json!(["hp", id, item.hrid, value]));
+            self.emit(ResultOp::Hp(id, &item.hrid, value));
         }
         if item.mp > 0.0 {
             let value = self
                 .unit_mut(id)
                 .add_mp(combat_math::tick_value(item.mp, ticks, tick));
-            self.emit(json!(["mp", id, item.hrid, value]));
+            self.emit(ResultOp::Mp(id, &item.hrid, value));
             if self.unit(id).out_of_mana {
                 self.at(EventKind::Await, self.time, Some(id))?;
             }
@@ -999,7 +1000,12 @@ impl EncounterRun {
             combat_math::tick_value(event.amount.ok_or("Missing DOT damage")?, ticks, tick)
                 .min(self.unit(target).attributes.details.current_hitpoints);
         self.unit_mut(target).attributes.details.current_hitpoints -= damage;
-        self.emit(json!(["attack", source, target, "damageOverTime", damage]));
+        self.emit(ResultOp::Attack {
+            source,
+            target,
+            ability: "damageOverTime",
+            hit: Hit::Damage(damage),
+        });
         if tick < ticks {
             event.time = self.time + DOT;
             event.tick = Some(tick + 1.0);
@@ -1021,9 +1027,9 @@ impl EncounterRun {
             let hp = (details.max_hitpoints * details.combat_stats.hp_regen_per10).floor();
             let mp = (details.max_manapoints * details.combat_stats.mp_regen_per10).floor();
             let hp = self.unit_mut(id).add_hp(hp);
-            self.emit(json!(["hp", id, "regen", hp]));
+            self.emit(ResultOp::Hp(id, "regen", hp));
             let mp = self.unit_mut(id).add_mp(mp);
-            self.emit(json!(["mp", id, "regen", mp]));
+            self.emit(ResultOp::Mp(id, "regen", mp));
             if self.unit(id).out_of_mana {
                 self.at(EventKind::Await, self.time, Some(id))?;
             }
@@ -1068,7 +1074,7 @@ impl EncounterRun {
     pub(crate) fn death_if_zero(&mut self, id: UnitId) {
         if self.unit(id).attributes.details.current_hitpoints == 0.0 {
             self.clear_unit(id);
-            self.emit(json!(["death", id]));
+            self.emit(ResultOp::Death(id));
         }
     }
     pub(crate) fn check_end(&mut self) -> Result<bool, String> {
@@ -1093,11 +1099,10 @@ impl EncounterRun {
                     .map(|id| self.unit(*id).attributes.experience * self.unit(*id).experience_rate)
                     .sum();
                 for id in self.players.clone() {
-                    self.emit(json!([
-                        "experience",
+                    self.emit(ResultOp::Experience(
                         id,
-                        experience / self.players.len() as f64
-                    ]));
+                        experience / self.players.len() as f64,
+                    ));
                 }
                 self.enemies = None;
                 if let Some(full) = &mut self.full {
@@ -1129,7 +1134,7 @@ impl EncounterRun {
                         }
                     }
                 }
-                self.emit(json!(["encounter"]));
+                self.emit(ResultOp::Encounter);
             }
         }
         for id in self.players.clone() {
@@ -1149,7 +1154,7 @@ impl EncounterRun {
                     event.hrid = Some(self.unit(id).hrid.clone());
                     self.push(event)?;
                 }
-                self.emit(json!(["oom", id, false, self.time]));
+                self.emit(ResultOp::Oom(id, false));
             }
         }
         if self.live(&self.players).is_empty() {
@@ -1248,17 +1253,16 @@ impl EncounterRun {
         ability: &str,
         result: &AttackResult,
     ) {
-        self.emit(json!([
-            "attack",
+        self.emit(ResultOp::Attack {
             source,
             target,
             ability,
-            if result.did_hit {
-                json!(result.damage_done)
+            hit: if result.did_hit {
+                Hit::Damage(result.damage_done)
             } else {
-                json!("miss")
-            }
-        ]));
+                Hit::Miss
+            },
+        });
     }
     pub(crate) fn record_returns(
         &mut self,
@@ -1269,10 +1273,10 @@ impl EncounterRun {
         logs: bool,
     ) {
         if resources && result.life_steal_heal > 0.0 {
-            self.emit(json!(["hp", source, "lifesteal", result.life_steal_heal]));
+            self.emit(ResultOp::Hp(source, "lifesteal", result.life_steal_heal));
         }
         if resources && result.mana_leech_mana > 0.0 {
-            self.emit(json!(["mp", source, "manaLeech", result.mana_leech_mana]));
+            self.emit(ResultOp::Mp(source, "manaLeech", result.mana_leech_mana));
         }
         if result.thorn_damage_done > 0.0 {
             if logs && self.unit(source).player {
@@ -1284,13 +1288,12 @@ impl EncounterRun {
                     false,
                 );
             }
-            self.emit(json!([
-                "attack",
-                target,
-                source,
-                result.thorn_type,
-                result.thorn_damage_done
-            ]));
+            self.emit(ResultOp::Attack {
+                source: target,
+                target: source,
+                ability: &result.thorn_type,
+                hit: Hit::Damage(result.thorn_damage_done),
+            });
         }
         if logs && result.retaliation_damage_done > 0.0 && self.unit(source).player {
             self.full_log(
@@ -1309,17 +1312,16 @@ impl EncounterRun {
             .retaliation
             > 0.0
         {
-            self.emit(json!([
-                "attack",
-                target,
-                source,
-                "retaliation",
-                if result.retaliation_damage_done > 0.0 {
-                    json!(result.retaliation_damage_done)
+            self.emit(ResultOp::Attack {
+                source: target,
+                target: source,
+                ability: "retaliation",
+                hit: if result.retaliation_damage_done > 0.0 {
+                    Hit::Damage(result.retaliation_damage_done)
                 } else {
-                    json!("miss")
-                }
-            ]));
+                    Hit::Miss
+                },
+            });
         }
     }
     pub(crate) fn stacks(
@@ -1576,7 +1578,7 @@ impl EncounterRun {
                             * effect.spend_hp_ratio)
                             .floor();
                         self.unit_mut(source).attributes.details.current_hitpoints -= spent;
-                        self.emit(json!(["hpSpent", source, ability.hrid, spent]));
+                        self.emit(ResultOp::HpSpent(source, &ability.hrid, spent));
                     }
                     "/ability_effect_types/promote" => {
                         self.clear_unit(source);
@@ -1609,7 +1611,7 @@ impl EncounterRun {
         let ripple = self.unit(source).attributes.details.combat_stats.ripple;
         if ripple > 0.0 && self.rng.next_f64() < ripple {
             let value = self.unit_mut(source).add_mp(10.0);
-            self.emit(json!(["mp", source, "ripple", value]));
+            self.emit(ResultOp::Mp(source, "ripple", value));
             let time = self.time;
             for ability in self.unit_mut(source).abilities.iter_mut().flatten() {
                 if ability.last_used != 0.0 && ability.last_used + ability.cooldown - time > 0.0 {
@@ -1714,7 +1716,7 @@ impl EncounterRun {
                 );
             }
             if result.hp_drain > 0.0 {
-                self.emit(json!(["hp", source, ability.hrid, result.hp_drain]));
+                self.emit(ResultOp::Hp(source, &ability.hrid, result.hp_drain));
             }
             if result.did_hit {
                 for buff in effect.buffs.as_deref().unwrap_or_default() {
@@ -1872,7 +1874,7 @@ impl EncounterRun {
                 unit.attributes.details.current_manapoints = unit.attributes.details.max_manapoints;
                 unit.clear_cc();
             }
-            self.emit(json!(["hp", target, ability.hrid, healed]));
+            self.emit(ResultOp::Hp(target, &ability.hrid, healed));
             if revive {
                 self.next_attack(target)?;
                 if !self.unit(target).player {

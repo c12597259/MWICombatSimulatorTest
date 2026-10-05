@@ -3,7 +3,7 @@ use crate::{
     attributes::{AttributeCase, MonsterInput, UnitInput},
     data::DefinitionSet,
     encounter::{EncounterCase, EncounterRun, EventKind},
-    result::SimResult,
+    result::{ResultOp, SimResult},
     zone::{LabyrinthInput, ZoneInput, ZoneState},
 };
 use serde::Deserialize;
@@ -173,12 +173,12 @@ impl EncounterRun {
         self.check_triggers()?;
         self.start_attacks()
     }
-    pub(crate) fn emit(&mut self, op: Value) {
+    pub(crate) fn emit(&mut self, op: ResultOp<'_>) {
         if let Some(full) = &mut self.full {
-            full.result.apply(&op, &self.units, self.time, &self.data);
+            full.result.apply(op, &self.units, self.time, &self.data);
         }
         if self.full.is_none() || self.tracing {
-            self.operations.push(op);
+            self.operations.push(op.trace_json(self.time));
         }
     }
     pub(crate) fn full_log(
