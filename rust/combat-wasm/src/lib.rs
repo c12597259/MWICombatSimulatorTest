@@ -85,7 +85,7 @@ impl PrototypeEngine {
             mwi_combat_core::encounter::EncounterRun::simulation(input, self.definitions.clone())
                 .map_err(error)?;
         LIVE_SIMULATIONS.with(|count| count.set(count.get() + 1));
-        Ok(SimulationProbe { run })
+        Ok(SimulationProbe { run: Some(run) })
     }
     pub fn math_trace(&self, input_json: &str) -> Result<String, JsValue> {
         let cases: Vec<mwi_combat_core::combat_math::MathCase> =
@@ -156,19 +156,44 @@ impl Drop for PrototypeEngine {
 }
 #[wasm_bindgen]
 pub struct SimulationProbe {
-    run: mwi_combat_core::encounter::EncounterRun,
+    run: Option<mwi_combat_core::encounter::EncounterRun>,
 }
 #[wasm_bindgen]
 impl SimulationProbe {
     pub fn advance(&mut self, events: u32) -> Result<String, JsValue> {
-        self.run.advance(events).map_err(error)?;
-        Ok(self.run.progress().to_string())
+        let run = self
+            .run
+            .as_mut()
+            .ok_or_else(|| error("Simulation already finished"))?;
+        run.advance(events).map_err(error)?;
+        Ok(run.progress().to_string())
     }
     pub fn done(&self) -> bool {
-        self.run.done()
+        self.run.as_ref().is_none_or(|run| run.done())
     }
     pub fn result(&self) -> Result<String, JsValue> {
-        Ok(self.run.simulation_summary().map_err(error)?.to_string())
+        let run = self
+            .run
+            .as_ref()
+            .ok_or_else(|| error("Simulation already finished"))?;
+        Ok(run.simulation_summary().map_err(error)?.to_string())
+    }
+    pub fn time_series(&self) -> Result<String, JsValue> {
+        let run = self
+            .run
+            .as_ref()
+            .ok_or_else(|| error("Simulation already finished"))?;
+        Ok(run.simulation_time_series().map_err(error)?.to_string())
+    }
+    pub fn finish(&mut self) -> Result<String, JsValue> {
+        if !self.done() {
+            return Err(error("Simulation is not complete"));
+        }
+        let run = self
+            .run
+            .take()
+            .ok_or_else(|| error("Simulation already finished"))?;
+        Ok(run.into_simulation_summary().map_err(error)?.to_string())
     }
 }
 impl Drop for SimulationProbe {

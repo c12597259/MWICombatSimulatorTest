@@ -328,7 +328,11 @@ impl EncounterRun {
     pub fn simulation_summary(&self) -> Result<Value, String> {
         Ok(self.wrap_simulation_result(self.simulation_result()?))
     }
-    fn into_simulation_summary(mut self) -> Result<Value, String> {
+    pub fn simulation_time_series(&self) -> Result<&Value, String> {
+        let full = self.full.as_ref().ok_or("Missing simulation")?;
+        Ok(&full.result.value["timeSeriesData"])
+    }
+    pub fn into_simulation_summary(mut self) -> Result<Value, String> {
         self.check_simulation_result_ready()?;
         // This run cannot be read again. Move its potentially large wipe history
         // instead of cloning it; the borrowed Probe path still takes a snapshot.

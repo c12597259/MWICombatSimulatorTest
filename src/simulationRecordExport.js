@@ -31,10 +31,12 @@ export function createSimulationRecordCapture(metadata = {}, now = () => perform
             // Snapshotting is excluded from the measured Worker round trip.
             startedAt = now();
         },
-        finish(result) {
+        finish(result, execution) {
             if (!pending) return false;
             completed = {
                 ...pending,
+                ...(execution?.engine ? { engine: execution.engine, execution,
+                    randomness: execution.randomness || { algorithm: 'per-task', exactReplay: false, seed: null } } : {}),
                 completedAt: new Date().toISOString(),
                 timing: {
                     elapsedMs: Math.max(0, now() - startedAt),
@@ -80,7 +82,7 @@ export async function createSimulationHistoryArchive(records, decodeSnapshot, { 
         notes: {
             historyResults: "summaries-only",
             olderRecords: "Team snapshots may lack exact extra buffs, Worker requests and wall-clock timings; missing fields were not inferred from current settings.",
-            randomness: "Native Math.random runs have no replayable seed; the exported inputs support repeated performance comparisons, not exact random-trajectory replay.",
+            randomness: "Native Math.random runs have no replayable seed. Rust runs record the seed and engine/data fingerprints in execution; batch execution.executions follows result/request target order. Exact replay requires the matching engine and definitions.",
         },
     };
 }

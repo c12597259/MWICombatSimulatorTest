@@ -6,7 +6,7 @@ export function getSimulationWorkerCount(hardwareConcurrency, deviceMemory) {
 }
 
 // Reuse workers within a batch; always release them on success or failure.
-export function runSimulationWorkerPool(tasks, { createWorker, concurrency, onProgress = () => {} }) {
+export function runSimulationWorkerPool(tasks, { createWorker, concurrency, onProgress = () => {}, onResult = () => {} }) {
     if (!tasks.length) return Promise.resolve([]);
     return new Promise((resolve, reject) => {
         const workers = [];
@@ -35,6 +35,7 @@ export function runSimulationWorkerPool(tasks, { createWorker, concurrency, onPr
                     report();
                 } else if (data.type === "simulation_result") {
                     results[index] = data.simResult;
+                    onResult(index, data);
                     progress[index] = 1;
                     report();
                     if (++completed === tasks.length) finish();

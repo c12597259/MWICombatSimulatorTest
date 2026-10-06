@@ -26,10 +26,14 @@
         "test:attributes-browser-reports": "node scripts/verify-attribute-browser-reports.cjs",
         "test:wasm-browser": "node scripts/test-wasm-browser.cjs",
         "start:wasm-prototype": "node scripts/serve-wasm-prototype.cjs",
-        "build": "webpack",
-        "build:production": "webpack --mode production",
+        "build": "node scripts/build-frontend.cjs",
+        "build:production": "node scripts/build-frontend.cjs --production",
         "watch": "webpack --watch",
-        "start": "webpack serve --mode development --open"
+        "start": "webpack serve --mode development --open",
+        "prestart": "npm run build:wasm",
+        "prewatch": "npm run build:wasm",
+        "test:frontend": "node --test tests/frontendWasmLifecycle.test.cjs tests/simulationWorkerPool.test.mjs tests/simulationRecordExport.test.mjs",
+        "test:frontend-browser": "node scripts/test-frontend-browser.cjs"
     },
     "repository": {
         "type": "git",

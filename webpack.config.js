@@ -17,9 +17,16 @@ module.exports = (env, argv = {}) => ({
   output: {
     path: path.resolve(__dirname, 'dist'),
     filename: 'bundle.js',
+    chunkFilename: '[name].[contenthash:12].js',
+    assetModuleFilename: 'assets/[name].[contenthash:12][ext]',
+    publicPath: 'auto',
     clean: true,
   },
   mode: argv.mode || 'development',
+  module: { rules: [{ oneOf: [
+    { test: /\.wasm$/, type: 'asset/resource' },
+    { resourceQuery: /asset/, type: 'asset/resource' },
+  ] }] },
   devtool: argv.mode === 'production' ? false : 'source-map',
   devServer: {
     static: {
@@ -45,6 +52,7 @@ module.exports = (env, argv = {}) => ({
     new CopyWebpackPlugin({
       patterns: [
         { from: path.resolve(__dirname, 'patchNote.json'), to: 'patchNote.json' },
+        { from: path.resolve(__dirname, 'rust/THIRD-PARTY-NOTICES.md'), to: 'THIRD-PARTY-NOTICES.md' },
         { from: path.resolve(__dirname, 'index.html'), to: 'index.html' }, // Correctly copy to dist/index.html
         { from: path.resolve(__dirname, 'js'), to: 'js' },
         { from: path.resolve(__dirname, 'locales'), to: 'locales' },

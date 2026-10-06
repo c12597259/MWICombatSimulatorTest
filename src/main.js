@@ -100,7 +100,7 @@ let buttonStopSimulation = document.getElementById("buttonStopSimulation");
 let progressbar = document.getElementById("simulationProgressBar");
 let simStartTime = 0;
 const simulationExportMetadata = {
-    engine: "javascript-worker",
+    engine: "rust-wasm-worker",
     build: typeof __SIMULATION_EXPORT_BUILD__ === "undefined" ? null : __SIMULATION_EXPORT_BUILD__,
     environment: {
         userAgent: navigator.userAgent,
@@ -147,7 +147,7 @@ async function exportCompletedSimulationRecord() {
     }
 }
 
-let worker = new Worker(new URL("worker.js", import.meta.url));
+let worker = new Worker(new URL("rustWorker.js", import.meta.url));
 let multiWorker = new Worker(new URL("multiWorker.js", import.meta.url));
 let workerPool = [];
 
@@ -198,7 +198,7 @@ let playerDataMap = {
 function onWorkerMessage(event) {
     switch (event.data.type) {
         case "simulation_result":
-            simulationRecordCapture.finish(event.data.simResult);
+            simulationRecordCapture.finish(event.data.simResult, event.data.execution);
             progressbar.style.width = "100%";
             progressbar.innerHTML = "100% (" + ((Date.now() - simStartTime) / 1000).toFixed(2) + "s)";
             //console.log("SIM RESULTS: ", event.data.simResult);
@@ -232,7 +232,7 @@ function onMultiWorkerMessage(event) {
     switch (event.data.type) {
         case "simulation_result_allZones":
         case "simulation_result_allLabyrinths":
-            simulationRecordCapture.finish(event.data.simResults);
+            simulationRecordCapture.finish(event.data.simResults, event.data.execution);
             progressbar.style.width = "100%";
             progressbar.innerHTML = "100% (" + ((Date.now() - simStartTime) / 1000).toFixed(2) + "s)";
             showAllSimulationResults(event.data.simResults);
@@ -6285,7 +6285,7 @@ function initSimulationControls() {
         if (worker) {
             worker.terminate();
         }
-        worker = new Worker(new URL("worker.js", import.meta.url));
+        worker = new Worker(new URL("rustWorker.js", import.meta.url));
 
         if (multiWorker) {
             multiWorker.terminate();
@@ -6441,7 +6441,7 @@ function startSimulation(selectedPlayers) {
         lastSimulationExperienceSnapshot = { ...pendingSimulationHistoryContext.snapshot.playerDataMap };
         simStartTime = Date.now();
         if (!worker) {
-            worker = new Worker(new URL("multiWorker.js", import.meta.url));
+            worker = new Worker(new URL("rustWorker.js", import.meta.url));
         }
         worker.onmessage = onWorkerMessage;
         simulationRecordCapture.start(workerMessage);
@@ -6629,7 +6629,7 @@ document.getElementById("buttonUploadJSONSimulate").addEventListener("click", (e
                         simulationTimeLimit: simulationTimeLimit,
                         extra : extra
                     };
-                    const worker = new Worker(new URL("worker.js", import.meta.url)); 
+                    const worker = new Worker(new URL("rustWorker.js", import.meta.url));
                     worker.onmessage = mainWorkerOnMessage;
                     worker.postMessage(workerMessage);
                     customAlert("Simulation task Created", "info")
@@ -6648,7 +6648,7 @@ document.getElementById("buttonUploadJSONSimulate").addEventListener("click", (e
                         simulationTimeLimit: simulationTimeLimit,
                         extra : extra
                     };
-                    const worker = new Worker(new URL("worker.js", import.meta.url)); 
+                    const worker = new Worker(new URL("rustWorker.js", import.meta.url));
                     worker.onmessage = mainWorkerOnMessage;
                     worker.postMessage(workerMessage);
                     customAlert("Simulation task Created", "info")

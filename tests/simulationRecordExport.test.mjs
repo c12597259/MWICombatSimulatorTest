@@ -9,6 +9,19 @@ const request = () => ({
     zone: { zoneHrid: '/actions/combat/aqua_planet', difficultyTier: 1 }, labyrinth: null,
     simulationTimeLimit: 24 * 3600e9, extra: { comExp: 10, personalBuffs: ['/items/seal_of_damage'], enableHpMpVisualization: false },
 });
+
+test('records the actual WASM seed and JS fallback without changing the input', () => {
+    const capture = createSimulationRecordCapture({ engine: 'rust-wasm-worker' });
+    capture.start(request());
+    const execution = { engine: 'rust-wasm-worker', randomness: { algorithm: 'js-number-v1', seed: 42, exactReplay: true } };
+    capture.finish({}, execution);
+    assert.deepEqual(capture.getRecord().randomness, execution.randomness);
+    assert.equal(capture.getRecord().execution, execution);
+    capture.start(request());
+    capture.finish({}, { engine: 'javascript-worker', randomness: { algorithm: 'Math.random', seed: null, exactReplay: false } });
+    assert.equal(capture.getRecord().engine, 'javascript-worker');
+    assert.equal(capture.getRecord().randomness.exactReplay, false);
+});
 test('exports the actual three-player input even after editing the current team/map', () => {
     let clock = 100;
     const capture = createSimulationRecordCapture({ engine: 'javascript-worker', build: { sourceSha256: 'test' } }, () => clock);
