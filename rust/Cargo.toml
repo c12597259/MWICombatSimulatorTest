@@ -1,0 +1,21 @@
+[workspace]
+members = ["combat-core", "combat-wasm", "combat-cli"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.98.1"
+license = "ISC"
+
+[workspace.dependencies]
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = { version = "=1.0.151", features = ["preserve_order", "float_roundtrip"] }
+wasm-bindgen = "=0.2.129"
+libm = "=0.2.8"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"

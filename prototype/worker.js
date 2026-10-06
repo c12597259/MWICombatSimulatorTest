@@ -1,0 +1,133 @@
+import init, { PrototypeEngine, module_info, live_engines, live_probes, live_encounters, live_simulations, js_round, js_remainder } from '../.wasm-build/pkg/combat_wasm.js';
+import wasmUrl from '../.wasm-build/pkg/combat_wasm_bg.wasm';
+import dataUrl from '../.wasm-build/data/combat-data.json?asset';
+import manifest from '../.wasm-build/manifest.json';
+
+let modulePromise, wasm, dataText, engine, busy = false;
+let moduleInitCount = 0, engineInitCount = 0, dataFetchCount = 0;
+let loadMode = 'not-loaded';
+const failure = (code, message) => Object.assign(new Error(message), { code });
+
+async function sha256(bytes) {
+    return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), value => value.toString(16).padStart(2, '0')).join('');
+}
+
+async function ensureEngine(options = {}) {
+    if (options.expectedHash && options.expectedHash !== manifest.dataFingerprint) throw failure('DATA_MISMATCH', 'Data fingerprint mismatch');
+    if (!wasm) {
+        modulePromise ||= (async () => {
+            const response = await fetch(options.wasmUrl || wasmUrl);
+            if (!response.ok) throw failure('LOAD_FAILED', `WASM HTTP ${response.status}`);
+            // Check the actual asset before either streaming or byte initialization.
+            const bytes = await response.clone().arrayBuffer();
+            if (await sha256(bytes) !== manifest.artifacts['combat_wasm_bg.wasm']) throw failure('DATA_MISMATCH', 'WASM asset fingerprint mismatch');
+            loadMode = options.byteLoading ? 'bytes' : 'response';
+            wasm = await init({ module_or_path: options.byteLoading ? bytes : response });
+            const info = JSON.parse(module_info());
+            if (info.interfaceVersion !== manifest.interfaceVersion || info.rngVersion !== manifest.rngVersion ||
+                info.dataFingerprint !== manifest.dataFingerprint) throw failure('DATA_MISMATCH', 'Module interface or data mismatch');
+            moduleInitCount++;
+        })();
+        try { await modulePromise; }
+        catch (error) { modulePromise = undefined; wasm = undefined; throw error; }
+    }
+    if (!dataText) {
+        const response = await fetch(options.dataUrl || dataUrl);
+        if (!response.ok) throw failure('LOAD_FAILED', `Data HTTP ${response.status}`);
+        const bytes = await response.arrayBuffer();
+        if (await sha256(bytes) !== manifest.dataAssetSha256) throw failure('DATA_MISMATCH', 'Definition asset fingerprint mismatch');
+        dataText = new TextDecoder().decode(bytes);
+        dataFetchCount++;
+    }
+    if (!engine) { engine = new PrototypeEngine(dataText, manifest.dataFingerprint); engineInitCount++; }
+}
+
+function stats() {
+    return { moduleInitCount, engineInitCount, dataFetchCount, loadMode,
+        liveEngines: wasm ? live_engines() : 0, liveProbes: wasm ? live_probes() : 0,
+        liveEncounters: wasm ? live_encounters() : 0,
+        liveSimulations: wasm ? live_simulations() : 0,
+        memoryBytes: wasm?.memory.buffer.byteLength ?? 0,
+        info: engine ? JSON.parse(engine.info()) : null,
+        module: wasm ? JSON.parse(module_info()) : null,
+        assets: { wasm: new URL(wasmUrl, location.href).href, data: new URL(dataUrl, location.href).href } };
+}
+
+async function execute(message) {
+    if (message.command === 'stats') return stats();
+    if (message.command === 'destroy') { if (engine) engine.free(); engine = undefined; return stats(); }
+    await ensureEngine(message.options);
+    if (message.command === 'init') return stats();
+    if (message.command === 'queue') return JSON.parse(engine.queue_trace(message.actionsJson));
+    if (message.command === 'attributes') return JSON.parse(engine.attribute_trace(message.inputJson));
+    if (message.command === 'math') return JSON.parse(engine.math_trace(message.inputJson));
+    if (message.command === 'simulationTrace') return JSON.parse(engine.simulation_trace(message.inputJson));
+    if (message.command === 'simulate') {
+        if (message.chunk == null) return JSON.parse(engine.simulate(message.inputJson));
+        if (!Number.isInteger(message.chunk) || message.chunk < 1 || message.chunk > 10000) throw failure('INVALID_INPUT', 'Invalid simulation chunk');
+        const probe = engine.create_simulation(message.inputJson);
+        try {
+            while (!probe.done()) {
+                const progress = JSON.parse(probe.advance(message.chunk));
+                self.postMessage({ id: message.id, progress });
+                await new Promise(resolve => setTimeout(resolve, 0));
+            }
+            return JSON.parse(probe.result());
+        } finally { probe.free(); }
+    }
+    if (message.command === 'encounters') {
+        const cases = JSON.parse(message.inputJson), chunk = message.chunk ?? 1000;
+        if (!Array.isArray(cases) || cases.length > 1000 || cases.reduce((sum, value) => sum + value.maxEvents, 0) > 100_000 ||
+            !Number.isInteger(chunk) || chunk < 1 || chunk > 10_000) throw failure('INVALID_INPUT', 'Invalid encounter batch or chunk');
+        const output = [];
+        let notified = false;
+        for (const value of cases) {
+            const probe = engine.create_encounter(JSON.stringify(value));
+            try {
+                const frames = [];
+                while (!probe.done()) {
+                    frames.push(...JSON.parse(probe.advance(chunk)));
+                    if (!notified) { notified = true; self.postMessage({ id: message.id, progress: { frames: frames.length } }); }
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                }
+                output.push(frames);
+            } finally { probe.free(); }
+        }
+        return output;
+    }
+    if (message.command === 'numeric') return { round: message.values.map(js_round), remainder: message.values.map(value => js_remainder(value, 2)) };
+    if (message.command === 'rng') {
+        if (!Number.isInteger(message.seed) || message.seed < 0 || message.seed > 0xffffffff ||
+            !Array.isArray(message.points) || message.points.length > 100 ||
+            message.points.some((value, index) => !Number.isInteger(value) || value < 1 || value > 10_000_000 || (index > 0 && value <= message.points[index - 1]))) {
+            throw failure('INVALID_INPUT', 'Invalid RNG checkpoints');
+        }
+        const chunk = message.chunk ?? 50_000;
+        if (!Number.isInteger(chunk) || chunk < 1 || chunk > 100_000) throw failure('INVALID_INPUT', 'Invalid chunk size');
+        const probe = engine.create_rng_probe(message.seed);
+        try {
+            const values = [];
+            for (const point of message.points) {
+                let value;
+                while (probe.calls() < point) {
+                    value = probe.sample_to(Math.min(point, probe.calls() + chunk));
+                    if (values.length === 0 && probe.calls() === Math.min(point, chunk)) self.postMessage({ id: message.id, progress: { calls: probe.calls() } });
+                    // Yield only between chunks; random draws stay entirely in Rust.
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                }
+                values.push({ call: point, u32: value });
+            }
+            return { values, calls: probe.calls() };
+        } finally { probe.free(); }
+    }
+    throw failure('INVALID_INPUT', 'Unknown prototype command');
+}
+
+self.onmessage = async ({ data }) => {
+    const { id } = data;
+    if (busy) { self.postMessage({ id, error: { code: 'BUSY', message: 'Worker already has a task' } }); return; }
+    busy = true;
+    try { self.postMessage({ id, result: await execute(data) }); }
+    catch (error) { self.postMessage({ id, error: { code: error.code || 'INVALID_INPUT', message: String(error.message || error) } }); }
+    finally { busy = false; }
+};

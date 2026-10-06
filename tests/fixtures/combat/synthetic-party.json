@@ -1,0 +1,487 @@
+{
+  "1": {
+    "player": {
+      "staminaLevel": 190,
+      "intelligenceLevel": 190,
+      "attackLevel": 190,
+      "defenseLevel": 190,
+      "meleeLevel": 190,
+      "rangedLevel": 190,
+      "magicLevel": 190,
+      "equipment": [
+        {
+          "itemLocationHrid": "/item_locations/head",
+          "itemHrid": "/items/corsair_helmet",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/body",
+          "itemHrid": "/items/anchorbound_plate_body",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/legs",
+          "itemHrid": "/items/anchorbound_plate_legs",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/feet",
+          "itemHrid": "/items/rainbow_boots",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/hands",
+          "itemHrid": "/items/rainbow_gauntlets",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/pouch",
+          "itemHrid": "/items/giant_pouch",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/main_hand",
+          "itemHrid": "/items/regal_sword",
+          "enhancementLevel": 10
+        }
+      ]
+    },
+    "houseRooms": {
+      "/house_rooms/gym": 3,
+      "/house_rooms/library": 2,
+      "/house_rooms/armory": 3
+    },
+    "achievements": {},
+    "guildCombatBuffLevels": {
+      "force": 3,
+      "tempo": 2,
+      "spirit": 4,
+      "rarity": 1,
+      "scholar": 2
+    },
+    "triggerMap": {},
+    "food": {
+      "/action_types/combat": [
+        {
+          "itemHrid": "/items/spaceberry_cake"
+        },
+        {
+          "itemHrid": "/items/star_fruit_gummy"
+        }
+      ]
+    },
+    "drinks": {
+      "/action_types/combat": [
+        {
+          "itemHrid": "/items/super_attack_coffee"
+        }
+      ]
+    },
+    "abilities": [
+      {
+        "abilityHrid": "/abilities/taunt",
+        "level": 20
+      },
+      {
+        "abilityHrid": "/abilities/cleave",
+        "level": 20
+      },
+      {
+        "abilityHrid": "/abilities/stunning_blow",
+        "level": 20
+      },
+      {
+        "abilityHrid": "/abilities/vampirism",
+        "level": 20
+      }
+    ]
+  },
+  "2": {
+    "player": {
+      "staminaLevel": 170,
+      "intelligenceLevel": 170,
+      "attackLevel": 170,
+      "defenseLevel": 170,
+      "meleeLevel": 170,
+      "rangedLevel": 170,
+      "magicLevel": 170,
+      "equipment": [
+        {
+          "itemLocationHrid": "/item_locations/head",
+          "itemHrid": "/items/corsair_helmet",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/body",
+          "itemHrid": "/items/anchorbound_plate_body",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/legs",
+          "itemHrid": "/items/anchorbound_plate_legs",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/feet",
+          "itemHrid": "/items/rainbow_boots",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/hands",
+          "itemHrid": "/items/rainbow_gauntlets",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/pouch",
+          "itemHrid": "/items/giant_pouch",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/two_hand",
+          "itemHrid": "/items/cursed_bow",
+          "enhancementLevel": 10
+        }
+      ]
+    },
+    "houseRooms": {
+      "/house_rooms/gym": 3,
+      "/house_rooms/library": 2,
+      "/house_rooms/armory": 3
+    },
+    "achievements": {},
+    "guildCombatBuffLevels": {
+      "force": 3,
+      "tempo": 2,
+      "spirit": 4,
+      "rarity": 1,
+      "scholar": 2
+    },
+    "triggerMap": {},
+    "food": {
+      "/action_types/combat": [
+        {
+          "itemHrid": "/items/spaceberry_cake"
+        },
+        {
+          "itemHrid": "/items/star_fruit_gummy"
+        }
+      ]
+    },
+    "drinks": {
+      "/action_types/combat": [
+        {
+          "itemHrid": "/items/super_ranged_coffee"
+        }
+      ]
+    },
+    "abilities": [
+      {
+        "abilityHrid": "/abilities/rain_of_arrows",
+        "level": 20
+      },
+      {
+        "abilityHrid": "/abilities/silencing_shot",
+        "level": 20
+      },
+      {
+        "abilityHrid": "/abilities/puncture",
+        "level": 20
+      },
+      {
+        "abilityHrid": "/abilities/precision",
+        "level": 20
+      }
+    ]
+  },
+  "3": {
+    "player": {
+      "staminaLevel": 170,
+      "intelligenceLevel": 170,
+      "attackLevel": 170,
+      "defenseLevel": 170,
+      "meleeLevel": 170,
+      "rangedLevel": 170,
+      "magicLevel": 170,
+      "equipment": [
+        {
+          "itemLocationHrid": "/item_locations/head",
+          "itemHrid": "/items/corsair_helmet",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/body",
+          "itemHrid": "/items/anchorbound_plate_body",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/legs",
+          "itemHrid": "/items/anchorbound_plate_legs",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/feet",
+          "itemHrid": "/items/rainbow_boots",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/hands",
+          "itemHrid": "/items/rainbow_gauntlets",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/pouch",
+          "itemHrid": "/items/giant_pouch",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/main_hand",
+          "itemHrid": "/items/arcane_fire_staff",
+          "enhancementLevel": 10
+        }
+      ]
+    },
+    "houseRooms": {
+      "/house_rooms/gym": 3,
+      "/house_rooms/library": 2,
+      "/house_rooms/armory": 3
+    },
+    "achievements": {},
+    "guildCombatBuffLevels": {
+      "force": 3,
+      "tempo": 2,
+      "spirit": 4,
+      "rarity": 1,
+      "scholar": 2
+    },
+    "triggerMap": {},
+    "food": {
+      "/action_types/combat": [
+        {
+          "itemHrid": "/items/spaceberry_cake"
+        },
+        {
+          "itemHrid": "/items/star_fruit_gummy"
+        }
+      ]
+    },
+    "drinks": {
+      "/action_types/combat": [
+        {
+          "itemHrid": "/items/super_magic_coffee"
+        }
+      ]
+    },
+    "abilities": [
+      {
+        "abilityHrid": "/abilities/firestorm",
+        "level": 20
+      },
+      {
+        "abilityHrid": "/abilities/flame_blast",
+        "level": 20
+      },
+      {
+        "abilityHrid": "/abilities/elemental_affinity",
+        "level": 20
+      },
+      {
+        "abilityHrid": "/abilities/life_drain",
+        "level": 20
+      }
+    ]
+  },
+  "4": {
+    "player": {
+      "staminaLevel": 170,
+      "intelligenceLevel": 170,
+      "attackLevel": 170,
+      "defenseLevel": 170,
+      "meleeLevel": 170,
+      "rangedLevel": 170,
+      "magicLevel": 170,
+      "equipment": [
+        {
+          "itemLocationHrid": "/item_locations/head",
+          "itemHrid": "/items/corsair_helmet",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/body",
+          "itemHrid": "/items/anchorbound_plate_body",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/legs",
+          "itemHrid": "/items/anchorbound_plate_legs",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/feet",
+          "itemHrid": "/items/rainbow_boots",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/hands",
+          "itemHrid": "/items/rainbow_gauntlets",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/pouch",
+          "itemHrid": "/items/giant_pouch",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/main_hand",
+          "itemHrid": "/items/arcane_nature_staff",
+          "enhancementLevel": 10
+        }
+      ]
+    },
+    "houseRooms": {
+      "/house_rooms/gym": 3,
+      "/house_rooms/library": 2,
+      "/house_rooms/armory": 3
+    },
+    "achievements": {},
+    "guildCombatBuffLevels": {
+      "force": 3,
+      "tempo": 2,
+      "spirit": 4,
+      "rarity": 1,
+      "scholar": 2
+    },
+    "triggerMap": {},
+    "food": {
+      "/action_types/combat": [
+        {
+          "itemHrid": "/items/spaceberry_cake"
+        },
+        {
+          "itemHrid": "/items/star_fruit_gummy"
+        }
+      ]
+    },
+    "drinks": {
+      "/action_types/combat": [
+        {
+          "itemHrid": "/items/super_magic_coffee"
+        }
+      ]
+    },
+    "abilities": [
+      {
+        "abilityHrid": "/abilities/rejuvenate",
+        "level": 20
+      },
+      {
+        "abilityHrid": "/abilities/quick_aid",
+        "level": 20
+      },
+      {
+        "abilityHrid": "/abilities/revive",
+        "level": 20
+      },
+      {
+        "abilityHrid": "/abilities/entangle",
+        "level": 20
+      }
+    ]
+  },
+  "5": {
+    "player": {
+      "staminaLevel": 170,
+      "intelligenceLevel": 170,
+      "attackLevel": 170,
+      "defenseLevel": 170,
+      "meleeLevel": 170,
+      "rangedLevel": 170,
+      "magicLevel": 170,
+      "equipment": [
+        {
+          "itemLocationHrid": "/item_locations/head",
+          "itemHrid": "/items/corsair_helmet",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/body",
+          "itemHrid": "/items/anchorbound_plate_body",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/legs",
+          "itemHrid": "/items/anchorbound_plate_legs",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/feet",
+          "itemHrid": "/items/rainbow_boots",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/hands",
+          "itemHrid": "/items/rainbow_gauntlets",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/pouch",
+          "itemHrid": "/items/giant_pouch",
+          "enhancementLevel": 10
+        },
+        {
+          "itemLocationHrid": "/item_locations/main_hand",
+          "itemHrid": "/items/arcane_water_staff",
+          "enhancementLevel": 10
+        }
+      ]
+    },
+    "houseRooms": {
+      "/house_rooms/gym": 3,
+      "/house_rooms/library": 2,
+      "/house_rooms/armory": 3
+    },
+    "achievements": {},
+    "guildCombatBuffLevels": {
+      "force": 3,
+      "tempo": 2,
+      "spirit": 4,
+      "rarity": 1,
+      "scholar": 2
+    },
+    "triggerMap": {},
+    "food": {
+      "/action_types/combat": [
+        {
+          "itemHrid": "/items/spaceberry_cake"
+        },
+        {
+          "itemHrid": "/items/star_fruit_gummy"
+        }
+      ]
+    },
+    "drinks": {
+      "/action_types/combat": [
+        {
+          "itemHrid": "/items/super_magic_coffee"
+        }
+      ]
+    },
+    "abilities": [
+      {
+        "abilityHrid": "/abilities/frost_surge",
+        "level": 20
+      },
+      {
+        "abilityHrid": "/abilities/mana_spring",
+        "level": 20
+      },
+      {
+        "abilityHrid": "/abilities/natures_veil",
+        "level": 20
+      },
+      {
+        "abilityHrid": "/abilities/ice_spear",
+        "level": 20
+      }
+    ]
+  }
+}

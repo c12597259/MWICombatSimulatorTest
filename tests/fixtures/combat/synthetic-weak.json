@@ -1,0 +1,23 @@
+{
+  "1": {
+    "player": {
+      "staminaLevel": 1,
+      "intelligenceLevel": 1,
+      "attackLevel": 1,
+      "defenseLevel": 1,
+      "meleeLevel": 1,
+      "rangedLevel": 1,
+      "magicLevel": 1,
+      "equipment": []
+    },
+    "houseRooms": {},
+    "triggerMap": {},
+    "food": {
+      "/action_types/combat": []
+    },
+    "drinks": {
+      "/action_types/combat": []
+    },
+    "abilities": []
+  }
+}

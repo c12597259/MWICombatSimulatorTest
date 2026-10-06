@@ -34,7 +34,7 @@ export async function run(team, options) {
         await globalThis.onmessage({ data: {
             type: "start_simulation", players,
             zone: options.labyrinth ? null : { zoneHrid: options.zone, difficultyTier: options.tier },
-            labyrinth: options.labyrinth ? { labyrinthHrid: options.labyrinth, roomLevel: options.room || 100, crates: [] } : null,
+            labyrinth: options.labyrinth ? { labyrinthHrid: options.labyrinth, roomLevel: options.room || 100, crates: options.crates || [] } : null,
             extra: { ...options.extra, enableHpMpVisualization: options.visualization },
             simulationTimeLimit: options.hours * 3600e9,
         } });
