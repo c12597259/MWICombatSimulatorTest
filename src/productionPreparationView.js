@@ -1,7 +1,7 @@
 import { calculateProductionPreparation, DEFAULT_PRODUCTION_SETTINGS } from './productionPreparation.js';
 
 // Keep controls mounted while typing/selecting. Only replace calculated output.
-export function createProductionPreparationView({ snapshot, consumables, combatHours = 0, settings = {}, onChange, onResult, context = 'plan', inventory = null,
+export function createProductionPreparationView({ snapshot, consumables, combatHours = 0, settings = {}, onChange, onResult, context = 'plan', inventory = null, inventoryAvailable = true,
     data, language = 'zh', itemName = value => value }) {
     const zh = language.startsWith('zh');
     if (context === 'plan') consumables = Object.fromEntries(Object.entries(consumables || {})
@@ -12,8 +12,8 @@ export function createProductionPreparationView({ snapshot, consumables, combatH
     const root = el('section', 'border rounded p-3 mb-3 production-preparation');
     root.append(el('h6', '', t('消耗品准备时间', 'Consumable preparation time')));
     if (!snapshot) {
-        root.append(el('p', 'text-warning mb-0', t('这条历史没有新版专业资料。更新主电脑插件、重新导入配装并模拟后，选择新记录即可计算。',
-            'This history has no production snapshot. Update the simulator userscript, reimport and simulate, then select the new record.')));
+        root.append(el('p', 'text-warning mb-0', t('这条历史缺少专业资料，暂无法计算消耗品准备时间。',
+            'This history has no production snapshot; consumable preparation time is unavailable.')));
         return root;
     }
     root.append(el('p', 'small text-secondary', (context === 'result'
@@ -24,7 +24,7 @@ export function createProductionPreparationView({ snapshot, consumables, combatH
     details.append(el('summary', '', t('专业配装与社区增益设置', 'Profession loadouts and fixed community buffs')));
     const settingsGrid = el('div', 'row g-2 my-2');
     const save = () => { onChange?.(settings); render(); };
-    if (context === 'plan') {
+    if (context === 'plan' && inventoryAvailable) {
         const label = el('label', 'd-block small mb-2', t('库存抵扣模式', 'Inventory deduction'));
         const mode = el('select', 'form-select form-select-sm');
         mode.setAttribute('aria-label', t('库存抵扣模式', 'Inventory deduction'));

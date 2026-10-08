@@ -20,7 +20,7 @@ import achievementTierMap from "./combatsimulator/data/achievementTierDetailMap.
 import achievementDetailMap from "./combatsimulator/data/achievementDetailMap.json"
 import { calculateFragmentTimeCosts, applyPreparationToFragmentTimeCosts } from "./fragmentTimeCost.js";
 import { createProductionPreparationView } from "./productionPreparationView.js";
-import { normalizePlanInventory, calculateConsumableShortfall, requestPlanInventories } from './planInventory.js';
+import { normalizePlanInventory, calculateConsumableShortfall, requestPlanInventories, INVENTORY_BRIDGE_ATTRIBUTE } from './planInventory.js';
 import enhancementMultipliers from "./combatsimulator/data/enhancementLevelTotalBonusMultiplierTable.json";
 import {
     MAX_SKILL_LEVEL,
@@ -4164,7 +4164,7 @@ let planInventoryLoading = false;
 let planInventoryMessage = '';
 
 async function refreshPlanInventories(players, force = false) {
-    if (planInventoryLoading) return;
+    if (planInventoryLoading || !hasPrivateInventoryBridge()) return;
     const ids = [...new Set(players.map(p => String(p.productionSnapshot?.characterId || '')).filter(Boolean))];
     if (!ids.length) return;
     ids.forEach(id => attemptedInventoryCharacters.add(id));
@@ -4245,14 +4245,15 @@ function createSimulationPlanPlayerSummary(player, index, groupId, onPreparation
     const plan = getActiveSimulationPlan();
     plan.productionSettings ||= {};
     const preparationSettings = plan.productionSettings[player.identity] || {};
-    const inventory = planInventories.get(String(player.productionSnapshot?.characterId || '')) || null;
+    const inventoryAvailable = hasPrivateInventoryBridge();
+    const inventory = inventoryAvailable ? planInventories.get(String(player.productionSnapshot?.characterId || '')) || null : null;
     const shortfall = calculateConsumableShortfall(player.consumablesUsed, inventory);
     pane.append(createPlanFragmentInventorySummary(player));
     pane.appendChild(createProductionPreparationView({
         snapshot: player.productionSnapshot, consumables: player.consumablesUsed, combatHours: player.combatHours,
-        settings: preparationSettings, inventory,
+        settings: preparationSettings, inventory, inventoryAvailable,
         onResult: result => onPreparation?.(player.identity,
-            inventory || preparationSettings.inventoryMode === 'none' ? result.totalMinutes : null),
+            !inventoryAvailable || inventory || preparationSettings.inventoryMode === 'none' ? result.totalMinutes : null),
         onChange: settings => {
             plan.productionSettings[player.identity] = settings;
             plan.updatedAt = new Date().toISOString();
@@ -4324,17 +4325,17 @@ function createSimulationPlanPlayerSummary(player, index, groupId, onPreparation
             missingButton.title = '复制补货清单；Toolkit 会自行扣库存，请使用「导出全部」导入 Toolkit。';
             missingButton.addEventListener('click', () => void exportSimulationPlanPlayerConsumables({ ...player,
                 consumablesUsed: Object.fromEntries(shortfall.map(row => [row.itemHrid, row.missing])) }, missingButton, { shortfall: true }));
-            headingRow.append(missingButton);
+            if (inventoryAvailable) headingRow.append(missingButton);
         }
         column.append(
             headingRow,
-            section.exportConsumables ? createPlanConsumableInventoryTable(shortfall)
+            section.exportConsumables && inventoryAvailable ? createPlanConsumableInventoryTable(shortfall)
                 : createSimulationPlanSimpleTable(section.entries, getSimulationHistoryItemName),
         );
-        if (section.exportConsumables) column.append(createElement('p', 'small text-secondary', inventory
+        if (section.exportConsumables && inventoryAvailable) column.append(createElement('p', 'small text-secondary', inventory
             ? `库存采集于 ${new Date(inventory.capturedAt).toLocaleString()}。缺口仅扣成品，制作时间按上方模式抵扣材料；需求已向上取整。`
             : '库存未知，不能导出缺口；可以导出全部需求。'));
-        if (section.exportConsumables) column.append(createElement('p', 'small text-secondary',
+        if (section.exportConsumables && inventoryAvailable) column.append(createElement('p', 'small text-secondary',
             '导出全部：导入 Toolkit，由它扣库存。导出缺口：独立补货清单，不用于 Toolkit，避免重复扣减。'));
         grid.appendChild(column);
     }
@@ -4409,8 +4410,10 @@ function renderSimulationPlanPlayerSummaries(players) {
         content.appendChild(pane);
     });
 
-    container.append(heading, inventoryBar, readiness, tabs, content);
-    if (!planInventoryLoading && players.some(p => p.productionSnapshot?.characterId
+    container.append(heading);
+    if (hasPrivateInventoryBridge()) container.append(inventoryBar);
+    container.append(readiness, tabs, content);
+    if (hasPrivateInventoryBridge() && !planInventoryLoading && players.some(p => p.productionSnapshot?.characterId
         && !attemptedInventoryCharacters.has(String(p.productionSnapshot.characterId)))) void refreshPlanInventories(players);
 }
 
@@ -4447,7 +4450,7 @@ function renderSimulationPlanSummary(plan, calculation) {
 
 function renderSimulationPlan() {
     const plan = ensureActiveSimulationPlan();
-    const calculation = calculateSimulationPlan(plan, { inventories: planInventories });
+    const calculation = calculateSimulationPlan(plan, { inventories: hasPrivateInventoryBridge() ? planInventories : new Map() });
     renderSimulationPlanSelector(plan);
     renderSimulationPlanSteps(plan, calculation);
     renderSimulationPlanSummary(plan, calculation);
@@ -8510,6 +8513,7 @@ function renderCurrentLoadoutComparison(baseline, comparison, resolution) {
 }
 
 async function compareCurrentTeamToExistingLoadouts() {
+    if (document.documentElement.dataset[PRIVATE_LOADOUT_BASELINE_BRIDGE_ATTRIBUTE] !== '1') return;
     const compareButton = document.getElementById("buttonCompareTeamPreset");
     if (compareButton?.dataset.loading === "true") {
         return;
@@ -8650,6 +8654,7 @@ function initImporterLoadoutNameCapture() {
 }
 
 function initCurrentLoadoutComparison() {
+    initPrivateFeatureVisibility();
     initImporterLoadoutNameCapture();
     initLegacyLoadoutControlRetirement();
     try {
@@ -8662,6 +8667,33 @@ function initCurrentLoadoutComparison() {
         "click",
         compareCurrentTeamToExistingLoadouts,
     );
+}
+
+function hasPrivateInventoryBridge() {
+    return document.documentElement.dataset[INVENTORY_BRIDGE_ATTRIBUTE] === '1';
+}
+
+function initPrivateFeatureVisibility() {
+    let previousInventory = hasPrivateInventoryBridge();
+    const update = () => {
+        const loadouts = document.documentElement.dataset[PRIVATE_LOADOUT_BASELINE_BRIDGE_ATTRIBUTE] === '1';
+        document.getElementById('teamPresetComparisonBar')?.classList.toggle('d-none', !loadouts);
+        if (!loadouts) {
+            const modal = document.getElementById('teamPresetComparisonModal');
+            if (modal?.classList.contains('show')) bootstrap.Modal.getInstance(modal)?.hide();
+        }
+        const inventory = hasPrivateInventoryBridge();
+        if (previousInventory !== inventory) {
+            previousInventory = inventory;
+            if (document.getElementById('simulationPlanModal')?.classList.contains('show')) renderSimulationPlan();
+        }
+    };
+    update();
+    // Userscripts may register after the page has initialized, or remove a bridge later.
+    new MutationObserver(update).observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['data-mwi-private-loadout-baseline-bridge', 'data-mwi-private-inventory-bridge'],
+    });
 }
 
 // #endregion

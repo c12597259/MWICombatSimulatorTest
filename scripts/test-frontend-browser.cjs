@@ -137,6 +137,22 @@ async function main() {
         assert.equal(lab.message.execution.engine,'rust-wasm-worker');
         report.checks.push({name:'zone and labyrinth batches, ordered output and recorded seeds'});
 
+        // Private integrations are absent for visitors and can register after startup.
+        assert.equal(await page.locator('#teamPresetComparisonBar').isVisible(), false);
+        await page.evaluate(() => {
+            window.privateBaselineRequests = 0;
+            document.addEventListener('mwi-private-loadout-baseline-request', () => window.privateBaselineRequests++);
+            document.getElementById('buttonCompareTeamPreset').click();
+        });
+        assert.equal(await page.evaluate(() => window.privateBaselineRequests), 0);
+        assert.equal(await page.locator('#teamPresetComparisonModal').isVisible(), false);
+        await page.evaluate(() => document.documentElement.dataset.mwiPrivateLoadoutBaselineBridge = '1');
+        await page.waitForFunction(() => !document.getElementById('teamPresetComparisonBar').classList.contains('d-none'));
+        assert.equal(await page.locator('#teamPresetComparisonBar').isVisible(), true);
+        await page.evaluate(() => delete document.documentElement.dataset.mwiPrivateLoadoutBaselineBridge);
+        await page.waitForFunction(() => document.getElementById('teamPresetComparisonBar').classList.contains('d-none'));
+        report.checks.push({name:'private entry hidden for visitors, guarded clicks, late bridge registration and removal'});
+
         // Exercise the real controls, renderer, history and export, not only Workers.
         await page.locator('#buttonSimulationSetup').click();
         await page.locator('#inputSimulationTime').fill('1');
