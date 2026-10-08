@@ -289,7 +289,7 @@
         "rarity": "稀有神龛",
         "rarityEffect": "战斗稀有掉落 +1.5%",
         "scholar": "学者神龛",
-        "scholarEffect": "战斗经验 +0.5%"
+        "scholarEffect": "战斗经验 +1%"
     },
     "fragmentTimeCost": {
         "title": "钥匙碎片时间成本",
@@ -419,6 +419,14 @@
         "waitingForData" : "等待模拟数据..."
     },
     "simLabyrinth" : "模拟迷宫",
-    "simAllLabyrinths" : "模拟所有迷宫",
-    "roomLevel" : "房间等级"
+    "roomLevel" : "房间等级",
+    "labyrinthUpgrades": {
+        "title": "迷宫升级",
+        "description": "当前角色的升级等级，每级增加 1%；迷宫不使用个人增益。",
+        "combat_damage": "战斗伤害",
+        "attack_speed": "攻击速度",
+        "cast_speed": "施法速度",
+        "critical_rate": "暴击率",
+        "experience": "经验"
+    }
 }

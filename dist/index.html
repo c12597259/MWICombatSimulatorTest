@@ -1786,12 +1786,7 @@
                                             Sim Labyrinth
                                         </label>
                                     </div>
-                                    <div class="form-check form-check-reverse">
-                                        <input class="form-check-input" type="checkbox" value="" id="simAllLabyrinthsToggle">
-                                        <label class="form-check-label" for="simAllLabyrinthsToggle" data-i18n="common:simAllLabyrinths">
-                                            Sim All Labyrinths
-                                        </label>
-                                    </div>
+
                                 </div>
                             </div>
                             <div class="col-12 pt-1">
@@ -1830,12 +1825,17 @@
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="form-check form-switch mb-1">
+                                    <div id="personalBuffsSection" class="form-check form-switch mb-1">
                                         <input class="form-check-input" type="checkbox" id="personalBuffsToggle">
                                         <label class="form-check-label" for="personalBuffsToggle" data-i18n="personalBuffs.title">Personal Buffs</label>
                                         <div id="personalBuffsBox" class="d-none">
                                             <!-- Personal buffs will be dynamically added here -->
                                         </div>
+                                    </div>
+                                    <div id="labyrinthUpgradesSection" class="d-none mt-2">
+                                        <h6 data-i18n="common:labyrinthUpgrades.title">Labyrinth upgrades</h6>
+                                        <div class="small text-muted mb-2" data-i18n="common:labyrinthUpgrades.description">Upgrades for the current player; each level grants 1%. Personal buffs do not apply.</div>
+                                        <div id="labyrinthUpgradesBox"></div>
                                     </div>
                                 </div>
                             </div>
