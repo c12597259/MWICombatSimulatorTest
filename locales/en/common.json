@@ -246,8 +246,6 @@
         "battleQueue": "BattleQueue?",
         "startSimulation": "Start Simulation",
         "stopSimulation": "Stop Simulation",
-        "exportSimulationRecord": "Export All Map Records (Temporary)",
-        "noSimulationRecords": "No simulation records to export yet. Complete a simulation first.",
         "calcCoffeeBenefits": "Calc Coffee Benefits",
         "coffeeResults": "Coffee Results",
         "calcSpecialAbilityBenefits": "Calc Special Ability Benefits",

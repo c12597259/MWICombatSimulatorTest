@@ -246,8 +246,6 @@
         "battleQueue": "战斗队列?",
         "startSimulation": "开始模拟",
         "stopSimulation": "中止模拟",
-        "exportSimulationRecord": "导出全部地图记录（临时）",
-        "noSimulationRecords": "暂无可导出的模拟记录，请先完成一次模拟。",
         "calcCoffeeBenefits": "计算咖啡收益",
         "coffeeResults": "咖啡结果",
         "calcSpecialAbilityBenefits": "计算特殊能力收益",

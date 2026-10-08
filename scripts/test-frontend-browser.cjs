@@ -153,7 +153,7 @@ async function main() {
         await page.waitForFunction(() => document.getElementById('teamPresetComparisonBar').classList.contains('d-none'));
         report.checks.push({name:'private entry hidden for visitors, guarded clicks, late bridge registration and removal'});
 
-        // Exercise the real controls, renderer, history and export, not only Workers.
+        // Exercise the real controls, renderer and history, not only Workers.
         await page.locator('#buttonSimulationSetup').click();
         await page.locator('#inputSimulationTime').fill('1');
         await page.locator('#player1').check();
@@ -161,15 +161,21 @@ async function main() {
         await page.waitForFunction(()=>window.testWorkers[0].testMessages.some(m=>m.type==='simulation_result'),null,{timeout:120000});
         await page.waitForFunction(()=>!document.querySelector('#buttonStartSimulation').disabled);
         assert.equal(await page.evaluate(()=>window.testWorkers[0].testMessages.find(m=>m.type==='simulation_result').execution.engine),'rust-wasm-worker');
-        const downloadPromise=page.waitForEvent('download');
-        await page.locator('#buttonExportSimulationRecord').click();
-        const download=await downloadPromise;
-        const exported=read(await download.path());
-        assert.equal(exported.latestRun.engine,'rust-wasm-worker');
-        assert.equal(exported.latestRun.randomness.exactReplay,true);
-        assert.ok(exported.records.length>0);
-        assert.equal(exported.records[0].teamSnapshot.simulationRecord.engine,'rust-wasm-worker');
-        report.checks.push({name:'page single run, rendered results, saved history and export'});
+        assert.equal(await page.locator('#buttonExportSimulationRecord').count(), 0);
+        await page.waitForFunction(() => Number(document.getElementById('simulationHistoryCount').textContent) > 0);
+        const historyRecords = await page.evaluate(() => new Promise((resolve, reject) => {
+            const request = indexedDB.open('mwiCombatSimulatorHistory');
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => {
+                const db = request.result;
+                const read = db.transaction('records').objectStore('records').getAll();
+                read.onsuccess = () => { db.close(); resolve(read.result); };
+                read.onerror = () => { db.close(); reject(read.error); };
+            };
+        }));
+        assert.ok(historyRecords.length > 0);
+        assert.ok(historyRecords[0].teamSnapshot);
+        report.checks.push({name:'page single run, rendered results and saved history; temporary export removed'});
         await page.locator('#buttonSimulationSetup').click();
         await page.locator('#inputSimulationTime').fill('2500');
         await page.locator('#buttonStartSimulation').click();
@@ -185,14 +191,7 @@ async function main() {
         await page.locator('#buttonStartSimulation').click();
         await page.waitForFunction(()=>!document.querySelector('#buttonStartSimulation').disabled,null,{timeout:120000});
         assert.ok(await page.locator('#buttonShowAllSimData').isVisible());
-        const batchDownloadPromise=page.waitForEvent('download');
-        await page.locator('#buttonExportSimulationRecord').click();
-        const batchDownload=await batchDownloadPromise;
-        const batchArchive=read(await batchDownload.path());
-        assert.equal(batchArchive.latestRun.engine,'rust-wasm-worker');
-        assert.equal(batchArchive.latestRun.result.length,batchArchive.latestRun.request.zones.length);
-        assert.equal(batchArchive.latestRun.execution.executions.length,batchArchive.latestRun.result.length);
-        report.checks.push({name:'page all maps, rendered batch and export'});
+        report.checks.push({name:'page all maps and rendered batch'});
         await page.evaluate(() => caches.delete('mwi-combat-wasm-assets-v1'));
         await context.route('**/*.wasm',route=>route.abort());
         const fallback = await run(sample);
