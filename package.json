@@ -5,6 +5,8 @@
     "main": "index.js",
     "scripts": {
         "test": "node --test tests/planInventory.test.mjs tests/productionPreparation.test.mjs tests/fragmentTimeCost.test.mjs tests/guildCombatBuffs.test.mjs tests/teamPresetComparison.test.mjs tests/privateLoadoutBaseline.test.mjs tests/simulationHistory.test.mjs tests/simulationRecordExport.test.mjs tests/playerFormation.test.mjs tests/experienceLevelCalculator.test.mjs tests/simulationPlan.test.mjs tests/simulationPlanConsumableTransfer.test.mjs tests/toolkitConsumableImportUserscript.test.mjs tests/zoneSelection.test.mjs",
+        "test:labyrinth": "node --test tests/labyrinthWasm.test.cjs",
+        "test:labyrinth-browser": "node scripts/test-labyrinth-browser.cjs",
         "test:combat": "node --test tests/combatPerformance.test.mjs tests/simulationWorkerPool.test.mjs",
         "bench": "node bench/run.cjs",
         "bench:freeze": "node bench/freeze.cjs",

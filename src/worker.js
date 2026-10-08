@@ -1,3 +1,4 @@
+import { getLabyrinthRequestBuffs } from './labyrinthUpgrades.js';
 import CombatSimulator from "./combatsimulator/combatSimulator";
 import Player from "./combatsimulator/player";
 import Zone from "./combatsimulator/zone";
@@ -46,7 +47,7 @@ onmessage = async function (event) {
                 };
                 extraBuffs.push(comDropBuff);
             }
-            if (event.data.extra.personalBuffs) {
+            if (!event.data.labyrinth && event.data.extra.personalBuffs) {
                 const personalBuffs = {
                     "/items/seal_of_attack_speed": {
                         "uniqueHrid": "/buff_uniques/personal_attack_speed",
@@ -139,7 +140,12 @@ onmessage = async function (event) {
             for (let i = 0; i < playersData.length; i++) {
                 let currentPlayer = Player.createFromDTO(structuredClone(playersData[i]));
                 currentPlayer.zoneBuffs = zone?.buffs || labyrinth?.buffs || [];
-                currentPlayer.extraBuffs = extraBuffs;
+                currentPlayer.extraBuffs = labyrinth
+                    ? [...extraBuffs, ...getLabyrinthRequestBuffs(playersData[i], event.data.extra)] : extraBuffs;
+                if (labyrinth) {
+                    currentPlayer.food = [null, null, null];
+                    currentPlayer.drinks = [null, null, null];
+                }
                 players.push(currentPlayer);
             }
             let simulationTimeLimit = event.data.simulationTimeLimit;

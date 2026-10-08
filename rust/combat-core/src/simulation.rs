@@ -21,11 +21,25 @@ pub struct SimulationInput {
     pub time_limit: f64,
     #[serde(default)]
     pub visualization: bool,
+    #[serde(default)]
+    pub record_labyrinth_stats: bool,
+}
+#[derive(Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LabyrinthStats {
+    pub completed: u32,
+    pub successes: u32,
+    pub deaths: u32,
+    pub timeouts: u32,
+    pub last_end: f64,
+    pub min_duration: f64,
+    pub max_duration: f64,
 }
 pub struct SimulationState {
     pub zone: Option<ZoneState>,
     pub lab: Option<LabyrinthInput>,
     pub attempts: u32,
+    pub labyrinth_stats: Option<LabyrinthStats>,
     pub encounter_start: f64,
     pub dungeon_count: u32,
     pub result: SimResult,
@@ -62,6 +76,9 @@ impl EncounterRun {
             }
             for player in &mut input.players {
                 player.zone_hrid = None;
+                if let Some(extra) = player.extra.as_object_mut() {
+                    extra.remove("personalBuffs");
+                }
                 if let UnitInput::Player(value) = &mut player.input {
                     value.guild_buffs.extend(buffs.clone());
                 }
@@ -105,6 +122,7 @@ impl EncounterRun {
             zone,
             lab: input.labyrinth,
             attempts: 0,
+            labyrinth_stats: input.record_labyrinth_stats.then(LabyrinthStats::default),
             encounter_start: 0.0,
             dungeon_count: 0,
             result,
@@ -308,6 +326,9 @@ impl EncounterRun {
             }
         }
         value["labyAttemptCount"] = json!(full.attempts);
+        if let Some(stats) = &full.labyrinth_stats {
+            value["labyrinthStats"] = json!(stats);
+        }
         for id in &self.players {
             let unit = self.unit(*id);
             let name = &unit.hrid;

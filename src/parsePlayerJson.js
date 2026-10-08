@@ -17,6 +17,7 @@ export default function parsePlayerJson(playerJson, hrid) {
         houseRooms: playerJson.houseRooms,
         achievements: playerJson.achievements ?? {},
         guildCombatBuffs,
+        labyrinthUpgrades: playerJson.labyrinth ?? playerJson.labyrinthUpgrades,
         guildCombatBuffLevels: resolveGuildCombatShrineLevels(
             playerJson.guildCombatBuffLevels ?? playerJson.guildShrineLevels,
             guildCombatBuffs,

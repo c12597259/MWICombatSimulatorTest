@@ -177,6 +177,7 @@ async function main() {
         assert.equal(batchArchive.latestRun.result.length,batchArchive.latestRun.request.zones.length);
         assert.equal(batchArchive.latestRun.execution.executions.length,batchArchive.latestRun.result.length);
         report.checks.push({name:'page all maps, rendered batch and export'});
+        await page.evaluate(() => caches.delete('mwi-combat-wasm-assets-v1'));
         await context.route('**/*.wasm',route=>route.abort());
         const fallback = await run(sample);
         assert.equal(fallback.message.type,'simulation_result');

@@ -1,27 +1,7 @@
-import init, { PrototypeEngine, module_info } from '../.wasm-build/pkg/combat_wasm.js';
-import wasmUrl from '../.wasm-build/pkg/combat_wasm_bg.wasm';
-import dataUrl from '../.wasm-build/data/combat-data.json?asset';
-import manifest from '../.wasm-build/manifest.json';
+import { loadEngine, manifest } from './combatWasmEngine.js';
 import { normalizeSimulationRequest } from './rustSimulationInput.js';
 
 let enginePromise, fallback, busy = false;
-const sha256 = async bytes => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)),
-    value => value.toString(16).padStart(2, '0')).join('');
-
-async function loadEngine() {
-    const [wasmResponse, dataResponse] = await Promise.all([fetch(wasmUrl), fetch(dataUrl)]);
-    if (!wasmResponse.ok || !dataResponse.ok) throw new Error('Could not load combat engine assets');
-    const [bytes, data] = await Promise.all([wasmResponse.arrayBuffer(), dataResponse.arrayBuffer()]);
-    const [wasmHash, dataHash] = await Promise.all([sha256(bytes), sha256(data)]);
-    if (wasmHash !== manifest.artifacts['combat_wasm_bg.wasm'] || dataHash !== manifest.dataAssetSha256) {
-        throw new Error('Combat engine asset version mismatch');
-    }
-    await init({ module_or_path: bytes });
-    const info = JSON.parse(module_info());
-    if (info.interfaceVersion !== manifest.interfaceVersion || info.rngVersion !== manifest.rngVersion ||
-        info.dataFingerprint !== manifest.dataFingerprint) throw new Error('Combat engine interface mismatch');
-    return new PrototypeEngine(new TextDecoder().decode(data), manifest.dataFingerprint);
-}
 
 function runFallback(request, reason) {
     // Only loading failures fall back; simulation errors must stay visible.

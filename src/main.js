@@ -1,3 +1,4 @@
+import { LABYRINTH_UPGRADES, normalizeLabyrinthUpgrades } from './labyrinthUpgrades.js';
 import parsePlayerJson from "./parsePlayerJson.js";
 import Equipment from "./combatsimulator/equipment.js";
 import Player from "./combatsimulator/player.js";
@@ -1427,7 +1428,15 @@ function initLabyrinth() {
 
 
     const updateLabyrinthToggle = () => {
-        let isLabyrinth = simLabyrinthToggle.checked || simAllLabyrinthsToggle.checked;
+        let isLabyrinth = simLabyrinthToggle.checked;
+        document.getElementById('personalBuffsSection').classList.toggle('d-none', isLabyrinth);
+        document.getElementById('labyrinthUpgradesSection').classList.toggle('d-none', !isLabyrinth);
+        if (isLabyrinth) {
+            for (const id of ['simAllZoneToggle', 'simAllSoloToggle', 'simDungeonToggle']) {
+                const toggle = document.getElementById(id);
+                if (toggle.checked) { toggle.checked = false; toggle.dispatchEvent(new Event('change', { bubbles: true })); }
+            }
+        }
         if (isLabyRinthSim === isLabyrinth) return;
 
         const labyrinthSupplyItemsBox = document.getElementById('labyrinthSupplyItemsBox');
@@ -1440,12 +1449,46 @@ function initLabyrinth() {
     }
     const simLabyrinthToggle = document.getElementById('simLabyrinthToggle');
     simLabyrinthToggle.onchange = updateLabyrinthToggle;
-    const simAllLabyrinthsToggle = document.getElementById('simAllLabyrinthsToggle');
-    simAllLabyrinthsToggle.onchange = updateLabyrinthToggle;
+    for (const id of ['simAllZoneToggle', 'simAllSoloToggle', 'simDungeonToggle']) {
+        document.getElementById(id).addEventListener('change', (event) => {
+            if (event.target.checked) { simLabyrinthToggle.checked = false; updateLabyrinthToggle(); }
+        });
+    }
+    updateLabyrinthToggle();
 
 }
 
 // #endregion
+
+function initLabyrinthUpgradeControls() {
+    const box = document.getElementById('labyrinthUpgradesBox');
+    for (const { key, field } of LABYRINTH_UPGRADES) {
+        const row = document.createElement('div');
+        row.className = 'row g-2 align-items-center mb-1';
+        const label = document.createElement('label');
+        label.className = 'col-7 col-form-label';
+        label.htmlFor = field;
+        label.dataset.i18n = 'common:labyrinthUpgrades.' + key;
+        label.textContent = key.replaceAll('_', ' ');
+        const col = document.createElement('div'); col.className = 'col-5';
+        const input = document.createElement('input');
+        Object.assign(input, { type: 'number', id: field, min: '0', step: '1', value: '0', className: 'form-control' });
+        input.dataset.labyrinthUpgrade = field;
+        input.addEventListener('change', () => { updateLabyrinthUpgradeState(); updateLabyrinthUpgradeUI(); });
+        col.appendChild(input); row.append(label, col); box.appendChild(row);
+    }
+}
+function updateLabyrinthUpgradeState() {
+    player.labyrinthUpgrades = normalizeLabyrinthUpgrades(Object.fromEntries(LABYRINTH_UPGRADES.map(({ field }) =>
+        [field, document.getElementById(field)?.value ?? 0])));
+}
+function updateLabyrinthUpgradeUI() {
+    const levels = normalizeLabyrinthUpgrades(player.labyrinthUpgrades);
+    for (const { field } of LABYRINTH_UPGRADES) {
+        const input = document.getElementById(field);
+        if (input) input.value = levels[field];
+    }
+}
 
 // #region Simulation Result
 
@@ -3256,7 +3299,6 @@ function restoreSimulationHistoryTarget(record) {
     const allToggleIds = [
         "simAllZoneToggle",
         "simAllSoloToggle",
-        "simAllLabyrinthsToggle",
     ];
     allToggleIds.forEach((id) => {
         const toggle = document.getElementById(id);
@@ -6306,7 +6348,6 @@ function startSimulation(selectedPlayers) {
     pendingSimulationHistoryContext = null;
     lastSimulationExperienceSnapshot = { ...playerDataMap };
     let simLabyrinthToggle = document.getElementById("simLabyrinthToggle");
-    let simAllLabyrinthsToggle = document.getElementById("simAllLabyrinthsToggle");
 
     let playersToSim = [];
     for (const selectedPlayer of selectedPlayers) {
@@ -6316,7 +6357,7 @@ function startSimulation(selectedPlayers) {
             updateState();
             updateUI();
             player.hrid = "player" + j.toString();
-            if (!simLabyrinthToggle.checked && !simAllLabyrinthsToggle.checked) {
+            if (!simLabyrinthToggle.checked) {
                 for (let i = 0; i < 3; i++) {
                     if (food[i] && i < player.combatDetails.combatStats.foodSlots) {
                         let consumable = new Consumable(food[i], triggerMap[food[i]]);
@@ -6383,7 +6424,7 @@ function startSimulation(selectedPlayers) {
     }
     extra.enableHpMpVisualization = document.getElementById("hpMpVisualizationToggle").checked;
     extra.personalBuffs = [];
-    if (document.getElementById("personalBuffsToggle").checked) {
+    if (!simLabyrinthToggle.checked && document.getElementById("personalBuffsToggle").checked) {
         let personalBuffs = document.getElementById("personalBuffsBox").querySelectorAll("input");
         for (let buff of personalBuffs) {
             if (buff.checked) {
@@ -6412,7 +6453,7 @@ function startSimulation(selectedPlayers) {
         if (categorySelect.value !== "") crates.push(categorySelect.value);
     });
 
-    if (!simAllZonesToggle.checked && !simAllSoloToggle.checked && !simAllLabyrinthsToggle.checked) {
+    if (!simAllZonesToggle.checked && !simAllSoloToggle.checked) {
         let simZone = null;
         let simLabyrinth = null;
         if (simLabyrinthToggle.checked) {
@@ -6446,37 +6487,6 @@ function startSimulation(selectedPlayers) {
         worker.onmessage = onWorkerMessage;
         simulationRecordCapture.start(workerMessage);
         worker.postMessage(workerMessage);
-    } else if (simAllLabyrinthsToggle.checked) {
-        let gameLabyrinths = Object.values(combatMonsterDetailMap)
-        .filter((monster) => monster.isLabyrinthMonster === true)
-        .sort((a, b) => a.sortIndex - b.sortIndex);
-
-        let simHrids = gameLabyrinths
-            .map(action => {
-                let result = [];
-                // floor 1 is room level 20-40, +20 level per floor
-                for (let roomLevel = 40; roomLevel <= 220; roomLevel+=20) {
-                    result.push({ labyrinthHrid: action.hrid, roomLevel: roomLevel, crates: crates });
-                }
-                return result;
-            })
-            .flat();
-
-        let workerMessage = {
-            type: "start_simulation_all_labyrinths",
-            workerId: Math.floor(Math.random() * 1e9).toString(),
-            players: playersToSim,
-            labyrinths: simHrids,
-            simulationTimeLimit: simulationTimeLimit,
-            extra: extra
-        };
-        simStartTime = Date.now();
-        if (!multiWorker) {
-            multiWorker = new Worker(new URL("multiWorker.js", import.meta.url));
-        }
-        multiWorker.onmessage = onMultiWorkerMessage;
-        simulationRecordCapture.start(workerMessage);
-        multiWorker.postMessage(workerMessage);
     } else if (simAllZonesToggle.checked || simAllSoloToggle.checked) {
         let targetHrids = {};
 
@@ -7091,6 +7101,7 @@ function getEquipmentSetFromUI() {
     equipmentSet.houseRooms = player.houseRooms;
     equipmentSet.achievements = player.achievements;
     equipmentSet.guildCombatBuffLevels = player.guildCombatBuffLevels;
+    equipmentSet.labyrinth = normalizeLabyrinthUpgrades(player.labyrinthUpgrades);
 
     return equipmentSet;
 }
@@ -7220,6 +7231,8 @@ function loadEquipmentSetIntoUI(equipmentSet) {
     }
     refreshAchievementStatics();
     setGuildCombatBuffLevels(equipmentSet.guildCombatBuffLevels ?? {});
+    player.labyrinthUpgrades = normalizeLabyrinthUpgrades(equipmentSet.labyrinth ?? equipmentSet.labyrinthUpgrades);
+    updateLabyrinthUpgradeUI();
 
     updateState();
     updateUI();
@@ -7335,6 +7348,7 @@ function doSoloExport() {
         houseRooms: player.houseRooms,
         achievements: player.achievements,
         guildCombatBuffLevels: player.guildCombatBuffLevels,
+        labyrinth: normalizeLabyrinthUpgrades(player.labyrinthUpgrades),
     };
     try {
         navigator.clipboard.writeText(JSON.stringify(state)).then(() => alert("Current set has been copied to clipboard."));
@@ -7418,6 +7432,8 @@ function doGroupImport() {
 function doSoloImport() {
     let importSet = document.getElementById("inputSetSolo").value;
     importSet = JSON.parse(importSet);
+    player.labyrinthUpgrades = normalizeLabyrinthUpgrades(importSet.labyrinth ?? importSet.labyrinthUpgrades);
+    updateLabyrinthUpgradeUI();
     player.guildCombatBuffs = Array.isArray(importSet.guildCombatBuffs)
         ? structuredClone(importSet.guildCombatBuffs)
         : [];
@@ -7619,6 +7635,7 @@ function savePreviousPlayer(playerId) {
             "achievements",
             "guildCombatBuffLevels",
             "guildShrineLevels",
+            "labyrinth", "labyrinthUpgrades",
         ]);
         for (const [key, value] of Object.entries(previousImportData)) {
             if (!simulatorStateKeys.has(key)) {
@@ -7641,6 +7658,7 @@ function savePreviousPlayer(playerId) {
         houseRooms: player.houseRooms,
         achievements: player.achievements,
         guildCombatBuffLevels: player.guildCombatBuffLevels,
+        labyrinth: normalizeLabyrinthUpgrades(player.labyrinthUpgrades),
     };
     try {
         playerDataMap[playerId] = JSON.stringify(state);
@@ -7652,6 +7670,8 @@ function savePreviousPlayer(playerId) {
 function updateNextPlayer(currentPlayerNumber) {
     let playerImportData = playerDataMap[currentPlayerNumber];
     let importSet = JSON.parse(playerImportData);
+    player.labyrinthUpgrades = normalizeLabyrinthUpgrades(importSet.labyrinth ?? importSet.labyrinthUpgrades);
+    updateLabyrinthUpgradeUI();
     player.guildCombatBuffs = Array.isArray(importSet.guildCombatBuffs)
         ? structuredClone(importSet.guildCombatBuffs)
         : [];
@@ -8801,6 +8821,7 @@ function initExtraBuffSection() {
 
 
 function updateState() {
+    updateLabyrinthUpgradeState();
     updateEquipmentState();
     updateLevels();
     updateFoodState();
@@ -8810,6 +8831,7 @@ function updateState() {
 }
 
 function updateUI() {
+    updateLabyrinthUpgradeUI();
     updateCombatStatsUI();
     updateFoodUI();
     updateDrinksUI();
@@ -8857,6 +8879,7 @@ initDrinksSection();
 initAbilitiesSection();
 initZones();
 initDungeons();
+initLabyrinthUpgradeControls();
 initLabyrinth();
 initTriggerModal();
 initSimulationControls();

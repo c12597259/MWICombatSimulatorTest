@@ -289,7 +289,7 @@
         "rarity": "Rarity Shrine",
         "rarityEffect": "Combat Rare Find +1.5%",
         "scholar": "Scholar Shrine",
-        "scholarEffect": "Combat Experience +0.5%"
+        "scholarEffect": "Combat Experience +1%"
     },
     "fragmentTimeCost": {
         "title": "Key Fragment Time Cost",
@@ -420,6 +420,14 @@
         "waitingForData" : "Waiting for simulation data..."
     },
     "simLabyrinth" : "Sim Labyrinth",
-    "simAllLabyrinths" : "Sim All Labyrinths",
-    "roomLevel" : "Room Level"
+    "roomLevel" : "Room Level",
+    "labyrinthUpgrades": {
+        "title": "Labyrinth upgrades",
+        "description": "Current player upgrades, +1% per level. Personal buffs do not apply in labyrinths.",
+        "combat_damage": "Combat damage",
+        "attack_speed": "Attack speed",
+        "cast_speed": "Cast speed",
+        "critical_rate": "Critical rate",
+        "experience": "Experience"
+    }
 }

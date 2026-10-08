@@ -1195,6 +1195,24 @@ impl EncounterRun {
         if self.full.as_ref().is_some_and(|full| {
             full.lab.is_some() && (self.time - full.encounter_start > 120e9 || ended)
         }) {
+            let success = self.enemies.is_none();
+            let full = self.full.as_mut().unwrap();
+            if let Some(stats) = &mut full.labyrinth_stats {
+                let duration = (self.time - full.encounter_start).max(0.0);
+                if stats.completed == 0 || duration < stats.min_duration {
+                    stats.min_duration = duration;
+                }
+                stats.max_duration = stats.max_duration.max(duration);
+                stats.completed += 1;
+                stats.last_end = self.time;
+                if success {
+                    stats.successes += 1;
+                } else if self.all_players_dead {
+                    stats.deaths += 1;
+                } else {
+                    stats.timeouts += 1;
+                }
+            }
             self.enemies = None;
             self.queue.clear();
             self.at(EventKind::Start, self.time, None)?;

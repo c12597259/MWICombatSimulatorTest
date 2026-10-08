@@ -1,3 +1,4 @@
+import { normalizeLabyrinthUpgrades } from '../labyrinthUpgrades.js';
 import Ability from "./ability";
 import CombatUnit from "./combatUnit";
 import Consumable from "./consumable";
@@ -49,6 +50,7 @@ class Player extends CombatUnit {
         player.magicLevel = dto.magicLevel;
 
         player.hrid = dto.hrid;
+        player.labyrinthUpgrades = normalizeLabyrinthUpgrades(dto.labyrinthUpgrades ?? dto.labyrinth);
 
         for (const [key, value] of Object.entries(dto.equipment)) {
             player.equipment[key] = value ? Equipment.createFromDTO(value) : null;

@@ -13,7 +13,10 @@ function simulationBuildSources(directory) {
 }
 
 module.exports = (env, argv = {}) => ({
-  entry: './src/main.js',
+  entry: {
+    main: { import: './src/main.js', filename: 'bundle.js' },
+    labyrinth: { import: './src/labyrinthWorker.js', filename: 'labyrinth-worker.js', publicPath: '', chunkLoading: 'import-scripts' },
+  },
   output: {
     path: path.resolve(__dirname, 'dist'),
     filename: 'bundle.js',
