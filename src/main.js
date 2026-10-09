@@ -5083,10 +5083,13 @@ function showKills(simResult, playerToDisplay) {
         ? calcExpectedDropMap(simResult, playerToDisplay)
         : new Map();
 
-    for (let [name, dropAmount] of expectedDropMap.entries()) {
+    const dropRows = sortSimulationHistoryDropRows(
+        [...expectedDropMap].map(([key, value]) => ({ key, value })),
+    );
+    for (const { key: name, value: dropAmount } of dropRows) {
         let dropRow = createRow(
             ["col-md-6", "col-md-6 text-end"],
-            [name, dropAmount.toLocaleString()]
+            [name, formatSimulationHistoryDropNumber(dropAmount, name)]
         );
         dropRow.firstElementChild.setAttribute("data-i18n", "itemNames." + name);
         newDropChildren.push(dropRow);
