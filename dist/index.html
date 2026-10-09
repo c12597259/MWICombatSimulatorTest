@@ -3,6 +3,12 @@
 
 <head>
     <style>
+        .item-quick-switch { display: flex; align-items: stretch; gap: 4px; min-width: 0; }
+        .item-quick-switch > select { flex: 1 1 0; min-width: 0; width: 0; }
+        .drink-quick-switch { min-width: calc(9rem + 64px); }
+        .item-quick-switch > .item-quick-switch-button { flex: 0 0 28px; padding: 0; font-size: 1.1rem; }
+        body.dark-mode .item-quick-switch-button { color: #ddd; }
+        .item-quick-switch > .item-quick-switch-button[aria-pressed="true"] { color: #ffc107; }
         .form-control {
             min-width: 3.60rem
         }

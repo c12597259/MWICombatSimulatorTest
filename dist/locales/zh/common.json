@@ -242,6 +242,10 @@
     "patchNotes": "更新日志",
     "calcEPHProfit": "计算EPH利润",
     "controls": {
+        "upgradeDrink": "提高饮料品质",
+        "downgradeDrink": "降低饮料品质",
+        "refineEquipment": "切换为精炼装备",
+        "unrefineEquipment": "切换为未精炼装备",
         "title": "操作区域",
         "battleQueue": "战斗队列?",
         "startSimulation": "开始模拟",

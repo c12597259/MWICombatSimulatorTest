@@ -242,6 +242,10 @@
     "patchNotes": "Patch Notes",
     "calcEPHProfit": "Calc EPH Profit",
     "controls": {
+        "upgradeDrink": "Upgrade drink quality",
+        "downgradeDrink": "Downgrade drink quality",
+        "refineEquipment": "Switch to refined equipment",
+        "unrefineEquipment": "Switch to unrefined equipment",
         "title": "Controls",
         "battleQueue": "BattleQueue?",
         "startSimulation": "Start Simulation",

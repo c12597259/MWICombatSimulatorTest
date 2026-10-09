@@ -61,6 +61,7 @@ async function main() {
                     this.addEventListener('message', ({ data }) => this.testMessages.push(data));
                     window.testWorkers.push(this);
                 }
+                postMessage(message) { this.lastRequest = structuredClone(message); return super.postMessage(message); }
             };
         });
         await page.goto(base, { waitUntil: 'networkidle', timeout: 60000 });
@@ -153,11 +154,48 @@ async function main() {
         await page.waitForFunction(() => document.getElementById('teamPresetComparisonBar').classList.contains('d-none'));
         report.checks.push({name:'private entry hidden for visitors, guarded clicks, late bridge registration and removal'});
 
+        // Variant buttons must use the same state updates as selecting an item.
+        await page.locator('#selectDrink_0').selectOption('/items/super_magic_coffee');
+        await page.locator('#buttonDrinkQuality_0_up').click();
+        assert.equal(await page.locator('#selectDrink_0').inputValue(), '/items/ultra_magic_coffee');
+        assert.equal(await page.locator('#buttonDrinkQuality_0_up').isDisabled(), true);
+        await page.locator('#buttonDrinkQuality_0_down').click();
+        await page.locator('#buttonDrinkQuality_0_down').click();
+        assert.equal(await page.locator('#selectDrink_0').inputValue(), '/items/magic_coffee');
+        assert.equal(await page.locator('#buttonDrinkQuality_0_down').isDisabled(), true);
+        await page.locator('#selectDrink_0').selectOption('/items/lucky_coffee');
+        assert.equal(await page.locator('#buttonDrinkQuality_0_up').isDisabled(), true);
+        assert.equal(await page.locator('#buttonDrinkQuality_0_down').isDisabled(), true);
+        await page.locator('#selectDrink_0').selectOption('/items/super_magic_coffee');
+        await page.locator('#buttonDrinkQuality_0_up').click();
+        await page.locator('#selectEquipment_body').selectOption('/items/anchorbound_plate_body');
+        await page.locator('#inputEquipmentEnhancementLevel_body').fill('10');
+        await page.locator('#selectEquipment_body_refinement').click();
+        assert.equal(await page.locator('#selectEquipment_body').inputValue(), '/items/anchorbound_plate_body_refined');
+        assert.equal(await page.locator('#inputEquipmentEnhancementLevel_body').inputValue(), '10');
+        assert.equal(await page.locator('#selectEquipment_body_refinement').getAttribute('aria-pressed'), 'true');
+        await page.locator('#selectEquipment_body_refinement').click();
+        assert.equal(await page.locator('#selectEquipment_body').inputValue(), '/items/anchorbound_plate_body');
+        await page.locator('#selectEquipment_body').selectOption('');
+        assert.equal(await page.locator('#selectEquipment_body_refinement').isVisible(), false);
+        await page.locator('#selectEquipment_body').selectOption('/items/anchorbound_plate_body');
+        await page.locator('#selectEquipment_body_refinement').click();
+        await page.locator('#playerTab .nav-link').nth(1).click();
+        assert.equal(await page.locator('#selectEquipment_body_refinement').isVisible(), false);
+        await page.locator('#playerTab .nav-link').nth(0).click();
+        assert.equal(await page.locator('#selectEquipment_body_refinement').getAttribute('aria-pressed'), 'true');
+        assert.equal(await page.locator('#selectDrink_0').inputValue(), '/items/ultra_magic_coffee');
+        report.checks.push({name:'drink quality limits, refinement toggle, enhancement retention and player switching'});
+
         // Exercise the real controls, renderer and history, not only Workers.
         await page.locator('#buttonSimulationSetup').click();
         await page.locator('#inputSimulationTime').fill('1');
         await page.locator('#player1').check();
         await page.locator('#buttonStartSimulation').click();
+        const switchedPlayer = await page.evaluate(() => window.testWorkers[0].lastRequest.players[0]);
+        assert.equal(switchedPlayer.drinks[0].hrid, '/items/ultra_magic_coffee');
+        assert.equal(switchedPlayer.equipment['/equipment_types/body'].hrid, '/items/anchorbound_plate_body_refined');
+        assert.equal(switchedPlayer.equipment['/equipment_types/body'].enhancementLevel, 10);
         await page.waitForFunction(()=>window.testWorkers[0].testMessages.some(m=>m.type==='simulation_result'),null,{timeout:120000});
         await page.waitForFunction(()=>!document.querySelector('#buttonStartSimulation').disabled);
         assert.equal(await page.evaluate(()=>window.testWorkers[0].testMessages.find(m=>m.type==='simulation_result').execution.engine),'rust-wasm-worker');

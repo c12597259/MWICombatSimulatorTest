@@ -91,6 +91,46 @@ import {
 } from "./zoneSelection.js";
 
 import patchNote from "../patchNote.json";
+import { drinkQualityTarget, refinementTargets } from './itemQuickSwitch.js';
+
+const equipmentRefinementTargets = refinementTargets(itemDetailMap);
+
+function wrapQuickSwitchSelect(select) {
+    const group = document.createElement('div');
+    group.className = 'item-quick-switch';
+    select.before(group);
+    group.append(select);
+    return group;
+}
+
+function quickSwitchButton(symbol, id, action) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.id = id;
+    button.className = 'btn btn-outline-secondary item-quick-switch-button';
+    button.textContent = symbol;
+    button.addEventListener('click', action);
+    return button;
+}
+
+function setQuickSwitchLabel(button, key, fallback) {
+    const label = getLocalizedHistoryValue(`common:controls.${key}`, fallback);
+    button.title = label;
+    button.setAttribute('aria-label', label);
+}
+
+function updateRefinementButtons() {
+    document.querySelectorAll('[data-refinement-select]').forEach(button => {
+        const select = document.getElementById(button.dataset.refinementSelect);
+        const target = equipmentRefinementTargets.get(select.value);
+        button.hidden = !target;
+        button.disabled = select.disabled || !target;
+        button.classList.toggle('active', target?.refined === true);
+        button.setAttribute('aria-pressed', String(target?.refined === true));
+        setQuickSwitchLabel(button, target?.refined ? 'unrefineEquipment' : 'refineEquipment',
+            target?.refined ? 'Switch to unrefined equipment' : 'Switch to refined equipment');
+    });
+}
 
 const ONE_SECOND = 1e9;
 const ONE_HOUR = 60 * 60 * ONE_SECOND;
@@ -237,6 +277,19 @@ function initEquipmentSelect(equipmentType) {
     selectElement.addEventListener("change", (event) => {
         equipmentSelectHandler(event, equipmentType);
     });
+    // Main-hand and two-hand items share one select.
+    if (!document.getElementById(`${selectId}_refinement`)) {
+        const group = wrapQuickSwitchSelect(selectElement);
+        const button = quickSwitchButton('★', `${selectId}_refinement`, () => {
+            const target = equipmentRefinementTargets.get(selectElement.value);
+            if (!target || selectElement.disabled) return;
+            selectElement.value = target.hrid;
+            selectElement.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        button.dataset.refinementSelect = selectId;
+        button.hidden = true;
+        group.prepend(button);
+    }
 }
 
 function initHouseRoomsModal() {
@@ -776,6 +829,16 @@ function initDrinksSection() {
         }
 
         element.addEventListener("change", drinkSelectHandler);
+        const group = wrapQuickSwitchSelect(element);
+        group.classList.add('drink-quick-switch');
+        for (const [direction, symbol, suffix] of [[1, '↑', 'up'], [-1, '↓', 'down']]) {
+            group.append(quickSwitchButton(symbol, `buttonDrinkQuality_${i}_${suffix}`, () => {
+                const target = drinkQualityTarget(element.value, direction, itemDetailMap);
+                if (!target || element.disabled) return;
+                element.value = target;
+                element.dispatchEvent(new Event('change', { bubbles: true }));
+            }));
+        }
     }
 }
 
@@ -802,6 +865,12 @@ function updateDrinksUI() {
 
         selectElement.disabled = i >= player.combatDetails.combatStats.drinkSlots;
         triggerButton.disabled = i >= player.combatDetails.combatStats.drinkSlots || !drinks[i];
+        for (const [direction, suffix, key, fallback] of [[1, 'up', 'upgradeDrink', 'Upgrade drink quality'],
+            [-1, 'down', 'downgradeDrink', 'Downgrade drink quality']]) {
+            const button = document.getElementById(`buttonDrinkQuality_${i}_${suffix}`);
+            button.disabled = selectElement.disabled || !drinkQualityTarget(selectElement.value, direction, itemDetailMap);
+            setQuickSwitchLabel(button, key, fallback);
+        }
     }
 }
 
@@ -8798,6 +8867,7 @@ function updateState() {
 }
 
 function updateUI() {
+    updateRefinementButtons();
     updateLabyrinthUpgradeUI();
     updateCombatStatsUI();
     updateFoodUI();
