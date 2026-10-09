@@ -155,6 +155,23 @@ async function main() {
         report.checks.push({name:'private entry hidden for visitors, guarded clicks, late bridge registration and removal'});
 
         // Variant buttons must use the same state updates as selecting an item.
+        const originalViewport = page.viewportSize();
+        for (const width of [1920, 1440, 1024, 768, 390]) {
+            await page.setViewportSize({width, height: 1000});
+            for (let i = 0; i < 3; i++) {
+                const boxes = await page.evaluate(i => {
+                    const rect = id => { const r = document.getElementById(id).getBoundingClientRect(); return {top:r.top,left:r.left,right:r.right,width:r.width}; };
+                    return [rect(`selectDrink_${i}`), rect(`buttonDrinkQuality_${i}_up`), rect(`buttonDrinkQuality_${i}_down`), rect(`buttonDrinkTrigger_${i}`)];
+                }, i);
+                assert.ok(boxes[0].width > 0, `drink select width at ${width}`);
+                for (let j = 1; j < boxes.length; j++) {
+                    assert.ok(Math.abs(boxes[j].top - boxes[0].top) < 2, `drink controls remain on one line at ${width}`);
+                    assert.ok(boxes[j].left >= boxes[j-1].right, `drink controls do not overlap at ${width}`);
+                }
+                assert.ok(boxes[3].right <= width, `drink controls fit viewport ${width}`);
+            }
+        }
+        await page.setViewportSize(originalViewport);
         await page.locator('#selectDrink_0').selectOption('/items/super_magic_coffee');
         await page.locator('#buttonDrinkQuality_0_up').click();
         assert.equal(await page.locator('#selectDrink_0').inputValue(), '/items/ultra_magic_coffee');

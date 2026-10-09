@@ -5,7 +5,11 @@
     <style>
         .item-quick-switch { display: flex; align-items: stretch; gap: 4px; min-width: 0; }
         .item-quick-switch > select { flex: 1 1 0; min-width: 0; width: 0; }
-        .drink-quick-switch { min-width: calc(9rem + 64px); }
+        .drink-row.row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-left: 0; margin-right: 0; }
+        .drink-row.row > div { min-width: 0; width: auto; padding: 0; }
+        @media (max-width: 1199px) {
+            .consumables-column { min-width: min(100%, 340px); flex-grow: 1; }
+        }
         .item-quick-switch > .item-quick-switch-button { flex: 0 0 28px; padding: 0; font-size: 1.1rem; }
         body.dark-mode .item-quick-switch-button { color: #ddd; }
         .item-quick-switch > .item-quick-switch-button[aria-pressed="true"] { color: #ffc107; }
@@ -715,7 +719,7 @@
                     </div>
                 </div>
                 <div class="row mb-3">
-                    <div class="col-md-5">
+                    <div class="col-md-5 consumables-column">
                         <!-- #region Food -->
                         <div class="row mb-3">
                             <b data-i18n="consumableSlot.food">Food</b>
@@ -767,7 +771,7 @@
                         <div class="row mb-3">
                             <b data-i18n="consumableSlot.drink">Drinks</b>
                         </div>
-                        <div class="row mb-2">
+                        <div class="row mb-2 drink-row">
                             <div class="col">
                                 <select id="selectDrink_0" class="form-select">
                                     <option value="" data-i18n="characterSelectPage.slots.empty">Empty</option>
@@ -781,7 +785,7 @@
                                 </button>
                             </div>
                         </div>
-                        <div class="row mb-2">
+                        <div class="row mb-2 drink-row">
                             <div class="col">
                                 <select id="selectDrink_1" class="form-select">
                                     <option value="" data-i18n="characterSelectPage.slots.empty">Empty</option>
@@ -795,7 +799,7 @@
                                 </button>
                             </div>
                         </div>
-                        <div class="row mb-2">
+                        <div class="row mb-2 drink-row">
                             <div class="col">
                                 <select id="selectDrink_2" class="form-select">
                                     <option value="" data-i18n="characterSelectPage.slots.empty">Empty</option>
