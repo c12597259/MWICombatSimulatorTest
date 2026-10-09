@@ -34,7 +34,7 @@ import {
     GUILD_COMBAT_SHRINE_DETAILS,
     normalizeGuildCombatShrineLevel,
     normalizeGuildCombatShrineLevels,
-    resolveGuildCombatShrineLevels,
+    resolveImportedGuildCombatShrineLevels,
 } from "./guildCombatShrines.js";
 import { compareTeamPresetWithCurrent } from "./teamPresetComparison.js";
 import {
@@ -7447,10 +7447,7 @@ function doSoloImport() {
     player.guildCombatBuffs = Array.isArray(importSet.guildCombatBuffs)
         ? structuredClone(importSet.guildCombatBuffs)
         : [];
-    setGuildCombatBuffLevels(resolveGuildCombatShrineLevels(
-        importSet.guildCombatBuffLevels ?? importSet.guildShrineLevels,
-        player.guildCombatBuffs,
-    ));
+    setGuildCombatBuffLevels(resolveImportedGuildCombatShrineLevels(importSet));
     ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"].forEach((skill) => {
         let levelInput = document.getElementById("inputLevel_" + skill);
         if (skill == "melee" && !importSet.player["meleeLevel"] && importSet.player["powerLevel"]) {
@@ -7685,10 +7682,7 @@ function updateNextPlayer(currentPlayerNumber) {
     player.guildCombatBuffs = Array.isArray(importSet.guildCombatBuffs)
         ? structuredClone(importSet.guildCombatBuffs)
         : [];
-    setGuildCombatBuffLevels(resolveGuildCombatShrineLevels(
-        importSet.guildCombatBuffLevels ?? importSet.guildShrineLevels,
-        player.guildCombatBuffs,
-    ));
+    setGuildCombatBuffLevels(resolveImportedGuildCombatShrineLevels(importSet));
     ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"].forEach((skill) => {
         let levelInput = document.getElementById("inputLevel_" + skill);
         if (skill == "melee" && !importSet.player["meleeLevel"] && importSet.player["powerLevel"]) {

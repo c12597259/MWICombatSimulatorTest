@@ -44,6 +44,11 @@ export function normalizeGuildCombatShrineLevel(level) {
 }
 
 function findShrineKey(key, entry) {
+    const aliases = { power: 'force', rhythm: 'tempo', rare: 'rarity' };
+    for (const value of [key, entry?.shrineHrid]) {
+        const name = String(value ?? '').toLowerCase().split('/').pop();
+        if (Object.hasOwn(aliases, name)) return aliases[name];
+    }
     const candidate = `${String(key ?? "")} ${String(entry?.shrineHrid ?? "")}`.toLowerCase();
     return GUILD_COMBAT_SHRINE_DETAILS.find(({ key: shrineKey }) => (
         candidate === shrineKey
@@ -119,6 +124,15 @@ export function resolveGuildCombatShrineLevels(levels, guildCombatBuffs = []) {
     return hasExplicitGuildCombatShrineLevels(levels)
         ? normalizeGuildCombatShrineLevels(levels)
         : inferGuildCombatShrineLevels(guildCombatBuffs);
+}
+
+// Importers use either the legacy guildShrine object or the five-entry shrines map.
+// Our saved levels take precedence, including explicit zeroes after manual edits.
+export function resolveImportedGuildCombatShrineLevels(data = {}) {
+    return resolveGuildCombatShrineLevels(
+        data.guildCombatBuffLevels ?? data.guildShrineLevels ?? data.shrines ?? data.guildShrine,
+        data.guildCombatBuffs,
+    );
 }
 
 export function isKnownGuildCombatShrineBuffType(typeHrid) {

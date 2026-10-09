@@ -13,7 +13,7 @@ import {
     getNormalizedGuildCombatShrineBoosts,
     normalizeGuildCombatShrineLevels,
     isKnownGuildCombatShrineBuffType,
-    resolveGuildCombatShrineLevels,
+    resolveImportedGuildCombatShrineLevels,
 } from "../guildCombatShrines.js";
 
 class Player extends CombatUnit {
@@ -66,10 +66,7 @@ class Player extends CombatUnit {
         });
 
         player.achievements = new Achievement(dto.achievements);
-        player.guildCombatBuffLevels = resolveGuildCombatShrineLevels(
-            dto.guildCombatBuffLevels ?? dto.guildShrineLevels,
-            dto.guildCombatBuffs,
-        );
+        player.guildCombatBuffLevels = resolveImportedGuildCombatShrineLevels(dto);
         player.guildCombatBuffs = (Array.isArray(dto.guildCombatBuffs) ? dto.guildCombatBuffs : [])
             .filter((buff) => typeof buff?.typeHrid === "string" && buff.typeHrid.startsWith("/buff_types/"))
             .filter((buff) => !isKnownGuildCombatShrineBuffType(buff.typeHrid))

@@ -23,7 +23,30 @@ const {
     getGuildCombatShrineBoosts,
     inferGuildCombatShrineLevels,
     normalizeGuildCombatShrineLevels,
+    resolveImportedGuildCombatShrineLevels,
 } = await import(shrineModuleUrl);
+
+test('imports the v1.5.7 guildShrine format sent to our simulator', () => {
+    assert.deepEqual(resolveImportedGuildCombatShrineLevels({guildShrine: {force: 12, tempo: 8, spirit: 20}}),
+        {force: 12, tempo: 8, spirit: 20, rarity: 0, scholar: 0});
+});
+
+test('imports all five alternate shrine names and prefers them over legacy three-shrine data', () => {
+    assert.deepEqual(resolveImportedGuildCombatShrineLevels({
+        guildShrine: {force: 19, tempo: 19, spirit: 19},
+        shrines: {'/shrines/power': 12, '/shrines/rhythm': 8, '/shrines/spirit': {level: 4},
+            '/shrines/rare': 7, '/shrines/scholar': 3},
+    }), {force: 12, tempo: 8, spirit: 4, rarity: 7, scholar: 3});
+});
+
+test('saved explicit levels override stale importer fields and buffs without double counting', () => {
+    const buffs = [{typeHrid: '/buff_types/damage', ratioBoost: 0.036, flatBoost: 0}];
+    assert.deepEqual(resolveImportedGuildCombatShrineLevels({guildCombatBuffLevels: {force: 0},
+        guildShrine: {force: 12}, shrines: {'/shrines/power': 12}, guildCombatBuffs: buffs}),
+    {force: 0, tempo: 0, spirit: 0, rarity: 0, scholar: 0});
+    assert.equal(resolveImportedGuildCombatShrineLevels({guildCombatBuffs: buffs}).force, 12);
+    assert.deepEqual(resolveImportedGuildCombatShrineLevels({}), {force: 0, tempo: 0, spirit: 0, rarity: 0, scholar: 0});
+});
 
 test("adds per-character guild shrine buffs to permanent combat buffs", () => {
     const unit = new CombatUnit();
