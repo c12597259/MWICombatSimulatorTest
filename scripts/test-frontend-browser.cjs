@@ -38,7 +38,7 @@ async function main() {
         const relative = pathname.replace(/^\/MWICombatSimulatorTest\/dist\//, '').replace(/^\//, '') || 'index.html';
         const file = path.resolve(dist, relative);
         if (!file.startsWith(dist + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) { res.writeHead(404).end(); return; }
-        res.setHeader('Content-Type', ({ '.wasm': 'application/wasm', '.js': 'text/javascript', '.json': 'application/json', '.html': 'text/html' })[path.extname(file)] || 'text/plain');
+        res.setHeader('Content-Type', ({ '.wasm': 'application/wasm', '.js': 'text/javascript', '.json': 'application/json', '.html': 'text/html', '.svg': 'image/svg+xml' })[path.extname(file)] || 'text/plain');
         res.end(fs.readFileSync(file));
     });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -230,6 +230,14 @@ async function main() {
         }));
         assert.ok(historyRecords.length > 0);
         assert.ok(historyRecords[0].teamSnapshot);
+        await page.waitForFunction(() => {
+            const icon = document.querySelector('#simulationResultDrops .drop-inventory-tile svg');
+            return icon && icon.getBBox().width > 0;
+        });
+        const dropTile = page.locator('#simulationResultDrops .drop-inventory-tile').first();
+        assert.equal(await dropTile.getAttribute('data-item-hrid'), '/items/coin');
+        await dropTile.click();
+        assert.equal(await page.locator('#simulationResultDrops .drop-inventory-detail').textContent(), await dropTile.getAttribute('title'));
         report.checks.push({name:'page single run, rendered results and saved history; temporary export removed'});
         await page.locator('#buttonSimulationSetup').click();
         await page.locator('#inputSimulationTime').fill('2500');

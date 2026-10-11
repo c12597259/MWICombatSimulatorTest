@@ -275,6 +275,8 @@
     "noRNGRevenue": "No RNG Revenue",
     "dropTotal": "Drops (Total)",
     "expectedDropsTotal": "Expected Drops (Total)",
+    "dropIcons": "Icons",
+    "dropText": "Text",
     "noRNGDrops": "No RNG Drops",
     "guildCombatBuffs": {
         "title": "Guild Combat Shrines",

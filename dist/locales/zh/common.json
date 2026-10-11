@@ -275,6 +275,8 @@
     "noRNGRevenue": "期望收入",
     "dropTotal": "掉落物合计",
     "expectedDropsTotal": "期望掉落物合计",
+    "dropIcons": "图标",
+    "dropText": "纯文字",
     "noRNGDrops": "非随机掉落物",
     "guildCombatBuffs": {
         "title": "公会战斗神龛",

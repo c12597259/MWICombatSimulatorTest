@@ -91,6 +91,7 @@ import {
 } from "./zoneSelection.js";
 
 import patchNote from "../patchNote.json";
+import { createDropInventory, updateDropInventoryLabels } from './dropInventory.js';
 import { drinkQualityTarget, refinementTargets } from './itemQuickSwitch.js';
 
 const equipmentRefinementTargets = refinementTargets(itemDetailMap);
@@ -5083,17 +5084,12 @@ function showKills(simResult, playerToDisplay) {
         ? calcExpectedDropMap(simResult, playerToDisplay)
         : new Map();
 
-    const dropRows = sortSimulationHistoryDropRows(
-        [...expectedDropMap].map(([key, value]) => ({ key, value })),
-    );
-    for (const { key: name, value: dropAmount } of dropRows) {
-        let dropRow = createRow(
-            ["col-md-6", "col-md-6 text-end"],
-            [name, formatSimulationHistoryDropNumber(dropAmount, name)]
-        );
-        dropRow.firstElementChild.setAttribute("data-i18n", "itemNames." + name);
-        newDropChildren.push(dropRow);
-    }
+    const dropRows = [...expectedDropMap].map(([key, value]) => ({ key, value }));
+    if (dropRows.length) newDropChildren.push(createDropInventory(dropRows, {
+        itemName: getSimulationHistoryItemName,
+        formatQuantity: formatSimulationHistoryDropNumber,
+        labels: getDropDisplayLabels(),
+    }));
 
     resultDiv.replaceChildren(...newChildren);
     dropsResultDiv.replaceChildren(...newDropChildren);
@@ -8880,7 +8876,12 @@ if (localStorage.getItem('darkModeEnabled') === 'true') {
     body.classList.add('dark-mode');
 }
 
+function getDropDisplayLabels() {
+    return { icons: getLocalizedHistoryValue('common:dropIcons', 'Icons'), text: getLocalizedHistoryValue('common:dropText', 'Text') };
+}
+
 function updateContent() {
+    updateDropInventoryLabels(document.getElementById('simulationResultDrops'), getSimulationHistoryItemName, getDropDisplayLabels());
     document.querySelectorAll('[data-i18n]').forEach(function (element) {
         const key = element.getAttribute('data-i18n');
         if (key) {
