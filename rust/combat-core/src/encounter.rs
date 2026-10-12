@@ -531,6 +531,7 @@ impl EncounterRun {
                             self.time == 0.0,
                             &self.data,
                             &mut self.rng,
+                            false,
                         )?;
                     }
                     self.at(EventKind::Regen, self.time + REGEN, None)?;
@@ -543,6 +544,7 @@ impl EncounterRun {
                         true,
                         &self.data,
                         &mut self.rng,
+                        false,
                     )?;
                 }
                 self.at(EventKind::Regen, self.time + REGEN, None)?;
@@ -552,6 +554,7 @@ impl EncounterRun {
                         false,
                         &self.data,
                         &mut self.rng,
+                        false,
                     )?;
                 }
                 let mut enrage = CombatEvent::new(EventKind::Enrage, self.time + ENRAGE, None);

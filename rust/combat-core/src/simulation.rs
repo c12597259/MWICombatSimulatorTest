@@ -172,7 +172,13 @@ impl EncounterRun {
         let mut enemies = Vec::new();
         for entry in entries {
             let mut unit = crate::runtime_unit::RuntimeUnit::new(entry, &self.data)?;
-            unit.reset(self.time, false, &self.data, &mut self.rng)?;
+            unit.reset(
+                self.time,
+                false,
+                &self.data,
+                &mut self.rng,
+                full.lab.is_some(),
+            )?;
             full.result.alive(&unit.hrid, true, self.time);
             let id = self.units.spawn(unit);
             self.unit_mut(id).assign_buff_identities(id.index());

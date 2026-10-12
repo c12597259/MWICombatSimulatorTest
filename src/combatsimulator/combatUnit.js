@@ -569,7 +569,7 @@ class CombatUnit {
         return boost;
     }
 
-    reset(currentTime = 0) {
+    reset(currentTime = 0, fixedOpeningCooldown = false) {
         this.clearCCs();
         
         // 只有玩家在地下城团灭重开时保留buff和CD，敌人始终完全重置
@@ -577,7 +577,7 @@ class CombatUnit {
             // 首次战斗开始 或 敌人重置：完全重置
             this.clearBuffs();
             // this.updateCombatDetails();
-            this.resetCooldowns(currentTime);
+            this.resetCooldowns(currentTime, fixedOpeningCooldown);
         } else {
             // 地下城团灭重开（仅玩家）：只移除过期buff，保留CD
             this.removeExpiredBuffs(currentTime);
@@ -588,7 +588,7 @@ class CombatUnit {
         this.combatDetails.currentManapoints = this.combatDetails.maxManapoints;
     }
 
-    resetCooldowns(currentTime = 0) {
+    resetCooldowns(currentTime = 0, fixedOpeningCooldown = false) {
         this.food.filter((food) => food != null).forEach((food) => (food.lastUsed = Number.MIN_SAFE_INTEGER));
         this.drinks.filter((drink) => drink != null).forEach((drink) => (drink.lastUsed = Number.MIN_SAFE_INTEGER));
 
@@ -604,7 +604,9 @@ class CombatUnit {
                     if (haste > 0) {
                         cooldownDuration = cooldownDuration * 100 / (100 + haste);
                     }
-                    ability.lastUsed = currentTime - Math.floor(cooldownDuration * 0.5) + Math.floor(Math.random() * cooldownDuration * 0.5);
+                    // Labyrinth starts at half cooldown; zones and dungeons randomize the remaining half.
+                    const randomDelay = fixedOpeningCooldown ? 0 : Math.floor(Math.random() * cooldownDuration * 0.5);
+                    ability.lastUsed = currentTime - Math.floor(cooldownDuration * 0.5) + randomDelay;
                 }
             });
     }

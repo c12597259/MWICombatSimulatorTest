@@ -22,6 +22,42 @@ process.on('exit', () => { engine?.free(); });
 const dto = (level = 100) => ({ hrid: 'player1', ...Object.fromEntries(['stamina','intelligence','attack','melee','defense','ranged','magic'].map(name => [name + 'Level', level])), equipment: {}, food: [], drinks: [], abilities: [], houseRooms: {}, achievements: {}, guildCombatBuffLevels: {} });
 const request = player => ({ players: [player], labyrinth: { labyrinthHrid: '/monsters/giant_scorpion', roomLevel: 20, crates: [] }, simulationTimeLimit: 1200e9, extra: {} });
 
+test('monster openings use half cooldown only in labyrinth, including restarts and haste', async () => {
+    await ready;
+    const monster = new api.Labyrinth('/monsters/giant_scorpion', 100).getMonster()[0];
+    monster.reset();
+    const originalRandom = Math.random;
+    try {
+        for (const haste of [0, 100]) {
+            monster.combatDetails.combatStats.abilityHaste = haste;
+            for (const time of [0, 120e9, 240e9]) {
+                Math.random = () => { throw new Error('Fixed openings must not draw RNG'); };
+                monster.resetCooldowns(time, true);
+                for (const ability of monster.abilities.filter(Boolean)) {
+                    const cd = ability.cooldownDuration * 100 / (100 + haste);
+                    assert.equal(ability.lastUsed + cd - time, cd - Math.floor(cd / 2));
+                }
+                for (const roll of [0, 0.5, 0.999999]) {
+                    let calls = 0;
+                    Math.random = () => { calls++; return roll; };
+                    monster.resetCooldowns(time);
+                    const abilities = monster.abilities.filter(Boolean);
+                    assert.equal(calls, abilities.length);
+                    for (const ability of abilities) {
+                        const cd = ability.cooldownDuration * 100 / (100 + haste);
+                        const remaining = ability.lastUsed + cd - time;
+                        assert(remaining >= cd / 2 && remaining <= cd);
+                        if (roll > 0) assert(remaining > cd / 2);
+                    }
+                }
+            }
+        }
+        const player = api.Player.createFromDTO({ ...dto(), abilities: [{ hrid: '/abilities/poke', level: 1, triggers: [] }] });
+        player.reset(0, true);
+        assert.equal(player.abilities[0].lastUsed, Number.MIN_SAFE_INTEGER);
+    } finally { Math.random = originalRandom; }
+});
+
 test('upgrade imports use 1% per level and never double count DTO levels plus raw buffs', async () => {
     await ready;
     const player = { ...dto(), labyrinthUpgrades: { '/buff_uniques/labyrinth_upgrade_combat_damage': 5 } };
@@ -73,7 +109,17 @@ for (const [name, level, roomLevel, timeLimit, defense] of [
     const stats = { completed: 0, successes: 0, deaths: 0, timeouts: 0, lastEnd: 0, minDuration: 0, maxDuration: 0 };
     let start = 0;
     const startEncounter = simulator.startNewEncounter.bind(simulator);
-    simulator.startNewEncounter = function () { const result = startEncounter(); start = this.simulationTime; return result; };
+    simulator.startNewEncounter = function () {
+        const result = startEncounter(); start = this.simulationTime;
+        for (const enemy of this.enemies) {
+            for (const ability of enemy.abilities.filter(Boolean)) {
+                const haste = enemy.combatDetails.combatStats.abilityHaste;
+                const cd = ability.cooldownDuration * 100 / (100 + Math.max(0, haste));
+                assert(Math.abs((ability.lastUsed + cd - start) - (cd - Math.floor(cd / 2))) < 1, 'Opening cooldown differs by at least 1 ns');
+            }
+        }
+        return result;
+    };
     const check = simulator.checkEncounterEnd.bind(simulator);
     simulator.checkEncounterEnd = function () {
         const before = this.simResult.encounters, ended = check();

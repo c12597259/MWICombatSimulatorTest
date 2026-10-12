@@ -415,7 +415,7 @@ class CombatSimulator extends EventTarget {
         }
 
         this.enemies.forEach((enemy) => {
-            enemy.reset(this.simulationTime);
+            enemy.reset(this.simulationTime, Boolean(this.labyrinth));
             this.simResult.updateTimeSpentAlive(enemy.hrid, true, this.simulationTime);
             //console.log(enemy.hrid, "spawned");
         });

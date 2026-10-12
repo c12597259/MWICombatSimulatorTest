@@ -153,6 +153,7 @@ impl RuntimeUnit {
         first: bool,
         data: &DefinitionSet,
         rng: &mut CombatRng,
+        fixed_opening_cooldown: bool,
     ) -> Result<(), String> {
         self.clear_cc();
         if first && self.player {
@@ -173,8 +174,13 @@ impl RuntimeUnit {
                     } else {
                         ability.cooldown
                     };
-                    ability.last_used =
-                        time - (cd * 0.5).floor() + (rng.next_f64() * cd * 0.5).floor();
+                    // Fixed labyrinth openings must not consume a random draw.
+                    let random_delay = if fixed_opening_cooldown {
+                        0.0
+                    } else {
+                        (rng.next_f64() * cd * 0.5).floor()
+                    };
+                    ability.last_used = time - (cd * 0.5).floor() + random_delay;
                 }
             }
         }
@@ -280,5 +286,55 @@ impl RuntimeUnit {
             active: value != 0.0 && !value.is_nan(),
             object: false,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn monster_opening_cooldowns_respect_context_haste_and_restarts() {
+        for haste in [0.0, 100.0] {
+            let data = DefinitionSet::parse(&json!({
+                "schemaVersion": 1, "sourceSha256": "test", "definitions": {
+                    "actionDetailMap": {}, "itemDetailMap": {},
+                    "abilityDetailMap": {"/abilities/test": {
+                        "cooldownDuration": 10e9, "abilityEffects": [], "defaultCombatTriggers": []
+                    }},
+                    "combatMonsterDetailMap": {"/monsters/test": {
+                        "abilities": [{"abilityHrid": "/abilities/test", "level": 1, "minDifficultyTier": 0}],
+                        "combatDetails": {"combatStats": {
+                            "combatStyleHrids": ["/combat_styles/stab"], "abilityHaste": haste
+                        }}
+                    }}
+                }
+            }).to_string(), "test").unwrap();
+            let case = serde_json::from_value(json!({"input": {
+                "kind": "monster", "hrid": "/monsters/test", "roomLevel": 100
+            }}))
+            .unwrap();
+            let mut unit = RuntimeUnit::new(case, &data).unwrap();
+            let mut rng = CombatRng::new(123);
+            let cd: f64 = 10e9 * 100.0 / (100.0 + haste);
+            for time in [0.0, 120e9, 240e9] {
+                let calls = rng.calls();
+                unit.reset(time, false, &data, &mut rng, true).unwrap();
+                assert_eq!(unit.attributes.details.combat_stats.ability_haste, haste);
+                let remaining = unit.abilities[0].as_ref().unwrap().last_used + cd - time;
+                assert_eq!(remaining, cd / 2.0);
+                assert_eq!(rng.calls(), calls);
+            }
+            let mut remaining_values = vec![];
+            for _ in 0..16 {
+                let calls = rng.calls();
+                unit.reset(120e9, false, &data, &mut rng, false).unwrap();
+                let remaining = unit.abilities[0].as_ref().unwrap().last_used + cd - 120e9;
+                assert!(remaining >= cd / 2.0 && remaining < cd);
+                assert_eq!(rng.calls(), calls + 1);
+                remaining_values.push(remaining);
+            }
+            assert!(remaining_values.windows(2).any(|pair| pair[0] != pair[1]));
+        }
     }
 }
