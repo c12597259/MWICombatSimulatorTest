@@ -19,6 +19,7 @@ import combatStyleDetailMap from "./combatsimulator/data/combatStyleDetailMap.js
 import achievementTierMap from "./combatsimulator/data/achievementTierDetailMap.json"
 import achievementDetailMap from "./combatsimulator/data/achievementDetailMap.json"
 import { calculateFragmentTimeCosts, applyPreparationToFragmentTimeCosts } from "./fragmentTimeCost.js";
+import { buildICTimeExport, ictimeCharacterName } from './ictimeExport.js';
 import { createProductionPreparationView } from "./productionPreparationView.js";
 import { normalizePlanInventory, calculateConsumableShortfall, requestPlanInventories, INVENTORY_BRIDGE_ATTRIBUTE } from './planInventory.js';
 import enhancementMultipliers from "./combatsimulator/data/enhancementLevelTotalBonusMultiplierTable.json";
@@ -91,6 +92,9 @@ import {
 } from "./zoneSelection.js";
 
 import patchNote from "../patchNote.json";
+import { normalizeAbilityLevels, normalizeLearnedAbilityLevels } from './abilityLevels.js';
+import { attachAbilityPicker } from './abilityPicker.js';
+import { inferAbilityWeaponProfile, isAbilityRecommended } from './abilityRecommendations.js';
 import { createDropInventory, updateDropInventoryLabels } from './dropInventory.js';
 import { drinkQualityTarget, refinementTargets } from './itemQuickSwitch.js';
 
@@ -878,6 +882,22 @@ function updateDrinksUI() {
 // #endregion
 
 // #region Abilities
+let knownAbilityLevels = {};
+let learnedAbilityLevels = {};
+const abilityPickerRefreshers = [];
+function captureAbilityLevels() {
+    for (let i = 0; i < 5; i++) {
+        const hrid = document.getElementById('selectAbility_' + i).value;
+        const level = Number(document.getElementById('inputAbilityLevel_' + i).value);
+        if (hrid && Number.isInteger(level) && level >= 1 && level <= 400) knownAbilityLevels[hrid] = level;
+    }
+    return { ...knownAbilityLevels };
+}
+function abilityPickerName(hrid) {
+    return hrid ? getLocalizedHistoryValue('abilityNames.' + hrid, abilityDetailMap[hrid]?.name ?? hrid)
+        : getLocalizedHistoryValue('characterSelectPage.slots.empty', 'Empty');
+}
+
 
 function initAbilitiesSection() {
     for (let i = 0; i < 5; i++) {
@@ -895,12 +915,44 @@ function initAbilitiesSection() {
 
 
         for (const ability of Object.values(gameAbilities)) {
+            if (ability.hrid === "/abilities/promote") continue;
             let opt = new Option(ability.name, ability.hrid);
             opt.setAttribute("data-i18n", "abilityNames." + ability.hrid);
             selectElement.add(opt);
         }
 
         selectElement.addEventListener("change", abilitySelectHandler);
+        inputElement.addEventListener('input', captureAbilityLevels);
+        abilityPickerRefreshers.push(attachAbilityPicker(selectElement, {
+            getName: abilityPickerName, getLevels: captureAbilityLevels,
+            getLearnedLevels: () => learnedAbilityLevels,
+            getRecommendation: () => {
+                const weapon = itemDetailMap[document.getElementById('selectEquipment_weapon').value];
+                const profile = inferAbilityWeaponProfile(weapon);
+                return {
+                    accepts: hrid => isAbilityRecommended(abilityDetailMap[hrid], profile),
+                    description: profile
+                        ? getLocalizedHistoryValue('common:abilityWeaponRoles.' + profile.role, profile.role)
+                            + ' · ' + getSimulationHistoryItemName(weapon.hrid)
+                        : getLocalizedHistoryValue('common:abilityRecommendationNoWeapon', 'No recognized weapon; showing all skills.'),
+                };
+            },
+            getDescription: hrid => getLocalizedHistoryValue("common:abilityDescriptions." + hrid.split("/").pop(), abilityDetailMap[hrid]?.description ?? ""),
+            getDetails: hrid => abilityDetailMap[hrid],
+            effectLabel: (key, fallback) => getLocalizedHistoryValue("common:abilityEffectLabels." + key, fallback),
+            labels: () => ({ choose: getLocalizedHistoryValue('common:chooseAbilityIcon', 'Choose ability'),
+                close: getLocalizedHistoryValue('common:closeAbilityPicker', 'Close'),
+                search: getLocalizedHistoryValue('common:searchAbility', 'Search abilities'),
+                learned: getLocalizedHistoryValue('common:learnedAbilities', 'Learned abilities'),
+                recommended: getLocalizedHistoryValue('common:recommendedAbilities', 'Smart recommendations'),
+                recommendationHint: getLocalizedHistoryValue('common:abilityRecommendationHint', 'Filter by weapon style and element; keep healing, defense and team auras. This is not a damage ranking.'),
+                noMatches: getLocalizedHistoryValue('common:noMatchingAbilities', 'No matching learned abilities. Import character skills first.'),
+                mana: getLocalizedHistoryValue('common:abilityMana', 'Mana cost'),
+                cooldown: getLocalizedHistoryValue('common:abilityCooldown', 'Base cooldown'),
+                cast: getLocalizedHistoryValue('common:abilityCast', 'Base cast time'),
+                effects: getLocalizedHistoryValue('common:abilityBaseEffects', 'Base effects at this ability level'),
+            }),
+        }));
     }
 
     document.getElementById('abilityOrderSwitch').addEventListener('change', function() {
@@ -931,7 +983,15 @@ function initAbilitiesSection() {
 
 }
 
-function abilitySelectHandler() {
+function abilitySelectHandler(event) {
+    if (event?.target) {
+        const slot = Number(event.target.id.split('_').pop());
+        const input = document.getElementById('inputAbilityLevel_' + slot);
+        const previous = abilities[slot];
+        const oldLevel = Number(input.value);
+        if (previous && Number.isInteger(oldLevel) && oldLevel >= 1 && oldLevel <= 400) knownAbilityLevels[previous] = oldLevel;
+        input.value = String(knownAbilityLevels[event.target.value] ?? 1);
+    }
     updateAbilityState();
     updateAbilityUI();
 }
@@ -959,6 +1019,7 @@ function updateAbilityUI() {
         let moveUpButton = document.getElementById("selectAbilityMoveUp_" + i);
         moveUpButton.onclick = () => swapAbilityOrder(i, -1);
     }
+    abilityPickerRefreshers.forEach(refresh => refresh());
 }
 
 function swapAbilityOrder(abilityIndex, step) {
@@ -2459,6 +2520,58 @@ function updateSimulationHistorySelection() {
     document.getElementById('buttonClearSimulationHistory').disabled = simulationHistoryDeletionPending || simulationHistoryRecords.length === 0;
     document.querySelectorAll('#simulationHistoryRecordRows button[data-history-action="delete"]')
         .forEach(button => { button.disabled = simulationHistoryDeletionPending; });
+    updateICTimeExportControls();
+}
+
+function getICTimeExportRecords() {
+    return selectedSimulationHistoryIds.size
+        ? simulationHistoryRecords.filter(record => selectedSimulationHistoryIds.has(record.id))
+        : simulationHistoryRecords;
+}
+
+function updateICTimeExportControls() {
+    const records = getICTimeExportRecords();
+    const select = document.getElementById('selectICTimeCharacter');
+    const previous = select.value || document.getElementById(`player${currentPlayerTabId}-tab`)?.textContent.trim();
+    const names = [...new Set(records.flatMap(record => (record.players ?? []).map(ictimeCharacterName)))].filter(Boolean).sort();
+    select.replaceChildren(...names.map(name => new Option(name, name)));
+    if (names.includes(previous)) select.value = previous;
+    select.disabled = names.length === 0;
+    const { data, missingBaseChests } = buildICTimeExport(records, select.value, itemDetailMap);
+    document.getElementById('buttonExportICTime').disabled = data.entries.length === 0;
+    document.getElementById('buttonCopyICTime').disabled = data.entries.length === 0;
+    const scope = selectedSimulationHistoryIds.size
+        ? getSimulationHistoryText('ictimeSelected', 'Selected records ({{count}})', { count: records.length })
+        : getSimulationHistoryText('ictimeAll', 'All maps ({{count}} records)', { count: records.length });
+    document.getElementById('ictimeExportSummary').textContent = getSimulationHistoryText('ictimeSummary',
+        '{{scope}} · {{count}} entries. Highest hourly yield per item; consumables come from the same record. ICTime import replaces existing entries.',
+        { scope, count: data.entries.length }) + (missingBaseChests.length ? ' ' + getSimulationHistoryText('ictimeMissingBase',
+            'Some refinement chests lack T0 records; add their T0 times in ICTime.') : '');
+}
+
+async function exportICTimeHistory(copy) {
+    const character = document.getElementById('selectICTimeCharacter').value;
+    const { data } = buildICTimeExport(getICTimeExportRecords(), character, itemDetailMap);
+    if (!data.entries.length) return;
+    const json = JSON.stringify(data, null, 2);
+    if (copy) {
+        try {
+            await navigator.clipboard.writeText(json);
+            setSimulationHistoryStatus(getSimulationHistoryText('ictimeCopied', 'ICTime JSON copied.'), 'success');
+        } catch {
+            setSimulationHistoryStatus(getSimulationHistoryText('ictimeCopyFailed',
+                'Could not copy. Download the JSON file and paste its contents into ICTime.'), 'warning');
+        }
+        return;
+    }
+    const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `ictime-${character.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')}-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function confirmSimulationHistoryDeletion(message) {
@@ -2661,6 +2774,7 @@ function createSimulationHistoryRateSection(
         valueMultiplier = 1,
         rowSorter = null,
         valueFormatter = null,
+        inventory = false,
     } = {},
 ) {
     const section = document.createElement("section");
@@ -2683,6 +2797,10 @@ function createSimulationHistoryRateSection(
         return section;
     }
 
+    if (inventory) {
+        section.append(createDropInventory(entries, { itemName: labelResolver, formatQuantity: valueFormatter, labels: getDropDisplayLabels() }));
+        return section;
+    }
     const table = createSimulationHistoryTable([
         getSimulationHistoryText("entry", "Metric / Item"),
         getSimulationHistoryText("value", "Value"),
@@ -2823,6 +2941,7 @@ function createSimulationHistoryPlayerDetail(playerEntry) {
             valueMultiplier: SIMULATION_HISTORY_DROP_COMPARISON_HOURS,
             rowSorter: sortSimulationHistoryDropRows,
             valueFormatter: formatSimulationHistoryDropNumber,
+            inventory: true,
         },
     ));
     grid.appendChild(dropsColumn);
@@ -2978,6 +3097,7 @@ function createSimulationHistoryRateComparisonSection(
         valueMultiplier = 1,
         rowSorter = null,
         valueFormatter = null,
+        inventory = false,
     } = {},
 ) {
     const section = document.createElement("section");
@@ -3015,7 +3135,23 @@ function createSimulationHistoryRateComparisonSection(
     const tableWrapper = document.createElement("div");
     tableWrapper.className = "table-responsive";
     tableWrapper.appendChild(table);
-    section.appendChild(tableWrapper);
+    if (inventory) {
+        const display = createDropInventory(displayRows.map(row => ({ key: row.key, value: row.comparison })), {
+            itemName: labelResolver, formatQuantity: valueFormatter, labels: getDropDisplayLabels(),
+        });
+        display.querySelector('.drop-inventory-list').replaceChildren(tableWrapper);
+        display.querySelector('.drop-inventory-grid').classList.add('history-drop-comparison-grid');
+        for (const tile of display.querySelectorAll('.drop-inventory-tile')) {
+            const row = displayRows.find(row => row.key === tile.dataset.itemHrid);
+            const info = document.createElement('div'); info.className = 'history-drop-comparison-values';
+            for (const [label, value] of [['A', valueFormatter(row.baseline, row.key)], ['B', valueFormatter(row.comparison, row.key)], ['Δ', formatSimulationHistoryComparisonDelta(row, maximumFractionDigits, '', value => valueFormatter(value, row.key))]]) {
+                const line = document.createElement('div'); line.textContent = `${label}: ${value}`; info.append(line);
+            }
+            tile.parentElement.append(info);
+            tile.title += `\n${info.textContent}`;
+        }
+        section.append(display);
+    } else section.appendChild(tableWrapper);
     return section;
 }
 
@@ -3164,6 +3300,7 @@ function createSimulationHistoryDropComparison(
             valueMultiplier: SIMULATION_HISTORY_DROP_COMPARISON_HOURS,
             rowSorter: sortSimulationHistoryDropRows,
             valueFormatter: formatSimulationHistoryDropNumber,
+            inventory: true,
         },
     ));
     card.appendChild(body);
@@ -3447,6 +3584,9 @@ function compareSelectedSimulationHistoryRecords() {
 }
 
 function initSimulationHistory() {
+    document.getElementById('selectICTimeCharacter').addEventListener('change', updateICTimeExportControls);
+    document.getElementById('buttonExportICTime').addEventListener('click', () => void exportICTimeHistory(false));
+    document.getElementById('buttonCopyICTime').addEventListener('click', () => void exportICTimeHistory(true));
     document.getElementById('simulationHistoryDeleteDialog').addEventListener('keydown', event => {
         // Let the native dialog cancel itself without also dismissing Bootstrap's history modal.
         if (event.key === 'Escape') event.stopPropagation();
@@ -7104,6 +7244,8 @@ function getEquipmentSetFromUI() {
 
     equipmentSet.triggerMap = triggerMap;
 
+    equipmentSet.abilityLevels = captureAbilityLevels();
+    equipmentSet.learnedAbilityLevels = { ...learnedAbilityLevels };
     equipmentSet.houseRooms = player.houseRooms;
     equipmentSet.achievements = player.achievements;
     equipmentSet.guildCombatBuffLevels = player.guildCombatBuffLevels;
@@ -7135,6 +7277,8 @@ function fixTriggerMap(triggerMap) {
 }
 
 function loadEquipmentSetIntoUI(equipmentSet) {
+    knownAbilityLevels = normalizeAbilityLevels(equipmentSet);
+    learnedAbilityLevels = normalizeLearnedAbilityLevels(equipmentSet);
     ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"].forEach((skill) => {
         let levelInput = document.getElementById("inputLevel_" + skill);
         if (skill == "melee" && !equipmentSet.levels["meleeLevel"] && equipmentSet.levels["powerLevel"]) {
@@ -7348,6 +7492,8 @@ function doSoloExport() {
         food: { "/action_types/combat": foodArray },
         drinks: { "/action_types/combat": drinksArray },
         abilities: abilitiesArray,
+        abilityLevels: captureAbilityLevels(),
+        learnedAbilityLevels: { ...learnedAbilityLevels },
         triggerMap: triggerMap,
         zone: zoneSelect.value,
         simulationTime: simulationTimeInput.value,
@@ -7438,6 +7584,8 @@ function doGroupImport() {
 function doSoloImport() {
     let importSet = document.getElementById("inputSetSolo").value;
     importSet = JSON.parse(importSet);
+    knownAbilityLevels = normalizeAbilityLevels(importSet);
+    learnedAbilityLevels = normalizeLearnedAbilityLevels(importSet);
     player.labyrinthUpgrades = normalizeLabyrinthUpgrades(importSet.labyrinth ?? importSet.labyrinthUpgrades);
     updateLabyrinthUpgradeUI();
     player.guildCombatBuffs = Array.isArray(importSet.guildCombatBuffs)
@@ -7630,7 +7778,7 @@ function savePreviousPlayer(playerId) {
             "player",
             "food",
             "drinks",
-            "abilities",
+            "abilities", "abilityLevels", "learnedAbilityLevels",
             "triggerMap",
             "zone",
             "simulationTime",
@@ -7655,6 +7803,8 @@ function savePreviousPlayer(playerId) {
         food: { "/action_types/combat": foodArray },
         drinks: { "/action_types/combat": drinksArray },
         abilities: abilitiesArray,
+        abilityLevels: captureAbilityLevels(),
+        learnedAbilityLevels: { ...learnedAbilityLevels },
         triggerMap: triggerMap,
         zone: zoneSelect.value,
         simulationTime: simulationTimeInput.value,
@@ -7673,6 +7823,8 @@ function savePreviousPlayer(playerId) {
 function updateNextPlayer(currentPlayerNumber) {
     let playerImportData = playerDataMap[currentPlayerNumber];
     let importSet = JSON.parse(playerImportData);
+    knownAbilityLevels = normalizeAbilityLevels(importSet);
+    learnedAbilityLevels = normalizeLearnedAbilityLevels(importSet);
     player.labyrinthUpgrades = normalizeLabyrinthUpgrades(importSet.labyrinth ?? importSet.labyrinthUpgrades);
     updateLabyrinthUpgradeUI();
     player.guildCombatBuffs = Array.isArray(importSet.guildCombatBuffs)
@@ -8881,7 +9033,10 @@ function getDropDisplayLabels() {
 }
 
 function updateContent() {
-    updateDropInventoryLabels(document.getElementById('simulationResultDrops'), getSimulationHistoryItemName, getDropDisplayLabels());
+    for (const id of ['simulationResultDrops', 'simulationHistoryRecordDetails', 'simulationHistoryComparisonResults']) {
+        updateDropInventoryLabels(document.getElementById(id), getSimulationHistoryItemName, getDropDisplayLabels());
+    }
+    abilityPickerRefreshers.forEach(refresh => refresh());
     document.querySelectorAll('[data-i18n]').forEach(function (element) {
         const key = element.getAttribute('data-i18n');
         if (key) {

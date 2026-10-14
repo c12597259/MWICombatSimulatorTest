@@ -3,6 +3,40 @@
 
 <head>
     <style>
+        .ability-selection { display: flex; gap: 6px; align-items: center; min-width: 0; }
+        .ability-selection > select { flex: 1; min-width: 0; width: 0; }
+        .ability-picker-button { flex: 0 0 calc(2.25rem + 2px); width: calc(2.25rem + 2px); height: calc(2.25rem + 2px); border: 1px solid #888; border-radius: 5px; padding: 3px; background: #2e2f46; color: white; font-size: 20px; }
+        .ability-picker-button:disabled { opacity: .4; }
+        .ability-picker-button svg { display: block; width: 100%; height: 100%; }
+        .ability-picker-dialog { position: fixed; inset: auto; margin: 0; width: min(512px, calc(100% - 16px)); max-height: calc(100vh - 16px); padding: 12px; border: 1px solid #73778d; border-radius: 10px; background: #20212d; color: #eee; }
+        .ability-picker-dialog[open] { display: flex; flex-direction: column; }
+        .ability-picker-dialog > :not(.ability-picker-grid) { flex-shrink: 0; }
+        .ability-picker-dialog::backdrop { background: #0005; }
+        .ability-picker-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }
+        .ability-picker-header button { background: transparent; border: 0; color: inherit; font-size: 26px; }
+        .ability-picker-dialog input[type="search"] { width: 100%; padding: 6px 10px; margin-bottom: 12px; background: #2e2f46; color: #eee; border: 1px solid #888; border-radius: 5px; }
+        .ability-picker-grid { display: grid; grid-template-columns: repeat(7, var(--ability-tile-size, 66px)); gap: 4px; flex-shrink: 0; align-content: start; }
+        .ability-picker-choice { position: relative; display: flex; align-items: center; justify-content: center; width: var(--ability-tile-size, 66px); height: var(--ability-tile-size, 66px); padding: 5px; border: 1px solid transparent; border-radius: 3px; background: #2e2f46; color: #eee; font-size: 14px; }
+        .ability-picker-choice svg { width: 100%; height: 100%; max-width: 48px; max-height: 48px; }
+        .ability-picker-choice small { position: absolute; top: 1px; left: 2px; color: #e7e7e7; font-size: 12px; font-weight: 500; line-height: 16px; z-index: 1; pointer-events: none; text-shadow: -1px 0 #131419, 0 1px #131419, 1px 0 #131419, 0 -1px #131419; }
+        .ability-picker-filters { display: flex; flex-wrap: wrap; gap: 0 18px; }
+        .ability-picker-recommendation { margin: 0 0 10px; font-size: 12px; color: #bfc8d9; }
+        .ability-picker-filter { display: flex; align-items: center; gap: 7px; margin: 0 0 12px; cursor: pointer; }
+        .ability-picker-filter input { width: 16px; height: 16px; accent-color: #5f91eb; }
+        .ability-picker-empty { margin: 12px 0 0; color: #bfc8d9; font-size: 13px; }
+        .ability-picker-tooltip { position: fixed; z-index: 1; width: 300px; max-width: calc(100vw - 16px); padding: 14px; border: 1px solid #727992; border-radius: 5px; background: #181b2bf5; color: #eee; box-shadow: 0 4px 16px #0008; pointer-events: auto; max-height: calc(100vh - 16px); overflow-y: auto; font-size: 14px; }
+        .ability-picker-tooltip strong { color: #efcc83; font-size: 16px; }
+        .ability-picker-effects { margin-top: 10px; font-size: 13px; line-height: 1.6; }
+        .ability-picker-effects b { display: block; color: #bbc3d9; }
+        .ability-picker-tooltip p { margin: 10px 0; }
+        .ability-picker-tooltip dl { display: grid; grid-template-columns: 1fr auto; gap: 3px 18px; margin: 0; }
+        .ability-picker-tooltip dt { font-weight: normal; color: #bbc3d9; }
+        .ability-picker-tooltip dd { margin: 0; text-align: right; }
+        .ability-picker-choice[hidden] { display: none; }
+        .ability-picker-choice:hover, .ability-picker-choice[aria-pressed="true"] { border-color: #dbaf43; outline: 1px solid #dbaf43; }
+        .drop-inventory-grid.history-drop-comparison-grid { grid-template-columns: repeat(auto-fill, minmax(146px, 1fr)); gap: 12px; }
+        .history-drop-comparison-values { font-size: 12px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+
         .drop-inventory-grid { display: grid; grid-template-columns: repeat(auto-fill, 66px); gap: 4px; margin-top: 8px; }
         .drop-inventory-grid[hidden], .drop-inventory-list[hidden] { display: none; }
         .drop-inventory-modes { display: flex; gap: 4px; margin-top: 8px; }
@@ -2010,6 +2044,15 @@
                         </div>
                     </div>
 
+                    <div class="border rounded p-3 mb-3">
+                        <div class="d-flex flex-wrap align-items-center gap-2">
+                            <label for="selectICTimeCharacter" class="mb-0" data-i18n="common:simulationHistory.ictimeCharacter">ICTime character</label>
+                            <select id="selectICTimeCharacter" class="form-select form-select-sm w-auto" style="max-width: 100%"></select>
+                            <button id="buttonExportICTime" type="button" class="btn btn-outline-primary btn-sm" disabled data-i18n="common:simulationHistory.ictimeExport">Export ICTime JSON</button>
+                            <button id="buttonCopyICTime" type="button" class="btn btn-outline-secondary btn-sm" disabled data-i18n="common:simulationHistory.ictimeCopy">Copy JSON</button>
+                        </div>
+                        <p id="ictimeExportSummary" class="small text-secondary mt-2 mb-0" aria-live="polite"></p>
+                    </div>
                     <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
                         <h6 class="mb-0 me-auto" data-i18n="common:simulationHistory.recordList">History Records</h6>
                         <button id="buttonClearSimulationHistorySelection" type="button" class="btn btn-outline-secondary btn-sm" disabled

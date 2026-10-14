@@ -84,6 +84,15 @@
         "defaultBadge": "default"
     },
     "simulationHistory": {
+        "ictimeCharacter": "ICTime character",
+        "ictimeExport": "Export ICTime JSON",
+        "ictimeCopy": "Copy JSON",
+        "ictimeAll": "All maps ({{count}} records)",
+        "ictimeSelected": "Selected records ({{count}})",
+        "ictimeSummary": "{{scope}} · {{count}} entries. Highest hourly yield per item, with that record's consumables. With no selection, all history is used. ICTime import replaces existing entries.",
+        "ictimeMissingBase": "Some refinement chests lack T0 records; add their T0 times in ICTime.",
+        "ictimeCopied": "ICTime JSON copied. Import it in the in-game ICTime time panel.",
+        "ictimeCopyFailed": "Could not copy. Download the JSON file and paste its contents into ICTime.",
         "button": "Simulation History",
         "title": "Simulation History",
         "description": "Single-map results and compressed team snapshots are saved automatically. Difficulty tiers share the same map history.",
@@ -275,6 +284,9 @@
     "noRNGRevenue": "No RNG Revenue",
     "dropTotal": "Drops (Total)",
     "expectedDropsTotal": "Expected Drops (Total)",
+    "chooseAbilityIcon": "Choose ability icons",
+    "closeAbilityPicker": "Close",
+    "searchAbility": "Search abilities",
     "dropIcons": "Icons",
     "dropText": "Text",
     "noRNGDrops": "No RNG Drops",
@@ -433,5 +445,36 @@
         "cast_speed": "Cast speed",
         "critical_rate": "Critical rate",
         "experience": "Experience"
+    },
+    "learnedAbilities": "Learned abilities",
+    "noMatchingAbilities": "No matching abilities. Import character skills if none are available.",
+    "abilityMana": "Mana cost",
+    "abilityCooldown": "Base cooldown",
+    "abilityCast": "Base cast time",
+    "abilityBaseEffects": "Base effects at this ability level",
+    "abilityEffectLabels": {
+        "allEnemies": "All enemies",
+        "allAllies": "All allies",
+        "lowestHpAlly": "Lowest HP ally",
+        "deadAlly": "Dead ally",
+        "bonus_accuracy": "Bonus accuracy",
+        "armor_damage": "Extra armor damage ratio",
+        "spend_hp": "HP cost",
+        "hp_drain": "HP drain",
+        "damage_over_time": "Damage over time"
+    },
+    "recommendedAbilities": "Smart recommendations",
+    "abilityRecommendationNoWeapon": "No recognized weapon; showing all skills.",
+    "abilityRecommendationHint": "Filter damage by weapon style and element. Keep healing, defense and team auras; favor taunts and retaliation for tanks. This is not an optimal build; uncheck to see all skills.",
+    "abilityWeaponRoles": {
+        "sword": "Sword · Slash",
+        "spear": "Spear · Stab",
+        "hammer": "Hammer · Smash",
+        "tank": "Tank · Smash / Armor",
+        "bow": "Bow · Ranged",
+        "crossbow": "Crossbow · Ranged",
+        "water": "Water mage",
+        "fire": "Fire mage",
+        "nature": "Nature mage"
     }
 }
