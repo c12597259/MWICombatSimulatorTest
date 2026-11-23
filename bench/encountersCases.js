@@ -51,6 +51,13 @@ export function encounterGroups() {
         skills.push(named(`${hrid}:${level}`, run));
     }
     const mechanics = [];
+    const promotion = stable(base([player(1, true)], [
+        enemy('/monsters/crab'), enemy('/monsters/enchanted_pawn'), enemy('/monsters/crab'),
+    ]));
+    // The middle pawn casts with a non-integer HP percentage while its neighbours survive.
+    promotion.setup.push({ unit: 2, combatDetails: { currentHitpoints: 370001 }, lastUsed: [[0, -1e20]] });
+    promotion.maxEvents = 36;
+    mechanics.push(named('wounded-pawn-promotes-in-place', promotion));
     // A normal-map wipe with both attacks and casts pending. Their removals
     // must run in JS order, even though the same set of events is discarded.
     const wipePlayer = player(1);

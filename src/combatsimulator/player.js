@@ -78,7 +78,7 @@ class Player extends CombatUnit {
                 duration: 0,
             }));
 
-        player.debuffOnLevelGap = dto.debuffOnLevelGap;
+        player.debuffOnLevelGap = dto.debuffOnLevelGap ?? 0;
 
         return player;
     }

@@ -135,11 +135,13 @@ struct BuffEntry {
     buff: CombatBuff,
 }
 
+#[derive(Clone)]
 struct EquipmentStatsCache {
     definition_hash: String,
     stats: CombatStats,
 }
 
+#[derive(Clone)]
 struct MonsterStatsCache {
     definition_hash: String,
     stats: CombatStats,
@@ -241,6 +243,7 @@ impl BuffBoosts {
     }
 }
 
+#[derive(Clone)]
 pub struct AttributeUnit {
     input: UnitInput,
     equipment: Vec<EquipmentInput>,

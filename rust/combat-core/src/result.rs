@@ -6,8 +6,8 @@ use crate::{
     runtime_unit::RuntimeUnit,
     zone::{LabyrinthInput, ZoneInput},
 };
+use indexmap::{IndexMap, IndexSet};
 use serde_json::{json, Value};
-use std::borrow::Cow;
 
 #[derive(Clone, Copy)]
 pub(crate) enum Hit {
@@ -69,7 +69,59 @@ fn finite_amount(amount: f64) -> f64 {
     amount
 }
 
+#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+enum DamageKey {
+    Miss,
+    Damage(u64),
+}
+
+#[derive(Default)]
+struct AttackCounts {
+    labels: IndexSet<String>,
+    counts: IndexMap<(usize, usize, usize), IndexMap<DamageKey, f64>>,
+}
+
+impl AttackCounts {
+    fn label(&mut self, name: &str) -> usize {
+        self.labels
+            .get_index_of(name)
+            .unwrap_or_else(|| self.labels.insert_full(name.to_owned()).0)
+    }
+
+    fn record(&mut self, source: &str, target: &str, ability: &str, hit: Hit) {
+        let key = (self.label(source), self.label(target), self.label(ability));
+        let damage = match hit {
+            Hit::Miss => DamageKey::Miss,
+            Hit::Damage(value) => DamageKey::Damage(finite_amount(value).to_bits()),
+        };
+        *self
+            .counts
+            .entry(key)
+            .or_default()
+            .entry(damage)
+            .or_default() += 1.0;
+    }
+
+    fn to_json(&self) -> Value {
+        let mut value = json!({});
+        for (&(source, target, ability), hits) in &self.counts {
+            let mut histogram = serde_json::Map::with_capacity(hits.len());
+            for (&hit, &count) in hits {
+                let key = match hit {
+                    DamageKey::Miss => "miss".to_owned(),
+                    DamageKey::Damage(bits) => f64::from_bits(bits).to_string(),
+                };
+                histogram.insert(key, json!(count));
+            }
+            value[&self.labels[source]][&self.labels[target]][&self.labels[ability]] =
+                Value::Object(histogram);
+        }
+        value
+    }
+}
+
 pub struct SimResult {
+    attacks: AttackCounts,
     pub value: Value,
 }
 fn increment(root: &mut Value, keys: &[&str], amount: f64) {
@@ -105,8 +157,23 @@ impl SimResult {
             value["labyrinthName"] = json!(lab.hrid);
             value["roomLevel"] = json!(lab.room_level);
         }
-        Self { value }
+        Self {
+            value,
+            attacks: AttackCounts::default(),
+        }
     }
+    pub(crate) fn snapshot(&self) -> Value {
+        let mut value = self.value.clone();
+        value["attacks"] = self.attacks.to_json();
+        value
+    }
+
+    pub(crate) fn take_value(&mut self) -> Value {
+        let mut value = std::mem::take(&mut self.value);
+        value["attacks"] = std::mem::take(&mut self.attacks).to_json();
+        value
+    }
+
     pub fn alive(&mut self, name: &str, alive: bool, time: f64) {
         let entries = self.value["timeSpentAlive"].as_array_mut().unwrap();
         if let Some(entry) = entries.iter_mut().find(|entry| entry["name"] == name) {
@@ -159,15 +226,7 @@ impl SimResult {
                 ..
             } => {
                 let target = units.get(target).unwrap();
-                let hit = match hit {
-                    Hit::Miss => Cow::Borrowed("miss"),
-                    Hit::Damage(amount) => Cow::Owned(finite_amount(amount).to_string()),
-                };
-                increment(
-                    &mut self.value,
-                    &["attacks", name, &target.hrid, ability, &hit],
-                    1.0,
-                );
+                self.attacks.record(name, &target.hrid, ability, hit);
             }
             ResultOp::Death(_) => {
                 increment(&mut self.value, &["deaths", name], 1.0);
@@ -299,6 +358,29 @@ impl SimResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn attack_histograms_preserve_json_keys_counts_and_order() {
+        let mut counts = AttackCounts::default();
+        let mut legacy = json!({});
+        for (source, target, ability, hit) in [
+            ("player1", "pawn", "slash", Hit::Damage(0.0)),
+            ("player2", "pawn", "stab", Hit::Miss),
+            ("player1", "rook", "slash", Hit::Damage(1.5)),
+            ("player1", "pawn", "stab", Hit::Damage(-0.0)),
+            ("player1", "pawn", "slash", Hit::Damage(-0.0)),
+            ("player1", "pawn", "slash", Hit::Miss),
+            ("player1", "pawn", "slash", Hit::Damage(0.0)),
+        ] {
+            let damage = match hit {
+                Hit::Miss => "miss".to_owned(),
+                Hit::Damage(n) => n.to_string(),
+            };
+            increment(&mut legacy, &[source, target, ability, &damage], 1.0);
+            counts.record(source, target, ability, hit);
+            assert_eq!(counts.to_json().to_string(), legacy.to_string());
+        }
+    }
 
     #[test]
     fn typed_traces_preserve_serial_ids_after_slot_reuse_and_wire_shapes() {

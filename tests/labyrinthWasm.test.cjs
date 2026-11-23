@@ -58,6 +58,43 @@ test('monster openings use half cooldown only in labyrinth, including restarts a
     } finally { Math.random = originalRandom; }
 });
 
+test('a promoted labyrinth pawn keeps the fixed opening cooldown and JS random stream', async () => {
+    await ready;
+    const playerDto = dto(190);
+    playerDto.staminaLevel = 2000;
+    const req = request(playerDto);
+    req.labyrinth.labyrinthHrid = '/monsters/enchanted_pawn';
+    req.labyrinth.roomLevel = 100;
+    const seed = 23;
+    const output = JSON.parse(engine.simulate(JSON.stringify(api.normalizeSimulationRequest(req, seed))));
+    const lab = new api.Labyrinth(req.labyrinth.labyrinthHrid, req.labyrinth.roomLevel, []);
+    const player = api.Player.createFromDTO(playerDto);
+    player.zoneBuffs = lab.buffs;
+    const simulator = new api.CombatSimulator([player], null, lab);
+    const random = require('../bench/lib/seededRandom.cjs').seededRandom(seed);
+    const promote = simulator.processAbilityPromoteEffect.bind(simulator);
+    let promotions = 0;
+    simulator.processAbilityPromoteEffect = pawn => {
+        const calls = random.count();
+        const piece = promote(pawn);
+        assert.notEqual(piece, pawn);
+        // Choosing the piece draws once. Labyrinth opening cooldowns draw nothing.
+        assert.equal(random.count() - calls, 1);
+        promotions++;
+        return piece;
+    };
+    const originalRandom = Math.random;
+    try {
+        Math.random = random;
+        const expected = await simulator.simulate(req.simulationTimeLimit);
+        assert.ok(promotions > 0);
+        assert.equal(output.randomCalls, random.count());
+        assert.deepEqual(output.result, JSON.parse(JSON.stringify(expected)));
+    } finally {
+        Math.random = originalRandom;
+    }
+});
+
 test('upgrade imports use 1% per level and never double count DTO levels plus raw buffs', async () => {
     await ready;
     const player = { ...dto(), labyrinthUpgrades: { '/buff_uniques/labyrinth_upgrade_combat_damage': 5 } };

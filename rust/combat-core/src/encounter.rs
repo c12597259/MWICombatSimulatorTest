@@ -80,6 +80,13 @@ pub struct CombatEvent {
     pub style: Option<String>,
 }
 impl TimedEvent for CombatEvent {
+    fn pending_attack_slot(&self) -> Option<usize> {
+        if matches!(self.kind, EventKind::Cast | EventKind::Attack) {
+            self.source.map(UnitId::slot)
+        } else {
+            None
+        }
+    }
     fn id(&self) -> u32 {
         self.id
     }
@@ -328,7 +335,7 @@ impl EncounterRun {
             "players":self.players,"enemies":self.enemies,"heap":self.queue.events().iter().map(|event| self.event_snapshot(event)).collect::<Vec<_>>(),
             "operations":self.operations,"allPlayersDead":self.all_players_dead,"maxEnrageStack":self.max_enrage });
         if let Some(full) = &self.full {
-            frame["result"] = full.result.value.clone();
+            frame["result"] = full.result.snapshot();
             frame["result"]["maxEnrageStack"] = json!(self.max_enrage);
             for wipe in frame["result"]["wipeEvents"].as_array_mut().unwrap() {
                 wipe.as_object_mut().unwrap().remove("timestamp");
@@ -398,7 +405,7 @@ impl EncounterRun {
             }
             // Collect only between complete events: emit() has already consumed
             // operation references, and all future reads are rooted in the sides
-            // or queue (including DOT source_ref and promoted off-side units).
+            // or queue (including delayed damage that still references its source).
             if !self.retain_unit_history && self.processed.is_multiple_of(64) {
                 self.collect_units();
             }
@@ -757,9 +764,8 @@ impl EncounterRun {
         !oom
     }
     pub(crate) fn next_attack(&mut self, id: UnitId) -> Result<(), String> {
-        if self.queue.events().iter().any(|event| {
-            event.source == Some(id) && matches!(event.kind, EventKind::Cast | EventKind::Attack)
-        }) {
+        // A unit slot cannot be recycled while any queued event references it.
+        if self.queue.has_pending_attack(id.slot()) {
             return Ok(());
         }
         let count = self.unit(id).abilities.len();
@@ -1167,7 +1173,7 @@ impl EncounterRun {
                 .is_some_and(|full| full.zone.as_ref().is_some_and(|zone| zone.dungeon))
             {
                 let full = self.full.as_mut().unwrap();
-                full.result.value["wipeEvents"].as_array_mut().unwrap().push(json!({"simulationTime":self.time,"logs":full.logs.iter().collect::<Vec<_>>(),"wave":full.zone.as_ref().unwrap().killed-1,"timestamp":"runtime-clock"}));
+                full.result.value["wipeEvents"].as_array_mut().unwrap().push(json!({"simulationTime":self.time,"logs":&full.logs,"wave":full.zone.as_ref().unwrap().killed-1,"timestamp":"runtime-clock"}));
                 full.logs.clear();
                 for kind in [
                     EventKind::Attack,
@@ -1602,7 +1608,21 @@ impl EncounterRun {
                         self.emit(ResultOp::HpSpent(source, &ability.hrid, spent));
                     }
                     "/ability_effect_types/promote" => {
-                        self.clear_unit(source);
+                        let Some(slot) = self
+                            .enemies
+                            .as_ref()
+                            .and_then(|enemies| enemies.iter().position(|&id| id == source))
+                        else {
+                            continue;
+                        };
+                        let pawn = self.unit(source);
+                        let UnitInput::Monster(input) = &pawn.case.input else {
+                            continue;
+                        };
+                        let difficulty_tier = pawn.tier;
+                        let room_level = input.room_level;
+                        let hp = &pawn.attributes.details;
+                        let hp_fraction = hp.current_hitpoints / hp.max_hitpoints;
                         let types = [
                             "/monsters/enchanted_rook",
                             "/monsters/enchanted_knight",
@@ -1610,20 +1630,31 @@ impl EncounterRun {
                         ];
                         let hrid =
                             types[(self.rng.next_f64() * types.len() as f64).floor() as usize];
-                        let tier = self.unit(source).tier;
                         let case = AttributeCase {
                             input: UnitInput::Monster(MonsterInput {
                                 hrid: hrid.into(),
-                                difficulty_tier: tier,
-                                room_level: 0.0,
+                                difficulty_tier,
+                                room_level,
                             }),
                             zone_hrid: None,
                             extra: Value::Null,
                             steps: vec![],
                         };
-                        source = self.units.spawn(RuntimeUnit::new(case, &self.data)?);
+                        let mut piece = RuntimeUnit::new(case, &self.data)?;
+                        let in_labyrinth =
+                            self.full.as_ref().is_some_and(|full| full.lab.is_some());
+                        piece.reset(time, false, &self.data, &mut self.rng, in_labyrinth)?;
+                        piece.attributes.details.current_hitpoints =
+                            hp_fraction * piece.attributes.details.max_hitpoints;
+                        self.clear_unit(source);
+                        if let Some(full) = &mut self.full {
+                            full.result
+                                .alive(&self.units.get(source).unwrap().hrid, false, time);
+                            full.result.alive(hrid, true, time);
+                        }
+                        source = self.units.spawn(piece);
                         self.unit_mut(source).assign_buff_identities(source.index());
-                        self.next_attack(source)?;
+                        self.enemies.as_mut().unwrap()[slot] = source;
                     }
                     _ => return Err("Unsupported ability effect".into()),
                 }
@@ -1934,6 +1965,25 @@ pub fn encounter_trace(cases: &[EncounterCase], data: Rc<DefinitionSet>) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn attack_index_follows_the_heap_after_cancels_and_pops() {
+        let mut run = test_run();
+        let id = run.players[0];
+        run.queue.clear();
+        run.at(EventKind::Attack, 3.0, Some(id)).unwrap();
+        run.at(EventKind::Cast, 5.0, Some(id)).unwrap();
+        run.at(EventKind::Await, 1.0, Some(id)).unwrap();
+        assert!(run.queue.has_pending_attack(id.slot()));
+        run.queue.clear_matching(|e| e.kind == EventKind::Cast);
+        run.queue.pop();
+        assert!(run.queue.has_pending_attack(id.slot()));
+        run.queue.pop();
+        assert!(!run.queue.has_pending_attack(id.slot()));
+        run.at(EventKind::Attack, 4.0, Some(id)).unwrap();
+        run.queue.clear();
+        assert!(!run.queue.has_pending_attack(id.slot()));
+    }
 
     fn test_run() -> EncounterRun {
         let data = Rc::new(DefinitionSet::parse(&json!({

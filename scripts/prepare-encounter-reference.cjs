@@ -8,7 +8,7 @@ async function prepare() {
     const version = loadReference('js-reference-2783b09-p0').node;
     if (process.version !== version || process.versions.v8 !== '10.2.154.26-node.26')
         throw new Error(`Generate the P2.2 oracle with frozen Node ${version} / V8 10.2.154.26-node.26; browser-native pow is audited separately`);
-    const frozen = await compileFrozen('./bench/encountersReference.js', 'encounters-reference.cjs');
+    const frozen = await compileFrozen('./bench/encountersReference.js', 'encounters-reference.cjs', 'pawn-promotion.patch');
     await compile({ mode: 'development', target: 'node', devtool: false, context: root, entry: './bench/encountersCases.js',
         output: { path: path.join(root, '.bench'), filename: 'encounters-cases.cjs', library: { type: 'commonjs2' } } });
     globalThis.onmessage = () => {};
@@ -31,7 +31,7 @@ async function prepare() {
     const cases = mathCases(), expected = mathTrace(cases), bytes = JSON.stringify({ name: 'math', cases, expected });
     fs.writeFileSync(path.join(output, 'math.json'), bytes);
     const manifest = { schemaVersion: 1, phase: 'P2.2', engineSourceSha256: frozen.engineSourceSha256, dataFingerprint: frozen.gameDataSha256,
-        referenceRuntime: { node: process.version, v8: process.versions.v8 }, math: { cases: cases.length, sha256: sha256(bytes) }, groups: summary };
+        ruleSha256: frozen.ruleSha256, referenceRuntime: { node: process.version, v8: process.versions.v8 }, math: { cases: cases.length, sha256: sha256(bytes) }, groups: summary };
     fs.writeFileSync(path.join(output, 'manifest.json'), JSON.stringify(manifest, null, 2));
     const coverage = require('./encounter-coverage.cjs').audit(output, manifest);
     console.log(`Coverage: ${coverage.eventKinds} executed event kinds; promotion and DOT after source death verified`);

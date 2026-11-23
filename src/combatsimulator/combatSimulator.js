@@ -1247,9 +1247,7 @@ class CombatSimulator extends EventTarget {
                         this.processAbilityReviveEffect(source, todoAbility, abilityEffect);
                         break;
                     case "/ability_effect_types/promote":
-                        this.eventQueue.clearEventsForUnit(source);
-                        source = this.processAbilityPromoteEffect(source, todoAbility, abilityEffect);
-                        this.addNextAttackEvent(source);
+                        source = this.processAbilityPromoteEffect(source);
                         break;
                     default:
                         throw new Error("Unsupported effect type for ability: " + todoAbility.hrid + " effectType: " + abilityEffect.effectType);
@@ -1699,10 +1697,22 @@ class CombatSimulator extends EventTarget {
         return;
     }
 
-    processAbilityPromoteEffect(source, ability, abilityEffect) {
+    processAbilityPromoteEffect(source) {
+        const slot = this.enemies?.indexOf(source) ?? -1;
+        if (slot < 0) return source;
+
+        const hpFraction = source.combatDetails.currentHitpoints / source.combatDetails.maxHitpoints;
         const promotionHrids = ["/monsters/enchanted_rook", "/monsters/enchanted_knight", "/monsters/enchanted_bishop"];
-        let randomPromotionIndex = Math.floor(Math.random() * promotionHrids.length);
-        return new Monster(promotionHrids[randomPromotionIndex], source.difficultyTier);
+        const hrid = promotionHrids[Math.floor(Math.random() * promotionHrids.length)];
+        const piece = new Monster(hrid, source.difficultyTier, source.roomLevel);
+        piece.reset(this.simulationTime, Boolean(this.labyrinth));
+        piece.combatDetails.currentHitpoints = hpFraction * piece.combatDetails.maxHitpoints;
+
+        this.eventQueue.clearEventsForUnit(source);
+        this.enemies[slot] = piece;
+        this.simResult.updateTimeSpentAlive(source.hrid, false, this.simulationTime);
+        this.simResult.updateTimeSpentAlive(piece.hrid, true, this.simulationTime);
+        return piece;
     }
 
     processAbilitySpendHpEffect(source, ability, abilityEffect) {

@@ -13,10 +13,48 @@ await new Promise((resolve, reject) => {
     compiler.run((error, stats) => compiler.close(() => error || stats.hasErrors()
         ? reject(error || new Error(stats.toString({ all: false, errors: true }))) : resolve()));
 });
-const { Player, Equipment, EventQueue, CombatSimulator, Zone, parsePlayerJson } = require(root + '.bench/tests.cjs');
+const { Player, Monster, Equipment, EventQueue, CombatSimulator, Zone, parsePlayerJson } = require(root + '.bench/tests.cjs');
 globalThis.CustomEvent ??= class CustomEvent extends Event {
     constructor(type, options) { super(type); this.detail = options.detail; }
 };
+
+test('promotion replaces only the casting pawn and transfers its HP fraction to each piece', () => {
+    const random = Math.random;
+    try {
+        for (const [index, name] of ['rook', 'knight', 'bishop'].entries()) {
+            const pawn = new Monster('/monsters/enchanted_pawn', 2);
+            const neighbour = new Monster(pawn.hrid, 2);
+            const player = new Player();
+            player.hrid = 'player1';
+            player.reset(0);
+            const sim = new CombatSimulator([player], { isDungeon: false }, null);
+            sim.enemies = [neighbour, pawn, new Monster('/monsters/crab')];
+            const last = sim.enemies[2];
+            sim.simulationTime = 20e9;
+            pawn.reset(0);
+            const fraction = [0.125, 0.375, 1][index];
+            pawn.combatDetails.currentHitpoints = pawn.combatDetails.maxHitpoints * fraction;
+            sim.simResult.updateTimeSpentAlive(pawn.hrid, true, 0);
+            Math.random = () => (index + 0.5) / 3;
+            assert.equal(sim.tryUseAbility(pawn, pawn.abilities[0]), true);
+            const piece = sim.enemies[1];
+            assert.equal(piece.hrid, '/monsters/enchanted_' + name);
+            assert.deepEqual(sim.enemies, [neighbour, piece, last]);
+            assert.equal(piece.difficultyTier, pawn.difficultyTier);
+            assert.ok(piece.combatDetails.maxHitpoints > 0);
+            assert.equal(piece.combatDetails.currentHitpoints, fraction * piece.combatDetails.maxHitpoints);
+            assert.equal(sim.simResult.deaths[pawn.hrid], undefined);
+            assert.ok(sim.simResult.timeSpentAlive.find(row => row.name === piece.hrid)?.alive);
+            assert.ok(sim.eventQueue.getMatching(event => event.source === piece));
+            assert.ok(!sim.eventQueue.getMatching(event => event.source === pawn));
+            neighbour.combatDetails.currentHitpoints = 0;
+            sim.processAutoAttackEvent({ source: player });
+            assert.ok(sim.simResult.attacks[player.hrid][piece.hrid].autoAttack);
+        }
+    } finally {
+        Math.random = random;
+    }
+});
 
 test('cached equipment matches fresh calculation after edits and buff changes', () => {
     const p = new Player();
