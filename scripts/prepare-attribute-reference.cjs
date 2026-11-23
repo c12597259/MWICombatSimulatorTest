@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const webpack = require('webpack');
+const { execFileSync } = require('node:child_process');
 const { root } = require('./rust-tools.cjs');
 const { loadReference, sha256 } = require('../bench/lib/reference.cjs');
 
@@ -14,11 +15,21 @@ function compile(config) {
     });
 }
 
-async function compileFrozen(entry, filename) {
+async function compileFrozen(entry, filename, rulePatch) {
     const reference = loadReference('js-reference-2783b09-p0');
-    const archive = path.join(root, '.bench', reference.sourceArchive);
+    let archive = path.join(root, '.bench', reference.sourceArchive);
     for (const { file, sha256: expected } of [...reference.files.engine, ...reference.files.data]) {
         if (sha256(fs.readFileSync(path.join(archive, file))) !== expected) throw new Error(`Frozen source changed: ${file}`);
+    }
+    let ruleSha256;
+    if (rulePatch) {
+        // Apply the reviewed game-rule delta to a separate copy of P0 for this suite.
+        const copy = path.join(root, '.bench', filename + '.sources');
+        fs.cpSync(archive, copy, { recursive: true });
+        const patch = path.join(root, 'bench', 'reference-rules', rulePatch);
+        execFileSync('git', ['apply', '--no-index', '--directory=' + path.relative(root, copy).split(path.sep).join('/'), patch], { cwd: root });
+        archive = copy;
+        ruleSha256 = sha256(fs.readFileSync(patch));
     }
     const source = path.join(root, 'src');
     const modules = await compile({ mode: 'development', target: 'node', devtool: false, context: root,
@@ -37,7 +48,7 @@ async function compileFrozen(entry, filename) {
     for (const file of ['combatsimulator/player.js', 'combatsimulator/monster.js', 'worker.js', 'guildCombatShrines.js']) {
         if (!resources.includes(path.join(archive, 'src', file))) throw new Error(`Frozen reference module not found: ${file}`);
     }
-    return reference;
+    return { ...reference, archive, ruleSha256 };
 }
 async function prepare() {
     const reference = await compileFrozen('./bench/attributesReference.js', 'attributes-reference.cjs');

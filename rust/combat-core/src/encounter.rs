@@ -398,7 +398,7 @@ impl EncounterRun {
             }
             // Collect only between complete events: emit() has already consumed
             // operation references, and all future reads are rooted in the sides
-            // or queue (including DOT source_ref and promoted off-side units).
+            // or queue (including delayed damage that still references its source).
             if !self.retain_unit_history && self.processed.is_multiple_of(64) {
                 self.collect_units();
             }
@@ -1581,7 +1581,21 @@ impl EncounterRun {
                         self.emit(ResultOp::HpSpent(source, &ability.hrid, spent));
                     }
                     "/ability_effect_types/promote" => {
-                        self.clear_unit(source);
+                        let Some(slot) = self
+                            .enemies
+                            .as_ref()
+                            .and_then(|enemies| enemies.iter().position(|&id| id == source))
+                        else {
+                            continue;
+                        };
+                        let pawn = self.unit(source);
+                        let UnitInput::Monster(input) = &pawn.case.input else {
+                            continue;
+                        };
+                        let difficulty_tier = pawn.tier;
+                        let room_level = input.room_level;
+                        let hp = &pawn.attributes.details;
+                        let hp_fraction = hp.current_hitpoints / hp.max_hitpoints;
                         let types = [
                             "/monsters/enchanted_rook",
                             "/monsters/enchanted_knight",
@@ -1589,20 +1603,29 @@ impl EncounterRun {
                         ];
                         let hrid =
                             types[(self.rng.next_f64() * types.len() as f64).floor() as usize];
-                        let tier = self.unit(source).tier;
                         let case = AttributeCase {
                             input: UnitInput::Monster(MonsterInput {
                                 hrid: hrid.into(),
-                                difficulty_tier: tier,
-                                room_level: 0.0,
+                                difficulty_tier,
+                                room_level,
                             }),
                             zone_hrid: None,
                             extra: Value::Null,
                             steps: vec![],
                         };
-                        source = self.units.spawn(RuntimeUnit::new(case, &self.data)?);
+                        let mut piece = RuntimeUnit::new(case, &self.data)?;
+                        piece.reset(time, false, &self.data, &mut self.rng)?;
+                        piece.attributes.details.current_hitpoints =
+                            hp_fraction * piece.attributes.details.max_hitpoints;
+                        self.clear_unit(source);
+                        if let Some(full) = &mut self.full {
+                            full.result
+                                .alive(&self.units.get(source).unwrap().hrid, false, time);
+                            full.result.alive(hrid, true, time);
+                        }
+                        source = self.units.spawn(piece);
                         self.unit_mut(source).assign_buff_identities(source.index());
-                        self.next_attack(source)?;
+                        self.enemies.as_mut().unwrap()[slot] = source;
                     }
                     _ => return Err("Unsupported ability effect".into()),
                 }
