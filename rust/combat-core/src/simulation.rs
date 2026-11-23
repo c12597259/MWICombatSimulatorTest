@@ -321,13 +321,12 @@ impl EncounterRun {
                             .push(json!(name));
                     }
                 }
-                if let Some(bosses) = zone.fight["bossSpawns"].as_array() {
-                    for boss in bosses {
-                        value["bossSpawns"]
-                            .as_array_mut()
-                            .unwrap()
-                            .push(boss["combatMonsterHrid"].clone());
-                    }
+            } else if let Some(bosses) = zone.fight["bossSpawns"].as_array() {
+                for boss in bosses {
+                    value["bossSpawns"]
+                        .as_array_mut()
+                        .unwrap()
+                        .push(boss["combatMonsterHrid"].clone());
                 }
             }
         }

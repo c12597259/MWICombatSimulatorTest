@@ -601,6 +601,51 @@ function updateEquipmentState() {
 
 // #region Combat Stats
 
+const combatStatFields = [...document.querySelectorAll('[id^="combatStat_"]')].map(element => ({
+    stat: element.id.slice('combatStat_'.length),
+    row: element.closest('.row'),
+}));
+const showAllCombatStats = document.getElementById('showAllCombatStats');
+showAllCombatStats.checked = localStorage.getItem('mwiShowAllCombatStats') === 'true';
+showAllCombatStats.addEventListener('change', () => {
+    localStorage.setItem('mwiShowAllCombatStats', String(showAllCombatStats.checked));
+    updateCombatStatVisibility();
+});
+
+function updateCombatStatVisibility() {
+    const details = player.combatDetails;
+    const stats = details.combatStats;
+    const attackStyles = new Set([stats.combatStyleHrid]);
+    let usesMagicHealing = false;
+    let usesRetaliation = stats.retaliation > 0;
+    let usesThorns = stats.physicalThorns > 0 || stats.elementalThorns > 0;
+    for (const [slot, hrid] of abilities.entries()) {
+        if (player.intelligenceLevel < abilitySlotsLevelRequirementList[slot + 1]) continue;
+        for (const effect of abilityDetailMap[hrid]?.abilityEffects ?? []) {
+            if (effect.effectType === '/ability_effect_types/damage') attackStyles.add(effect.combatStyleHrid);
+            if (['/ability_effect_types/heal', '/ability_effect_types/revive'].includes(effect.effectType)) usesMagicHealing = true;
+            for (const buff of effect.buffs ?? []) {
+                if (buff.typeHrid === '/buff_types/retaliation') usesRetaliation = true;
+                if (['/buff_types/physical_thorns', '/buff_types/elemental_thorns'].includes(buff.typeHrid)) usesThorns = true;
+            }
+        }
+    }
+    const bulwark = player.equipment?.['/equipment_types/two_hand']?.hrid.includes('bulwark');
+    for (const { stat, row } of combatStatFields) {
+        const value = details[stat] ?? stats[stat];
+        let relevant = value !== 0 && (stat !== 'focusTraining' || Boolean(stats.focusTraining));
+        const attack = /^(stab|slash|smash|ranged|magic)(AccuracyRating|MaxDamage)$/.exec(stat);
+        if (attack) {
+            relevant = attackStyles.has('/combat_styles/' + attack[1])
+                || (stat === 'magicMaxDamage' && usesMagicHealing)
+                || (stat === 'smashAccuracyRating' && usesRetaliation);
+        } else if (stat === 'defensiveMaxDamage') {
+            relevant = bulwark || usesThorns || usesRetaliation;
+        }
+        row.classList.toggle('d-none', !showAllCombatStats.checked && !relevant);
+    }
+}
+
 function updateCombatStatsUI() {
     player.updateCombatDetails();
 
@@ -1020,6 +1065,7 @@ function updateAbilityUI() {
         moveUpButton.onclick = () => swapAbilityOrder(i, -1);
     }
     abilityPickerRefreshers.forEach(refresh => refresh());
+    updateCombatStatVisibility();
 }
 
 function swapAbilityOrder(abilityIndex, step) {
@@ -5880,6 +5926,32 @@ function showManapointsGained(simResult, playerToDisplay) {
     resultDiv.replaceChildren(...newChildren);
 }
 
+function showBossTime(simResult) {
+    const rows = [];
+    for (const boss of simResult.bossSpawns) {
+        const name = simResult.isDungeon ? boss.split(",")[0] : boss;
+        const entry = simResult.timeSpentAlive.find(entry => entry.name === name);
+        if (!entry) continue;
+        if (simResult.isDungeon) {
+            if (!entry.count) continue;
+            const averageSeconds = entry.timeSpentAlive / ONE_SECOND / entry.count;
+            rows.push(createRow(["col-md-6", "col-md-2", "col-md-4 text-end"], [name, entry.count, averageSeconds.toFixed(1) + "s"]));
+        } else {
+            // Completed lives are accumulated at death. The last life may still be open.
+            const elapsed = entry.timeSpentAlive + (entry.alive ? simResult.simulatedTime - entry.spawnedAt : 0);
+            const hours = (elapsed / ONE_HOUR).toFixed(2);
+            const percent = (100 * elapsed / simResult.simulatedTime).toFixed(2);
+            const row = createRow(["col-md-6", "col-md-6 text-end"], [combatMonsterDetailMap[name].name, `${hours}h(${percent}%)`]);
+            row.firstElementChild.setAttribute("data-i18n", "monsterNames." + name);
+            rows.push(row);
+        }
+    }
+    const container = document.getElementById("simulationBossTime");
+    container.replaceChildren(...rows);
+    container.classList.toggle("d-none", !rows.length);
+    document.getElementById("simulationBossTimeHeading").classList.toggle("d-none", !rows.length);
+}
+
 function showDamageDone(simResult, playerToDisplay) {
     let totalDamageDone = {};
     let enemyIndex = 1;
@@ -5891,10 +5963,7 @@ function showDamageDone(simResult, playerToDisplay) {
         hideElement(accordion);
     }
 
-    let bossTimeHeadingDiv = document.getElementById("simulationBossTimeHeading");
-    bossTimeHeadingDiv.classList.add("d-none");
-    let bossTimeDiv = document.getElementById("simulationBossTime");
-    bossTimeDiv.classList.add("d-none");
+    showBossTime(simResult);
 
     if (!simResult.attacks[playerToDisplay]) {
         return;
@@ -5944,39 +6013,7 @@ function showDamageDone(simResult, playerToDisplay) {
         let targetName = combatMonsterDetailMap[target].name;
         resultAccordionButton.innerHTML = "<b><span data-i18n=\"common:simulationResults.damageDone\">Damage Done</span> (" + "<span data-i18n=\"monsterNames." + target + "\">" + targetName + "</span>" + ")</b>";
 
-        if (simResult.bossSpawns.includes(target)) {
-            let hoursSpentOnBoss = (aliveSecondsSimulated / 60 / 60).toFixed(2);
-            let percentSpentOnBoss = (aliveSecondsSimulated / totalSecondsSimulated * 100).toFixed(2);
-
-            let bossRow = createRow(["col-md-6", "col-md-6 text-end"], [targetName, hoursSpentOnBoss + "h(" + percentSpentOnBoss + "%)"]);
-            bossRow.firstElementChild.setAttribute("data-i18n", "monsterNames." + target);
-            bossTimeDiv.replaceChildren(bossRow);
-
-            bossTimeHeadingDiv.classList.remove("d-none");
-            bossTimeDiv.classList.remove("d-none");
-        }
-
         enemyIndex++;
-    }
-
-    if (simResult.isDungeon) {
-        let newChildren = [];
-        for (const waveName of simResult.bossSpawns) {
-            // waveName is something like "#15,/monsters/jackalope,/monsters/butterjerry"
-            let waveNumber = waveName.split(",")[0];
-            const idx = simResult.timeSpentAlive.findIndex(e => e.name === waveNumber);
-            if (idx == -1 || simResult.timeSpentAlive[idx].count == 0) {
-                continue;
-            }
-            let aliveSecondsSimulated = simResult.timeSpentAlive[idx].timeSpentAlive / ONE_SECOND / simResult.timeSpentAlive[idx].count;
-            let bossRow = createRow(["col-md-6", "col-md-2", "col-md-4 text-end"], [waveNumber, simResult.timeSpentAlive[idx].count, aliveSecondsSimulated.toFixed(1) + "s"]);
-            newChildren.push(bossRow);
-        }
-        if (newChildren.length > 0) {
-            bossTimeHeadingDiv.classList.remove("d-none");
-            bossTimeDiv.classList.remove("d-none");
-            bossTimeDiv.replaceChildren(...newChildren);
-        }
     }
 
     let totalResultDiv = document.getElementById("simulationResultTotalDamageDone");

@@ -217,12 +217,6 @@ class CombatSimulator extends EventTarget {
             timeSeriesData: this.enableHpMpVisualization ? this.simResult.timeSeriesData : null,
         } }));
 
-        // for (let i = 0; i < this.simResult.timeSpentAlive.length; i++) {
-        //     if (this.simResult.timeSpentAlive[i].alive == true) {
-        //         this.simResult.updateTimeSpentAlive(this.simResult.timeSpentAlive[i].name, false, simulationTimeLimit);
-        //     }
-        // }
-
         this.simResult.isDungeon = this.zone?.isDungeon ?? false;
         if (this.zone && this.simResult.isDungeon) {
             if (this.debug) console.log("Timeout now at wave #" + (this.zone.encountersKilled - 1));
@@ -259,8 +253,7 @@ class CombatSimulator extends EventTarget {
                 this.simResult.bossSpawns.push(waveName);
             });
 
-        }
-        if (this.zone?.isDungeon && this.zone.monsterSpawnInfo.bossSpawns) {
+        } else if (this.zone?.monsterSpawnInfo.bossSpawns) {
             for (const boss of this.zone.monsterSpawnInfo.bossSpawns) {
                 this.simResult.bossSpawns.push(boss.combatMonsterHrid);
             }
