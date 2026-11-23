@@ -6,6 +6,9 @@ pub struct UnitId {
     slot: usize,
 }
 impl UnitId {
+    pub(crate) fn slot(self) -> usize {
+        self.slot
+    }
     pub(crate) fn index(self) -> usize {
         self.serial
     }

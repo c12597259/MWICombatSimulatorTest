@@ -15,6 +15,9 @@ pub struct ProbeEvent {
 pub trait TimedEvent {
     fn id(&self) -> u32;
     fn time(&self) -> f64;
+    fn pending_attack_slot(&self) -> Option<usize> {
+        None
+    }
 }
 impl TimedEvent for ProbeEvent {
     fn id(&self) -> u32 {
@@ -26,10 +29,14 @@ impl TimedEvent for ProbeEvent {
 }
 pub struct CompatEventQueue<T: TimedEvent = ProbeEvent> {
     heap: Vec<T>,
+    pending_attacks: Vec<usize>,
 }
 impl<T: TimedEvent> Default for CompatEventQueue<T> {
     fn default() -> Self {
-        Self { heap: Vec::new() }
+        Self {
+            heap: Vec::new(),
+            pending_attacks: Vec::new(),
+        }
     }
 }
 impl<T: TimedEvent> CompatEventQueue<T> {
@@ -38,23 +45,42 @@ impl<T: TimedEvent> CompatEventQueue<T> {
     }
     pub fn clear(&mut self) {
         self.heap.clear();
+        self.pending_attacks.clear();
     }
 
     pub fn push(&mut self, event: T) -> Result<(), String> {
         if !event.time().is_finite() {
             return Err("Event time must be finite".into());
         }
+        if let Some(slot) = event.pending_attack_slot() {
+            if self.pending_attacks.len() <= slot {
+                self.pending_attacks.resize(slot + 1, 0);
+            }
+            self.pending_attacks[slot] += 1;
+        }
         self.heap.push(event);
         self.sort_up(self.heap.len() - 1);
         Ok(())
     }
 
+    pub(crate) fn has_pending_attack(&self, slot: usize) -> bool {
+        self.pending_attacks.get(slot).copied().unwrap_or(0) != 0
+    }
+
+    fn uncount(&mut self, slot: Option<usize>) {
+        if let Some(slot) = slot {
+            self.pending_attacks[slot] -= 1;
+        }
+    }
+
     pub fn pop(&mut self) -> Option<T> {
         let last = self.heap.pop()?;
         if self.heap.is_empty() {
+            self.uncount(last.pending_attack_slot());
             return Some(last);
         }
         let root = std::mem::replace(&mut self.heap[0], last);
+        self.uncount(root.pending_attack_slot());
         self.sort_down(0);
         Some(root)
     }
@@ -66,9 +92,11 @@ impl<T: TimedEvent> CompatEventQueue<T> {
         if index == 0 {
             self.pop();
         } else if index == self.heap.len() - 1 {
+            self.uncount(self.heap[index].pending_attack_slot());
             self.heap.pop();
         } else {
             let last = self.heap.pop().expect("nonempty heap");
+            self.uncount(self.heap[index].pending_attack_slot());
             self.heap[index] = last;
             // heap-js sorts down at the original index, even if sort_up moved it.
             self.sort_up(index);

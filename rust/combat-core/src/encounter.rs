@@ -80,6 +80,13 @@ pub struct CombatEvent {
     pub style: Option<String>,
 }
 impl TimedEvent for CombatEvent {
+    fn pending_attack_slot(&self) -> Option<usize> {
+        if matches!(self.kind, EventKind::Cast | EventKind::Attack) {
+            self.source.map(UnitId::slot)
+        } else {
+            None
+        }
+    }
     fn id(&self) -> u32 {
         self.id
     }
@@ -328,7 +335,7 @@ impl EncounterRun {
             "players":self.players,"enemies":self.enemies,"heap":self.queue.events().iter().map(|event| self.event_snapshot(event)).collect::<Vec<_>>(),
             "operations":self.operations,"allPlayersDead":self.all_players_dead,"maxEnrageStack":self.max_enrage });
         if let Some(full) = &self.full {
-            frame["result"] = full.result.value.clone();
+            frame["result"] = full.result.snapshot();
             frame["result"]["maxEnrageStack"] = json!(self.max_enrage);
             for wipe in frame["result"]["wipeEvents"].as_array_mut().unwrap() {
                 wipe.as_object_mut().unwrap().remove("timestamp");
@@ -754,9 +761,8 @@ impl EncounterRun {
         !oom
     }
     pub(crate) fn next_attack(&mut self, id: UnitId) -> Result<(), String> {
-        if self.queue.events().iter().any(|event| {
-            event.source == Some(id) && matches!(event.kind, EventKind::Cast | EventKind::Attack)
-        }) {
+        // A unit slot cannot be recycled while any queued event references it.
+        if self.queue.has_pending_attack(id.slot()) {
             return Ok(());
         }
         let count = self.unit(id).abilities.len();
@@ -1164,7 +1170,7 @@ impl EncounterRun {
                 .is_some_and(|full| full.zone.as_ref().is_some_and(|zone| zone.dungeon))
             {
                 let full = self.full.as_mut().unwrap();
-                full.result.value["wipeEvents"].as_array_mut().unwrap().push(json!({"simulationTime":self.time,"logs":full.logs.iter().collect::<Vec<_>>(),"wave":full.zone.as_ref().unwrap().killed-1,"timestamp":"runtime-clock"}));
+                full.result.value["wipeEvents"].as_array_mut().unwrap().push(json!({"simulationTime":self.time,"logs":&full.logs,"wave":full.zone.as_ref().unwrap().killed-1,"timestamp":"runtime-clock"}));
                 full.logs.clear();
                 for kind in [
                     EventKind::Attack,
@@ -1936,6 +1942,25 @@ pub fn encounter_trace(cases: &[EncounterCase], data: Rc<DefinitionSet>) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn attack_index_follows_the_heap_after_cancels_and_pops() {
+        let mut run = test_run();
+        let id = run.players[0];
+        run.queue.clear();
+        run.at(EventKind::Attack, 3.0, Some(id)).unwrap();
+        run.at(EventKind::Cast, 5.0, Some(id)).unwrap();
+        run.at(EventKind::Await, 1.0, Some(id)).unwrap();
+        assert!(run.queue.has_pending_attack(id.slot()));
+        run.queue.clear_matching(|e| e.kind == EventKind::Cast);
+        run.queue.pop();
+        assert!(run.queue.has_pending_attack(id.slot()));
+        run.queue.pop();
+        assert!(!run.queue.has_pending_attack(id.slot()));
+        run.at(EventKind::Attack, 4.0, Some(id)).unwrap();
+        run.queue.clear();
+        assert!(!run.queue.has_pending_attack(id.slot()));
+    }
 
     fn test_run() -> EncounterRun {
         let data = Rc::new(DefinitionSet::parse(&json!({

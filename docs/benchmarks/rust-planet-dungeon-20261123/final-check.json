@@ -1,0 +1,9 @@
+{
+  "wasm": "f61cbc53323f6845540cf77607d84e4c3b1f80f1ffeac0387015e995ddc6d4c0",
+  "cases": {
+    "sea": "318a14fe37a14cf45ad0de68c3e15321c9b917d5117c7025aedb99cfadc198fb",
+    "bear": "bae5a7e1aa73cd2bd7cc509002c89eb1ce07270f96f3221a25f852183757fbc1",
+    "pirate": "82912b5676b99bd6de8b4bb1ee285df7725d3f6f5cb207efd1a2cc924663bb91",
+    "chimerical": "20662bbfd8842b1442c5a22c0ffe0f0ca2fd8535d9eb1fd0c2612fb9180acd16"
+  }
+}

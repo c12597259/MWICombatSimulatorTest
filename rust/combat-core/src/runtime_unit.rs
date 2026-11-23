@@ -13,6 +13,7 @@ pub struct Dependency {
     pub object: bool,
 }
 
+#[derive(Clone)]
 pub struct RuntimeUnit {
     pub case: AttributeCase,
     pub attributes: AttributeUnit,

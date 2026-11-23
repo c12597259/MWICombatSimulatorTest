@@ -22,6 +22,29 @@ pub struct SimulationInput {
     #[serde(default)]
     pub visualization: bool,
 }
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlayerHp {
+    hrid: String,
+    current: f64,
+    max: f64,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CombatLog {
+    time: f64,
+    wave: u32,
+    source: String,
+    ability: String,
+    target: String,
+    damage: f64,
+    before_hp: f64,
+    after_hp: f64,
+    players_hp: Vec<PlayerHp>,
+    is_crit: bool,
+}
+
 pub struct SimulationState {
     pub zone: Option<ZoneState>,
     pub lab: Option<LabyrinthInput>,
@@ -29,7 +52,9 @@ pub struct SimulationState {
     pub encounter_start: f64,
     pub dungeon_count: u32,
     pub result: SimResult,
-    pub logs: VecDeque<Value>,
+    monster_templates:
+        std::collections::HashMap<(String, u64, u64), crate::runtime_unit::RuntimeUnit>,
+    pub(crate) logs: VecDeque<CombatLog>,
     pub visualization: bool,
 }
 impl EncounterRun {
@@ -108,6 +133,7 @@ impl EncounterRun {
             encounter_start: 0.0,
             dungeon_count: 0,
             result,
+            monster_templates: Default::default(),
             logs: VecDeque::with_capacity(200),
             visualization: input.visualization,
         });
@@ -153,7 +179,23 @@ impl EncounterRun {
         full.encounter_start = self.time;
         let mut enemies = Vec::new();
         for entry in entries {
-            let mut unit = crate::runtime_unit::RuntimeUnit::new(entry, &self.data)?;
+            // Wave and labyrinth entries describe fresh monsters using these three fields.
+            // Cache only the pristine constructor state; reset and identity assignment run per spawn.
+            let UnitInput::Monster(monster) = &entry.input else {
+                return Err("Expected monster in wave".into());
+            };
+            let key = (
+                monster.hrid.clone(),
+                monster.difficulty_tier.to_bits(),
+                monster.room_level.to_bits(),
+            );
+            let prototype = match full.monster_templates.entry(key) {
+                std::collections::hash_map::Entry::Occupied(hit) => hit.into_mut(),
+                std::collections::hash_map::Entry::Vacant(miss) => {
+                    miss.insert(crate::runtime_unit::RuntimeUnit::new(entry, &self.data)?)
+                }
+            };
+            let mut unit = prototype.clone();
             unit.reset(self.time, false, &self.data, &mut self.rng)?;
             full.result.alive(&unit.hrid, true, self.time);
             let id = self.units.spawn(unit);
@@ -197,7 +239,32 @@ impl EncounterRun {
         }
         let target_unit = self.unit(target);
         let hp = target_unit.attributes.details.current_hitpoints;
-        let log = json!({"time":self.time,"wave":full.zone.as_ref().unwrap().killed-1,"source":source.map(|id|self.unit(id).hrid.as_str()).unwrap_or("UNKNOWN_SOURCE"),"ability":ability,"target":target_unit.hrid,"damage":damage,"beforeHp":(hp+damage).max(0.0),"afterHp":hp,"playersHp":self.players.iter().map(|id|{let unit=self.unit(*id);json!({"hrid":unit.hrid,"current":unit.attributes.details.current_hitpoints,"max":unit.attributes.details.max_hitpoints})}).collect::<Vec<_>>(),"isCrit":crit});
+        let log = CombatLog {
+            time: self.time,
+            wave: full.zone.as_ref().unwrap().killed - 1,
+            source: source
+                .map(|id| self.unit(id).hrid.as_str())
+                .unwrap_or("UNKNOWN_SOURCE")
+                .to_owned(),
+            ability: ability.to_owned(),
+            target: target_unit.hrid.clone(),
+            damage,
+            before_hp: (hp + damage).max(0.0),
+            after_hp: hp,
+            players_hp: self
+                .players
+                .iter()
+                .map(|id| {
+                    let unit = self.unit(*id);
+                    PlayerHp {
+                        hrid: unit.hrid.clone(),
+                        current: unit.attributes.details.current_hitpoints,
+                        max: unit.attributes.details.max_hitpoints,
+                    }
+                })
+                .collect(),
+            is_crit: crit,
+        };
         let full = self.full.as_mut().unwrap();
         if full.logs.len() == 200 {
             full.logs.pop_front();
@@ -238,7 +305,7 @@ impl EncounterRun {
     }
     pub fn simulation_result(&self) -> Result<Value, String> {
         self.check_simulation_result_ready()?;
-        let value = self.full.as_ref().unwrap().result.value.clone();
+        let value = self.full.as_ref().unwrap().result.snapshot();
         Ok(self.finalize_simulation_result(value))
     }
     fn check_simulation_result_ready(&self) -> Result<(), String> {
@@ -332,7 +399,7 @@ impl EncounterRun {
         self.check_simulation_result_ready()?;
         // This run cannot be read again. Move its potentially large wipe history
         // instead of cloning it; the borrowed Probe path still takes a snapshot.
-        let value = std::mem::take(&mut self.full.as_mut().unwrap().result.value);
+        let value = self.full.as_mut().unwrap().result.take_value();
         let result = self.finalize_simulation_result(value);
         Ok(self.wrap_simulation_result(result))
     }
