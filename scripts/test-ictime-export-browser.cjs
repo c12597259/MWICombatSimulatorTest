@@ -38,6 +38,11 @@ const pw = require(process.env.MWI_PLAYWRIGHT_PATH || 'playwright');
                 record('first', 'fly', [player('Alice', '1', 20, '/items/gummy')]),
                 record('second', 'rat', [player('Bob', '1', 99, '/items/gummy'), player('Alice', '2', 25, '/items/super_magic_coffee')]),
             ];
+            for (const difficulty of [0, 2]) {
+                const p = { ...player('Dungeon', '1', 0, '/items/gummy'), expectedDropsPerHour: {} };
+                records.push({ ...record('dungeon-' + difficulty, 'pirate_cove', [p]), mapType: 'dungeon',
+                    mapKey: 'dungeon:/actions/combat/pirate_cove', difficulty, averageMinutes: 10 + difficulty });
+            }
             await new Promise((resolve, reject) => {
                 const req = indexedDB.open('mwiCombatSimulatorHistory');
                 req.onsuccess = () => {
@@ -66,6 +71,10 @@ const pw = require(process.env.MWI_PLAYWRIGHT_PATH || 'playwright');
         assert.deepEqual(JSON.parse(fs.readFileSync(await download.path(), 'utf8')).entries, data.entries);
         await page.locator('#selectICTimeCharacter').selectOption('Bob');
         assert.equal((await copy()).entries[0].quantityPer24h, 2376);
+        await page.locator('#selectICTimeCharacter').selectOption('Dungeon');
+        assert.deepEqual((await copy()).entries.map(e => [e.itemHrid, e.dungeonTier, e.runMinutes]), [
+            ['/items/pirate_chest', 0, 10], ['/items/pirate_refinement_chest', 2, 12],
+        ]);
         await page.locator('#selectSimulationHistoryMap').selectOption('zone:/actions/combat/fly');
         await page.locator('[data-history-selection="first"]').check();
         assert.equal(await page.locator('#selectICTimeCharacter').inputValue(), 'Alice');

@@ -90,7 +90,7 @@
         "ictimeCopy": "Copy JSON",
         "ictimeAll": "All maps ({{count}} records)",
         "ictimeSelected": "Selected records ({{count}})",
-        "ictimeSummary": "{{scope}} · {{count}} entries. Highest hourly yield per item, with that record's consumables. With no selection, all history is used. ICTime import replaces existing entries.",
+        "ictimeSummary": "{{scope}} · {{count}} entries. Best fragment yield and fastest average clear per dungeon tier, with matching consumables. T0 and T2 export separately (T1 if no T2). ICTime import replaces existing entries.",
         "ictimeMissingBase": "Some refinement chests lack T0 records; add their T0 times in ICTime.",
         "ictimeCopied": "ICTime JSON copied. Import it in the in-game ICTime time panel.",
         "ictimeCopyFailed": "Could not copy. Download the JSON file and paste its contents into ICTime.",

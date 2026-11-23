@@ -90,7 +90,7 @@
         "ictimeCopy": "复制 JSON",
         "ictimeAll": "全部地图（{{count}} 条记录）",
         "ictimeSelected": "已勾选记录（{{count}} 条）",
-        "ictimeSummary": "{{scope}} · 可导出 {{count}} 项。每种物品取每小时产量最高的记录及其消耗品；未勾选时使用全部历史。ICTime 导入会替换原有条目。",
+        "ictimeSummary": "{{scope}} · 可导出 {{count}} 项。碎片取最高产量，地牢分别导出 T0 和 T2 的最快平均通关时间（没有 T2 时取 T1），消耗品随记录导出。ICTime 导入会替换原有条目。",
         "ictimeMissingBase": "部分精炼宝箱缺少 T0 记录，需在 ICTime 中补充对应 T0 通关时间。",
         "ictimeCopied": "已复制 ICTime JSON，可在游戏中的 ICTime 时间面板导入。",
         "ictimeCopyFailed": "复制失败，请下载 JSON 文件，将文件内容粘贴到 ICTime。",

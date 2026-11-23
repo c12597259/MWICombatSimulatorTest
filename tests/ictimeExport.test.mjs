@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 const source = name => readFile(new URL('../src/' + name, import.meta.url), 'utf8');
 const dataUrl = code => `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`;
+const planUrl = dataUrl((await source('simulationPlan.js')).replace('./experienceLevelCalculator.js',
+    dataUrl(await source('experienceLevelCalculator.js'))));
 const { buildICTimeExport } = await import(dataUrl((await source('ictimeExport.js'))
+    .replace('./simulationPlan.js', planUrl)
     .replace('./fragmentTimeCost.js', dataUrl(await source('fragmentTimeCost.js')))));
 const items = JSON.parse(await source('combatsimulator/data/itemDetailMap.json'));
 const blue = '/items/blue_key_fragment', green = '/items/green_key_fragment';
@@ -50,9 +53,9 @@ test('invalid/unsupported drops and labyrinth results cannot win; equal yields p
 test('dungeon exports preserve tier, party count and completion minutes; refined drops need separate T0 entry', () => {
     const base = '/items/chimerical_chest', refined = '/items/chimerical_refinement_chest';
     const records = [
-        run([player('A', { [base]: 3 })], { mapType: 'dungeon', averageMinutes: 20 }),
-        run([player('A', { [base]: 8, [refined]: 2 }, { [drink]: 10 }), player('B', {})],
-            { mapType: 'dungeon', difficulty: 2, averageMinutes: 15 }),
+        run([player('A', {})], { mapKey: 'dungeon:/actions/combat/chimerical_den', mapType: 'dungeon', averageMinutes: 20 }),
+        run([player('A', {}, { [drink]: 10 }), player('B', {})],
+            { mapKey: 'dungeon:/actions/combat/chimerical_den', mapType: 'dungeon', difficulty: 2, averageMinutes: 15 }),
     ];
     const { data, missingBaseChests } = buildICTimeExport(records, 'A', items);
     assert.equal(data.entries.length, 2);
@@ -63,4 +66,15 @@ test('dungeon exports preserve tier, party count and completion minutes; refined
     assert.equal(data.entries[1].runMinutes, 15);
     assert.deepEqual(missingBaseChests, []);
     assert.deepEqual(buildICTimeExport(records.slice(1), 'A', items).missingBaseChests, [base]);
+    const tier1 = { ...records[1], difficulty: 1, averageMinutes: 8 };
+    const slower = { ...records[1], averageMinutes: 17 };
+    const failed = { ...records[0], averageMinutes: null };
+    for (const ordered of [[tier1, slower, ...records], [...records, slower, tier1]]) {
+        const refinedEntry = buildICTimeExport(ordered, 'A', items).data.entries.find(entry => entry.itemHrid === refined);
+        assert.equal(refinedEntry.runMinutes, 15);
+        assert.equal(refinedEntry.dungeonTier, 2);
+        assert.deepEqual(refinedEntry.drinks, [{ itemHrid: drink, perHour: 10 }]);
+    }
+    assert.equal(buildICTimeExport([tier1], 'A', items).data.entries[0].dungeonTier, 1);
+    assert.deepEqual(buildICTimeExport([failed], 'A', items).data.entries, []);
 });

@@ -2590,7 +2590,7 @@ function updateICTimeExportControls() {
         ? getSimulationHistoryText('ictimeSelected', 'Selected records ({{count}})', { count: records.length })
         : getSimulationHistoryText('ictimeAll', 'All maps ({{count}} records)', { count: records.length });
     document.getElementById('ictimeExportSummary').textContent = getSimulationHistoryText('ictimeSummary',
-        '{{scope}} · {{count}} entries. Highest hourly yield per item; consumables come from the same record. ICTime import replaces existing entries.',
+        '{{scope}} · {{count}} entries. Best fragment yield and fastest average clear per dungeon tier, with matching consumables. T0 and T2 export separately (T1 if no T2). ICTime import replaces existing entries.',
         { scope, count: data.entries.length }) + (missingBaseChests.length ? ' ' + getSimulationHistoryText('ictimeMissingBase',
             'Some refinement chests lack T0 records; add their T0 times in ICTime.') : '');
 }

@@ -1,6 +1,8 @@
 import { KEY_FRAGMENT_HRIDS } from './fragmentTimeCost.js';
+import { SIMULATION_PLAN_TARGETS } from './simulationPlan.js';
 
-const CHESTS = new Set(['chimerical', 'sinister', 'enchanted', 'pirate']);
+const dungeonTargets = new Map(SIMULATION_PLAN_TARGETS.filter(target => target.type === 'dungeon')
+    .map(target => [target.mapKey, target]));
 const positive = value => Number.isFinite(Number(value)) && Number(value) > 0;
 export const ictimeCharacterName = player => String(player?.name ?? '').trim();
 
@@ -20,28 +22,37 @@ export function buildICTimeExport(records, characterName, itemDetails, exportedA
                     : category === '/item_categories/drink' ? drinks : null;
                 target?.push({ itemHrid, perHour: Number(rate) });
             }
-            for (const [itemHrid, rawRate] of Object.entries(player.expectedDropsPerHour ?? {})) {
-                if (!positive(rawRate) || !Number.isFinite(Number(rawRate) * 24)) continue;
-                const rate = Number(rawRate);
-                const fragment = KEY_FRAGMENT_HRIDS.includes(itemHrid);
-                const chest = itemHrid.match(/^\/items\/(\w+?)(_refinement)?_chest$/);
+            const candidates = [];
+            if (record.mapType === 'dungeon') {
+                const dungeon = dungeonTargets.get(record.mapKey ?? `dungeon:${record.mapHrid}`);
                 const tier = Number(record.difficulty);
-                if (!fragment && !(chest && CHESTS.has(chest[1]) && record.mapType === 'dungeon'
-                    && positive(record.averageMinutes) && [0, 1, 2].includes(tier)
-                    && (chest[2] ? tier > 0 : tier === 0))) continue;
+                if (!dungeon || ![0, 1, 2].includes(tier) || !positive(record.averageMinutes)) continue;
+                candidates.push({
+                    itemHrid: tier === 0 ? dungeon.itemHrid : dungeon.refinementItemHrid,
+                    dungeonTier: tier, runMinutes: Number(record.averageMinutes), quantityPer24h: 0,
+                    partyCount: Math.min(5, record.players.length),
+                });
+            } else {
+                for (const itemHrid of KEY_FRAGMENT_HRIDS) {
+                    const quantityPer24h = Number(player.expectedDropsPerHour?.[itemHrid]) * 24;
+                    if (positive(quantityPer24h)) candidates.push({ itemHrid, dungeonTier: 0,
+                        runMinutes: 0, quantityPer24h, partyCount: 5 });
+                }
+            }
+            for (const candidate of candidates) {
+                const { itemHrid, dungeonTier, runMinutes, quantityPer24h } = candidate;
                 const previous = best.get(itemHrid);
-                if (previous && (previous.rate > rate || (previous.rate === rate
-                    && String(previous.createdAt) >= String(record.createdAt)))) continue;
+                // ICTime has only one refinement entry. Prefer T2; within a tier
+                // choose the fastest clear. Fragments still rank by daily yield.
+                if (previous) {
+                    const improvement = dungeonTier - previous.entry.dungeonTier
+                        || previous.entry.runMinutes - runMinutes
+                        || quantityPer24h - previous.entry.quantityPer24h;
+                    if (improvement < 0 || (improvement === 0 && previous.createdAt >= record.createdAt)) continue;
+                }
                 best.set(itemHrid, {
-                    rate, createdAt: record.createdAt,
-                    entry: {
-                        itemHrid, collapsed: false,
-                        dungeonTier: fragment ? 0 : tier,
-                        partyCount: fragment ? 5 : Math.min(5, Math.max(1, record.players.length)),
-                        runMinutes: fragment ? 0 : Number(record.averageMinutes),
-                        quantityPer24h: fragment ? rate * 24 : 0,
-                        foods, drinks,
-                    },
+                    createdAt: record.createdAt,
+                    entry: { ...candidate, collapsed: false, foods, drinks },
                 });
             }
         }
