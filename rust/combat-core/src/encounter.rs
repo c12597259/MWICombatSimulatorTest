@@ -168,6 +168,8 @@ pub struct EncounterRun {
     pub(crate) operations: Vec<Value>,
     pub(crate) max_enrage: f64,
     trigger_snapshot: Vec<UnitId>,
+    blaze: Ability,
+    bloom: Ability,
 }
 impl EncounterRun {
     pub fn new(case: EncounterCase, data: Rc<DefinitionSet>) -> Result<Self, String> {
@@ -234,6 +236,8 @@ impl EncounterRun {
             operations: vec![],
             max_enrage: 0.0,
             trigger_snapshot: Vec::new(),
+            blaze: Ability::proc("blaze"),
+            bloom: Ability::proc("bloom"),
         };
         run.push(CombatEvent::new(EventKind::Start, 0.0, None))?;
         Ok(run)
@@ -1576,15 +1580,12 @@ impl EncounterRun {
         }
         unit.attributes.details.current_manapoints -= ability.mana_cost;
         unit.abilities[index].as_mut().unwrap().last_used = time;
-        let mut todo = vec![ability];
-        let stats = self.unit(source).attributes.details.combat_stats.clone();
-        if stats.blaze > 0.0 && self.rng.next_f64() < stats.blaze {
-            todo.push(Ability::proc("blaze"));
-        }
-        if stats.bloom > 0.0 && self.rng.next_f64() < stats.bloom {
-            todo.push(Ability::proc("bloom"));
-        }
-        for ability in todo {
+        let stats = &unit.attributes.details.combat_stats;
+        let (blaze, bloom) = (stats.blaze, stats.bloom);
+        // Both rolls precede the first effect, which may itself consume RNG.
+        let blaze = (blaze > 0.0 && self.rng.next_f64() < blaze).then(|| self.blaze.clone());
+        let bloom = (bloom > 0.0 && self.rng.next_f64() < bloom).then(|| self.bloom.clone());
+        for ability in [Some(ability), blaze, bloom].into_iter().flatten() {
             for effect in &ability.effects {
                 match effect.kind.as_str() {
                     "/ability_effect_types/buff" => self.ability_buff(source, &ability, effect)?,
@@ -1696,11 +1697,11 @@ impl EncounterRun {
                     && !value.skill.is_empty()
                     && value.multiplier > 0.0
                 {
-                    let level = serde_json::to_value(&self.unit(source).attributes.details)
-                        .map_err(|_| "Cannot read skill multiplier")?
-                        [format!("{}Level", value.skill.rsplit('/').next().unwrap_or(""))]
-                    .as_f64()
-                    .unwrap_or(f64::NAN);
+                    let level = self
+                        .unit(source)
+                        .attributes
+                        .details
+                        .skill_level(&value.skill);
                     let multiplier = 1.0 + level * value.multiplier;
                     buff.flat_boost *= multiplier;
                     buff.ratio_boost *= multiplier;

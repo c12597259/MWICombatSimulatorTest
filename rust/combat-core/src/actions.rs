@@ -4,6 +4,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::{ops::Deref, rc::Rc};
 
 pub const NEVER_USED: f64 = -9_007_199_254_740_991.0;
 pub fn number(value: &Value, key: &str) -> f64 {
@@ -360,6 +361,45 @@ mod trigger_tests {
         assert_eq!(unknown.condition, TriggerCondition::Unknown);
         assert_eq!(unknown.comparator, TriggerComparator::Unknown);
     }
+
+    #[test]
+    fn spawned_abilities_keep_their_own_buff_ids_and_cooldowns() {
+        let data = DefinitionSet::parse(
+            &json!({
+                "schemaVersion": 1, "sourceSha256": "test", "definitions": {
+                    "actionDetailMap": {}, "combatMonsterDetailMap": {}, "itemDetailMap": {},
+                    "abilityDetailMap": {"a": {"defaultCombatTriggers": [], "abilityEffects": [
+                        {"buffs": [{"uniqueHrid": "x", "typeHrid": "/buff_types/damage"}]},
+                        {"buffs": [{"uniqueHrid": "y", "typeHrid": "/buff_types/accuracy"}]}
+                    ]}}
+                }
+            })
+            .to_string(),
+            "test",
+        )
+        .unwrap();
+        let template = Ability::new("a", 1.0, None, &data).unwrap();
+        let mut first = template.clone();
+        let mut second = template.clone();
+        let mut ordinal = 2;
+        first.assign_buff_identities(1 << 32, &mut ordinal);
+        let cast = first.clone();
+        first.last_used = 42.0;
+        let mut second_ordinal = 0;
+        second.assign_buff_identities(2 << 32, &mut second_ordinal);
+        let ids = |a: &Ability| {
+            a.effects
+                .iter()
+                .map(|effect| effect.buffs.as_ref().unwrap()[0].buff.instance)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(&template), [None, None]);
+        assert_eq!(ids(&cast), [Some((1 << 32) | 3), Some((1 << 32) | 4)]);
+        assert_eq!(ids(&second), [Some((2 << 32) | 1), Some((2 << 32) | 2)]);
+        assert_eq!(ordinal, 4);
+        assert_eq!(cast.last_used, NEVER_USED);
+        assert_eq!(first.last_used, 42.0);
+    }
 }
 
 #[derive(Clone)]
@@ -402,6 +442,12 @@ pub struct AbilityEffect {
 }
 #[derive(Clone)]
 pub struct Ability {
+    definition: Rc<AbilityDefinition>,
+    pub last_used: f64,
+}
+
+#[derive(Clone)]
+pub struct AbilityDefinition {
     pub hrid: String,
     pub level: f64,
     pub mana_cost: f64,
@@ -410,9 +456,41 @@ pub struct Ability {
     pub special: bool,
     pub effects: Vec<AbilityEffect>,
     pub triggers: Vec<Trigger>,
-    pub last_used: f64,
 }
+
+impl Deref for Ability {
+    type Target = AbilityDefinition;
+
+    fn deref(&self) -> &Self::Target {
+        &self.definition
+    }
+}
+
 impl Ability {
+    fn from_definition(definition: AbilityDefinition) -> Self {
+        Self {
+            definition: Rc::new(definition),
+            last_used: NEVER_USED,
+        }
+    }
+
+    pub(crate) fn assign_buff_identities(&mut self, prefix: u64, ordinal: &mut u64) {
+        if !self
+            .effects
+            .iter()
+            .any(|effect| effect.buffs.as_ref().is_some_and(|buffs| !buffs.is_empty()))
+        {
+            return;
+        }
+        // A spawned unit owns its bound buff IDs. Later casts can share them.
+        for effect in &mut Rc::make_mut(&mut self.definition).effects {
+            for buff in effect.buffs.iter_mut().flatten() {
+                *ordinal += 1;
+                buff.buff.instance = Some(prefix | *ordinal);
+            }
+        }
+    }
+
     pub fn new(
         hrid: &str,
         level: f64,
@@ -460,7 +538,7 @@ impl Ability {
                 buffs,
             });
         }
-        Ok(Self {
+        Ok(Self::from_definition(AbilityDefinition {
             hrid: hrid.into(),
             level,
             mana_cost: number(raw, "manaCost"),
@@ -469,8 +547,7 @@ impl Ability {
             special: raw["isSpecialAbility"].as_bool().unwrap_or(false),
             effects,
             triggers: triggers(selected, &raw["defaultCombatTriggers"])?,
-            last_used: NEVER_USED,
-        })
+        }))
     }
     pub fn selected(value: &SelectionInput, data: &DefinitionSet) -> Result<Self, String> {
         Self::new(&value.hrid, value.level, value.triggers.as_ref(), data)
@@ -512,7 +589,7 @@ impl Ability {
             spend_hp_ratio: 0.0,
             buffs: None,
         };
-        Self {
+        Self::from_definition(AbilityDefinition {
             hrid: kind.into(),
             level: 1.0,
             mana_cost: 0.0,
@@ -521,8 +598,7 @@ impl Ability {
             special: false,
             effects: vec![effect],
             triggers: vec![],
-            last_used: NEVER_USED,
-        }
+        })
     }
 }
 #[derive(Clone)]

@@ -386,6 +386,27 @@ pub struct CombatDetails {
     pub total_threat: f64,
     pub combat_stats: CombatStats,
 }
+impl CombatDetails {
+    pub(crate) fn skill_level(&self, hrid: &str) -> f64 {
+        let level = match hrid.rsplit('/').next() {
+            Some("stamina") => self.stamina_level,
+            Some("intelligence") => self.intelligence_level,
+            Some("attack") => self.attack_level,
+            Some("melee") => self.melee_level,
+            Some("defense") => self.defense_level,
+            Some("ranged") => self.ranged_level,
+            Some("magic") => self.magic_level,
+            _ => return f64::NAN,
+        };
+        // The previous JSON lookup turned non-finite numbers into null.
+        if level.is_finite() {
+            level
+        } else {
+            f64::NAN
+        }
+    }
+}
+
 impl Default for CombatDetails {
     fn default() -> Self {
         Self {

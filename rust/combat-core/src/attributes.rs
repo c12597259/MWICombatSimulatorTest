@@ -132,7 +132,18 @@ pub struct AttributeSnapshot {
 #[derive(Clone)]
 struct BuffEntry {
     key: String,
+    kind: Option<BuffKind>,
     buff: CombatBuff,
+}
+
+impl BuffEntry {
+    fn new(key: String, buff: CombatBuff) -> Self {
+        Self {
+            key,
+            kind: BuffKind::from_hrid(&buff.type_hrid),
+            buff,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -202,8 +213,8 @@ impl BuffBoosts {
         };
         // Preserve JS property order within each type. Keep individual values:
         // levels, evasion and resistances must not use a pre-summed boost.
-        for entry in ordered_buffs(buffs) {
-            if let Some(kind) = BuffKind::from_hrid(&entry.buff.type_hrid) {
+        for entry in buffs {
+            if let Some(kind) = entry.kind {
                 index.push(kind, entry.buff.ratio_boost, entry.buff.flat_boost);
             }
         }
@@ -285,10 +296,16 @@ fn integer_key(key: &str) -> Option<u32> {
     let value: u32 = key.parse().ok()?;
     (value != u32::MAX && value.to_string() == key).then_some(value)
 }
-fn ordered_buffs(buffs: &[BuffEntry]) -> Vec<&BuffEntry> {
-    let mut output: Vec<_> = buffs.iter().collect();
-    output.sort_by_key(|entry| integer_key(&entry.key).map_or((1, 0), |value| (0, value)));
-    output
+// JS enumerates array-index keys first, then string keys in insertion order.
+// Refreshes replace entries in place and removal preserves this ordering.
+fn insert_buff(buffs: &mut Vec<BuffEntry>, entry: BuffEntry) {
+    if let Some(index) = integer_key(&entry.key) {
+        let at =
+            buffs.partition_point(|existing| integer_key(&existing.key).is_some_and(|n| n < index));
+        buffs.insert(at, entry);
+    } else {
+        buffs.push(entry);
+    }
 }
 
 impl AttributeUnit {
@@ -308,7 +325,7 @@ impl AttributeUnit {
         self.initialized = false;
     }
     pub fn buffs_snapshot(&self) -> Vec<Value> {
-        ordered_buffs(&self.buffs).iter().map(|entry| json!({ "key": entry.key, "uniqueHrid": entry.buff.unique_hrid,
+        self.buffs.iter().map(|entry| json!({ "key": entry.key, "uniqueHrid": entry.buff.unique_hrid,
             "typeHrid": entry.buff.type_hrid, "ratioBoost": entry.buff.ratio_boost, "flatBoost": entry.buff.flat_boost,
             "duration": entry.buff.duration, "startTime": entry.buff.start_time })).collect()
     }
@@ -338,13 +355,14 @@ impl AttributeUnit {
             {
                 changed |= entry.buff.ratio_boost != buff.ratio_boost
                     || entry.buff.flat_boost != buff.flat_boost;
+                entry.kind = BuffKind::from_hrid(&buff.type_hrid);
                 entry.buff = buff;
             } else {
                 changed = true;
-                self.buffs.push(BuffEntry {
-                    key: buff.unique_hrid.clone(),
-                    buff,
-                });
+                insert_buff(
+                    &mut self.buffs,
+                    BuffEntry::new(buff.unique_hrid.clone(), buff),
+                );
             }
         }
         if changed {
@@ -815,10 +833,10 @@ impl AttributeUnit {
             entry.buff.ratio_boost += buff.ratio_boost;
         } else {
             buff.start_time = None;
-            self.permanent.push(BuffEntry {
-                key: buff.type_hrid.clone(),
-                buff,
-            });
+            insert_buff(
+                &mut self.permanent,
+                BuffEntry::new(buff.type_hrid.clone(), buff),
+            );
         }
     }
     fn generate_permanent(
@@ -1048,10 +1066,7 @@ impl AttributeUnit {
             base_levels: self.base_levels,
             experience: self.experience,
             combat_details,
-            buff_keys: ordered_buffs(&self.buffs)
-                .iter()
-                .map(|entry| entry.key.clone())
-                .collect(),
+            buff_keys: self.buffs.iter().map(|entry| entry.key.clone()).collect(),
         }
     }
 }
@@ -1103,16 +1118,18 @@ mod tests {
 
     #[test]
     fn buff_index_preserves_property_order_shrines_and_live_values() {
-        let entry = |key: &str, ratio: f64, flat: f64| BuffEntry {
-            key: key.into(),
-            buff: serde_json::from_value(
-                json!({"uniqueHrid": key, "typeHrid": "/buff_types/damage",
-                "ratioBoost": ratio, "flatBoost": flat}),
+        let entry = |key: &str, ratio: f64, flat: f64| {
+            BuffEntry::new(
+                key.into(),
+                serde_json::from_value(json!({"uniqueHrid": key, "typeHrid": "/buff_types/damage",
+                "ratioBoost": ratio, "flatBoost": flat}))
+                .unwrap(),
             )
-            .unwrap(),
         };
         // Numeric JS property keys sort ahead of string keys and numerically.
-        let mut buffs = vec![entry("10", -1e16, -1e16), entry("2", 1e16, 1e16)];
+        let mut buffs = vec![];
+        insert_buff(&mut buffs, entry("10", -1e16, -1e16));
+        insert_buff(&mut buffs, entry("2", 1e16, 1e16));
         let index = BuffBoosts::new(&buffs, Some([5.0, 0.0, 0.0, 0.0, 0.0]));
         assert_eq!(
             index.get(BuffKind::Damage).collect::<Vec<_>>(),
@@ -1133,6 +1150,13 @@ mod tests {
         let next = BuffBoosts::new(&buffs, None);
         assert_eq!(next.total(BuffKind::Damage).0, 0.75);
         assert!(BuffKind::from_hrid("/buff_types/unknown_future_type").is_none());
+        for key in ["tail", "01", "4294967295", "0", "4294967294"] {
+            insert_buff(&mut buffs, entry(key, 0.0, 0.0));
+        }
+        assert_eq!(
+            buffs.iter().map(|b| b.key.as_str()).collect::<Vec<_>>(),
+            ["0", "2", "10", "4294967294", "tail", "01", "4294967295"]
+        );
     }
 
     #[test]
