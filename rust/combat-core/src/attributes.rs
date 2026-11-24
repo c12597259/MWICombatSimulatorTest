@@ -198,7 +198,7 @@ buff_kinds! {
 
 #[derive(Default)]
 struct BuffBoostGroup {
-    values: Vec<(f64, f64)>,
+    values: smallvec::SmallVec<[(f64, f64); 2]>,
     total: (f64, f64),
 }
 

@@ -75,10 +75,12 @@ enum DamageKey {
     Damage(u64),
 }
 
+type HitHistogram = IndexMap<DamageKey, f64, rustc_hash::FxBuildHasher>;
+
 #[derive(Default)]
 struct AttackCounts {
-    labels: IndexSet<String>,
-    counts: IndexMap<(usize, usize, usize), IndexMap<DamageKey, f64>>,
+    labels: IndexSet<String, rustc_hash::FxBuildHasher>,
+    counts: IndexMap<(usize, usize, usize), HitHistogram, rustc_hash::FxBuildHasher>,
 }
 
 impl AttackCounts {

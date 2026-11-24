@@ -10,3 +10,5 @@ serde.workspace = true
 serde_json.workspace = true
 libm.workspace = true
 indexmap.workspace = true
+rustc-hash.workspace = true
+smallvec.workspace = true

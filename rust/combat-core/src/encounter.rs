@@ -62,6 +62,33 @@ pub enum EventKind {
     #[serde(rename = "cooldownReady")]
     Cooldown,
 }
+#[derive(Default)]
+pub(crate) struct EventCounts {
+    counts: [u64; EventKind::Cooldown as usize + 1],
+    order: Vec<EventKind>,
+}
+
+impl EventCounts {
+    fn record(&mut self, kind: EventKind) {
+        let count = &mut self.counts[kind as usize];
+        if *count == 0 {
+            self.order.push(kind);
+        }
+        *count += 1;
+    }
+}
+
+impl Serialize for EventCounts {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut entries = serializer.serialize_map(Some(self.order.len()))?;
+        for &kind in &self.order {
+            entries.serialize_entry(&kind, &self.counts[kind as usize])?;
+        }
+        entries.end()
+    }
+}
+
 #[derive(Clone)]
 pub struct CombatEvent {
     pub id: u32,
@@ -151,7 +178,7 @@ pub struct EncounterRun {
     pub(crate) full: Option<crate::simulation::SimulationState>,
     pub(crate) tracing: bool,
     pub(crate) retain_unit_history: bool,
-    pub(crate) event_counts: serde_json::Map<String, Value>,
+    pub(crate) event_counts: EventCounts,
     pub(crate) data: Rc<DefinitionSet>,
     pub(crate) case: EncounterCase,
     pub units: UnitArena<RuntimeUnit>,
@@ -219,7 +246,7 @@ impl EncounterRun {
             full: None,
             tracing: false,
             retain_unit_history: true,
-            event_counts: serde_json::Map::new(),
+            event_counts: EventCounts::default(),
             data,
             case,
             units,
@@ -388,17 +415,7 @@ impl EncounterRun {
             self.check_triggers()?;
             self.processed += 1;
             if self.full.is_some() {
-                let key = serde_json::to_value(event.kind)
-                    .unwrap()
-                    .as_str()
-                    .unwrap()
-                    .to_string();
-                let count = self
-                    .event_counts
-                    .get(&key)
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0);
-                self.event_counts.insert(key, json!(count + 1));
+                self.event_counts.record(event.kind);
                 self.sample();
             }
             if self.full.is_none() || self.tracing {
@@ -746,6 +763,9 @@ impl EncounterRun {
         if unit.stunned || (ability && unit.silenced) || last + cooldown > self.time {
             return Ok(false);
         }
+        if triggers.is_empty() {
+            return Ok(true);
+        }
         let (allies, enemies) = self.side_refs(id);
         let target = self.first_target(enemies);
         let mut active = true;
@@ -863,39 +883,11 @@ impl EncounterRun {
                         return Err("Checking triggers for a dead unit".into());
                     }
                     for drink in [false, true] {
-                        let count = if drink {
-                            self.unit(id).drinks.len()
-                        } else {
-                            self.unit(id).food.len()
-                        };
-                        for index in 0..count {
-                            let item = (if drink {
-                                &self.unit(id).drinks
-                            } else {
-                                &self.unit(id).food
-                            })[index]
-                                .as_ref();
-                            let Some(item) = item else {
-                                continue;
-                            };
-                            let stats = &self.unit(id).attributes.details.combat_stats;
-                            let haste = if item.is_food {
-                                stats.food_haste
-                            } else {
-                                stats.drink_concentration
-                            };
-                            let cd = if haste > 0.0 {
-                                item.cooldown / (1.0 + haste)
-                            } else {
-                                item.cooldown
-                            };
-                            if self.should_trigger(id, item.last_used, cd, &item.triggers, false)? {
-                                // Keep the execution snapshot, but do not copy
-                                // strings/triggers/buffs for a rejected item.
-                                let item = item.clone();
-                                if self.consume(id, drink, index, &item)? {
-                                    used = true;
-                                }
+                        let mut next = 0;
+                        while let Some((index, item)) = self.next_triggered_item(id, drink, next)? {
+                            next = index + 1;
+                            if self.consume(id, drink, index, &item)? {
+                                used = true;
                             }
                         }
                     }
@@ -907,6 +899,37 @@ impl EncounterRun {
         }
         Err("Consumable triggers did not settle".into())
     }
+    fn next_triggered_item(
+        &self,
+        id: UnitId,
+        drink: bool,
+        from: usize,
+    ) -> Result<Option<(usize, Consumable)>, String> {
+        let unit = self.unit(id);
+        if unit.stunned {
+            return Ok(None);
+        }
+        let items = if drink { &unit.drinks } else { &unit.food };
+        let stats = &unit.attributes.details.combat_stats;
+        for (index, slot) in items.iter().enumerate().skip(from) {
+            let Some(item) = slot else { continue };
+            let haste = if item.is_food {
+                stats.food_haste
+            } else {
+                stats.drink_concentration
+            };
+            let cd = if haste > 0.0 {
+                item.cooldown / (1.0 + haste)
+            } else {
+                item.cooldown
+            };
+            if self.should_trigger(id, item.last_used, cd, &item.triggers, false)? {
+                return Ok(Some((index, item.clone())));
+            }
+        }
+        Ok(None)
+    }
+
     pub(crate) fn consume(
         &mut self,
         id: UnitId,
@@ -1091,27 +1114,31 @@ impl EncounterRun {
         }
     }
     pub(crate) fn check_end(&mut self) -> Result<bool, String> {
-        if let Some(enemies) = self.enemies.clone() {
-            for id in &enemies {
-                if !self.unit(*id).alive() && self.unit(*id).experience_rate == 0.0 {
-                    let begin = self
-                        .full
-                        .as_ref()
-                        .map(|full| full.encounter_start)
-                        .unwrap_or(0.0);
-                    let elapsed = (self.time - begin).min(self.unit(*id).enrage_time);
-                    self.unit_mut(*id).experience_rate = 1.0 + elapsed / self.unit(*id).enrage_time;
+        if let Some(enemies) = &self.enemies {
+            let begin = self.full.as_ref().map_or(0.0, |full| full.encounter_start);
+            let mut any_alive = false;
+            for &id in enemies {
+                let unit = self.units.get_mut(id).expect("valid runtime identity");
+                if unit.alive() {
+                    any_alive = true;
+                } else if unit.experience_rate == 0.0 {
+                    let elapsed = (self.time - begin).min(unit.enrage_time);
+                    unit.experience_rate = 1.0 + elapsed / unit.enrage_time;
                 }
             }
-            if self.live(&enemies).is_empty() {
+            if !any_alive {
+                let experience: f64 = enemies
+                    .iter()
+                    .map(|id| {
+                        let unit = self.unit(*id);
+                        unit.attributes.experience * unit.experience_rate
+                    })
+                    .sum();
                 self.queue
                     .clear_matching(|event| event.kind == EventKind::Attack);
                 self.at(EventKind::NextEncounter, self.time + 3.0 * SECOND, None)?;
-                let experience: f64 = enemies
-                    .iter()
-                    .map(|id| self.unit(*id).attributes.experience * self.unit(*id).experience_rate)
-                    .sum();
-                for id in self.players.clone() {
+                for index in 0..self.players.len() {
+                    let id = self.players[index];
                     self.emit(ResultOp::Experience(
                         id,
                         experience / self.players.len() as f64,
@@ -1150,7 +1177,8 @@ impl EncounterRun {
                 self.emit(ResultOp::Encounter);
             }
         }
-        for id in self.players.clone() {
+        for index in 0..self.players.len() {
+            let id = self.players[index];
             if !self.unit(id).alive()
                 && !self.queue.events().iter().any(|event| {
                     event.kind == EventKind::Respawn
@@ -1170,7 +1198,7 @@ impl EncounterRun {
                 self.emit(ResultOp::Oom(id, false));
             }
         }
-        if self.live(&self.players).is_empty() {
+        if !self.players.iter().any(|&id| self.unit(id).alive()) {
             if self
                 .full
                 .as_ref()
@@ -2220,5 +2248,23 @@ mod tests {
             assert_eq!(buffs[0]["flatBoost"], json!(4.0 * multiplier));
             assert_eq!(buffs[0]["duration"], json!(80.0 / multiplier));
         }
+    }
+
+    #[test]
+    fn event_counts_preserve_first_seen_order_and_wide_counters() {
+        let mut counts = EventCounts::default();
+        counts.record(EventKind::Cooldown);
+        counts.record(EventKind::Start);
+        counts.record(EventKind::Cooldown);
+        assert_eq!(
+            serde_json::to_string(&counts).unwrap(),
+            r#"{"cooldownReady":2,"combatStart":1}"#
+        );
+        counts.counts[EventKind::Start as usize] = u64::from(u32::MAX);
+        counts.record(EventKind::Start);
+        assert_eq!(
+            serde_json::to_string(&counts).unwrap(),
+            r#"{"cooldownReady":2,"combatStart":4294967296}"#
+        );
     }
 }
